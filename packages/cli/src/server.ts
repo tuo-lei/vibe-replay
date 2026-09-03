@@ -1,23 +1,21 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { type Context, Hono } from "hono";
 import open from "open";
-import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { classifyProject } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
-import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
+import { getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import { getAiRuntime } from "./ai-runtime.js";
 import { injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./provider-discovery.js";
-import { getApiUrl, loadSavedCloudInfo } from "./publishers/cloud.js";
-import { loadSavedGistInfo, type SavedGistInfo } from "./publishers/gist.js";
+import { getApiUrl } from "./publishers/cloud.js";
 import { mergeSameSessions } from "./session-merge.js";
 import { getRemoteHome } from "./remote.js";
 import {
@@ -50,9 +48,21 @@ import type {
   SourceSessionCatalogCache,
   SourceSummaryRecord,
 } from "./server-types.js";
-import { loadAnnotations } from "./server-persistence.js";
 import { createAuthSession } from "./server-auth.js";
 import { resolveDefaultAiSelection } from "./server-ai-selection.js";
+import {
+  buildSourcesResult,
+  isFilesystemProjectKey,
+  loadSessionFromDisk,
+  normalizeSessionProjectsForHome,
+  scanSessions,
+} from "./server-replay-catalog.js";
+import {
+  buildReplayMaps,
+  findReplayForSource,
+  providerSlugCounts,
+} from "./server-replay-matching.js";
+import { countSessionStats, extractPromptPreviewsFromTurns } from "./server-session-stats.js";
 import { registerArchiveRoutes } from "./server-routes/archive.js";
 import { registerAssistantRoutes } from "./server-routes/assistant.js";
 import { registerAuthRoutes } from "./server-routes/auth.js";
@@ -82,9 +92,8 @@ import {
   type SessionScanResult,
   type UserInsights,
 } from "./scanner.js";
-import type { ParsedTurn, ReplaySession, SessionInfo } from "./types.js";
+import type { SessionInfo } from "./types.js";
 import { localDayKey, normalizeTitle } from "./utils.js";
-import { CLI_VERSION } from "./version.js";
 
 export { resolveGenerateInputs } from "./server-core.js";
 // Re-exported for tests that import it from "../src/server.js" (kept stable
@@ -132,184 +141,6 @@ function equivalentLocalOrigin(left: URL, right: URL): boolean {
   );
 }
 
-const replayGitRepoByProjectCache = new Map<string, string | undefined>();
-
-async function readReplayGitRepo(project: string): Promise<string | undefined> {
-  if (!replayGitRepoByProjectCache.has(project)) {
-    replayGitRepoByProjectCache.set(project, await readGitRepo(project));
-  }
-  return replayGitRepoByProjectCache.get(project);
-}
-
-/** Scan replay.json files from a single directory */
-async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
-  const results: ReplaySummary[] = [];
-  let entries: string[];
-  try {
-    entries = await readdir(baseDir);
-  } catch {
-    return results;
-  }
-
-  for (const entry of entries) {
-    const replayPath = join(baseDir, entry, "replay.json");
-    try {
-      const raw = await readFile(replayPath, "utf-8");
-      const session = JSON.parse(raw) as ReplaySession;
-      const targetId = session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
-      const annotationCount = (await loadAnnotations(baseDir, entry, targetId)).length;
-
-      let gist: SavedGistInfo | undefined;
-      try {
-        gist = await loadSavedGistInfo(join(baseDir, entry));
-      } catch {
-        /* no gist info */
-      }
-
-      const cloudInfo = await loadSavedCloudInfo(join(baseDir, entry));
-
-      const userPrompts = (session.scenes || [])
-        .filter((sc) => sc.type === "user-prompt")
-        .map((sc) => previewPrompt(sc.content))
-        .filter((m) => m.length >= 10);
-      const firstMessage = userPrompts[0] || undefined;
-      const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
-
-      const generatorVersion = session.meta.generator?.version;
-      const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
-      let gitRepo = session.meta.gitRepo;
-      if (!gitRepo && session.meta.project && session.meta.location?.kind !== "ssh") {
-        gitRepo = await readReplayGitRepo(session.meta.project);
-      }
-
-      results.push({
-        slug: entry,
-        sourceSlug: session.meta.slug,
-        baseDir,
-        sessionId: session.meta.sessionId,
-        title: session.meta.title,
-        provider: session.meta.provider,
-        location: session.meta.location,
-        transcriptStatus: session.meta.transcriptStatus,
-        model: session.meta.model,
-        gitRepo,
-        project: session.meta.project,
-        startTime: session.meta.startTime,
-        endTime: session.meta.endTime,
-        stats: session.meta.stats,
-        contextBreakdown: session.meta.contextBreakdown,
-        compactionCount: session.meta.compactions?.length || 0,
-        compactions: session.meta.compactions,
-        apiErrors: session.meta.apiErrors,
-        diagnostics: session.meta.diagnostics,
-        diagnosticNotes: session.meta.diagnosticNotes,
-        replaySize: Buffer.byteLength(raw, "utf-8"),
-        generatorVersion,
-        replayOutdated,
-        hasAnnotations: annotationCount > 0,
-        annotationCount,
-        firstMessage,
-        messages,
-        gist: gist
-          ? await (async () => {
-              let outdated = false;
-              if (gist?.contentHash) {
-                try {
-                  const content = await readFile(replayPath, "utf-8");
-                  const currentHash = createHash("sha256")
-                    .update(content)
-                    .digest("hex")
-                    .slice(0, 16);
-                  outdated = currentHash !== gist?.contentHash;
-                } catch {
-                  /* ignore */
-                }
-              }
-              return {
-                gistId: gist?.gistId,
-                viewerUrl: gist?.viewerUrl,
-                updatedAt: gist?.updatedAt,
-                outdated,
-              };
-            })()
-          : undefined,
-        cloud: cloudInfo
-          ? {
-              id: cloudInfo.id,
-              url: cloudInfo.url,
-              expiresAt: cloudInfo.expiresAt,
-              updatedAt: cloudInfo.updatedAt,
-            }
-          : undefined,
-      });
-    } catch {
-      // Skip any replay dir that fails to load — missing/unreadable/corrupt
-      // replay.json, annotations, gist or cloud info, or git-repo lookup —
-      // rather than failing the whole scan.
-    }
-  }
-
-  return results;
-}
-
-/** Scan replay.json from primary dir (~/.vibe-replay/) + optional CWD fallback (./vibe-replay/) */
-async function scanSessions(baseDir: string): Promise<ReplaySummary[]> {
-  const dirs = [baseDir];
-  // Also scan ./vibe-replay/ in CWD for backwards compatibility
-  const cwdLocal = resolve("./vibe-replay");
-  if (cwdLocal !== baseDir) {
-    dirs.push(cwdLocal);
-  }
-
-  const allResults: ReplaySummary[] = [];
-  const seen = new Set<string>();
-  for (const dir of dirs) {
-    const results = await scanSessionsFromDir(dir);
-    for (const r of results) {
-      const locationKey = r.location?.kind === "ssh" ? r.location.id : "local";
-      const replayKey = `${locationKey}\0${r.slug}`;
-      if (!seen.has(replayKey)) {
-        seen.add(replayKey);
-        allResults.push(r);
-      }
-    }
-  }
-
-  allResults.sort((a, b) => (b.startTime || "").localeCompare(a.startTime || ""));
-  return allResults;
-}
-
-/** Load a session from disk by slug — checks primary dir then CWD fallback */
-async function loadSessionFromDisk(
-  baseDir: string,
-  slug: string,
-  targetId?: string,
-): Promise<ReplaySession> {
-  let replayPath = join(baseDir, slug, "replay.json");
-  try {
-    await stat(replayPath);
-  } catch {
-    // Fallback: try ./vibe-replay/ in CWD
-    const fallback = resolve("./vibe-replay", slug, "replay.json");
-    await stat(fallback); // throws if not found
-    replayPath = fallback;
-  }
-  const raw = await readFile(replayPath, "utf-8");
-  const session = JSON.parse(raw) as ReplaySession;
-  const sessionTargetId =
-    session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
-  if (sessionTargetId !== targetId) {
-    throw new Error("Session does not belong to the requested SSH source");
-  }
-
-  const annotations = await loadAnnotations(baseDir, slug, targetId);
-  if (annotations.length > 0) {
-    session.annotations = annotations;
-  }
-
-  return session;
-}
-
 interface SourcesEnrichmentStatus {
   running: boolean;
   processed: number;
@@ -324,243 +155,6 @@ interface PersistedInsightsCache {
   userInsights: UserInsights | null;
   projectInsights: Array<[string, ProjectInsights]>;
   computedAt: string | null;
-}
-
-function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
-  return sessions.map((session) => ({
-    ...session,
-    project: shortenPath(session.project, home),
-  }));
-}
-
-function isFilesystemProjectKey(project: string): boolean {
-  return (
-    project === "~" ||
-    project.startsWith("~/") ||
-    project.startsWith("~\\") ||
-    project.startsWith("/") ||
-    /^[A-Za-z]:[\\/]/.test(project)
-  );
-}
-
-function countSessionStats(turns: ParsedTurn[]): {
-  promptCount: number;
-  toolCallCount: number;
-} {
-  let promptCount = 0;
-  let toolCallCount = 0;
-  for (const turn of turns) {
-    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
-      const hasText = turn.blocks.some(
-        (block) =>
-          block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
-      );
-      const hasImages = turn.blocks.some(
-        (block) => block.type === "_user_images" && block.images.length > 0,
-      );
-      if (hasText || hasImages) promptCount++;
-    }
-    for (const block of turn.blocks) {
-      if (block.type === "tool_use") toolCallCount++;
-    }
-  }
-  return { promptCount, toolCallCount };
-}
-
-function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[] {
-  const prompts: string[] = [];
-  for (const turn of turns) {
-    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
-    const text = turn.blocks
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
-    const cleaned = previewPrompt(text);
-    if (cleaned.length < 8 || prompts.includes(cleaned)) continue;
-    prompts.push(cleaned);
-    if (prompts.length >= limit) break;
-  }
-  return prompts;
-}
-
-/** Build provider-scoped replay lookup maps by slug and native session ID. */
-function buildReplayMaps(replays: ReplaySummary[]): {
-  bySlug: Map<string, ReplaySummary>;
-  bySessionId: Map<string, ReplaySummary>;
-  ambiguousSlugs: Set<string>;
-} {
-  const bySlug = new Map<string, ReplaySummary>();
-  const bySessionId = new Map<string, ReplaySummary>();
-  const ambiguousSlugs = new Set<string>();
-  for (const r of replays) {
-    const targetId = r.location?.kind === "ssh" ? r.location.id : undefined;
-    const slugKey = providerSlugKey(r.provider, r.slug, targetId);
-    if (bySlug.has(slugKey)) {
-      ambiguousSlugs.add(slugKey);
-    } else {
-      bySlug.set(slugKey, r);
-    }
-    if (r.sessionId) bySessionId.set(providerSessionKey(r.provider, r.sessionId, targetId), r);
-  }
-  return { bySlug, bySessionId, ambiguousSlugs };
-}
-
-function providerSlugCounts(
-  sessions: ReadonlyArray<Pick<SessionInfo, "provider" | "slug" | "location">>,
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const session of sessions) {
-    const targetId = session.location?.kind === "ssh" ? session.location.id : undefined;
-    const key = providerSlugKey(session.provider, session.slug, targetId);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  return counts;
-}
-
-function findReplayForSource(
-  source: {
-    provider: string;
-    sessionId?: string;
-    slug: string;
-    location?: SessionInfo["location"];
-  },
-  maps: ReturnType<typeof buildReplayMaps>,
-  sourceSlugCounts: ReadonlyMap<string, number>,
-): ReplaySummary | undefined {
-  // Native session IDs are stable; always prefer them over the human-readable
-  // slug, which can collide across Cursor sessions.
-  const targetId = source.location?.kind === "ssh" ? source.location.id : undefined;
-  if (source.sessionId) {
-    const bySessionId = maps.bySessionId.get(
-      providerSessionKey(source.provider, source.sessionId, targetId),
-    );
-    if (bySessionId) return bySessionId;
-  }
-
-  const slugKey = providerSlugKey(source.provider, source.slug, targetId);
-  if (maps.ambiguousSlugs.has(slugKey) || sourceSlugCounts.get(slugKey) !== 1) {
-    return undefined;
-  }
-  return maps.bySlug.get(slugKey);
-}
-
-async function buildSourcesResult(
-  merged: SessionInfo[],
-  baseDir: string,
-  home: string,
-  previousSources: SourceSummaryRecord[] = [],
-  cleanupPeriodDays = 0,
-): Promise<SourceSummaryRecord[]> {
-  // Normalize project paths: /Users/xxx/... → ~/...
-  for (const s of merged) {
-    s.project = shortenPath(s.project, home);
-  }
-
-  // Check which project directories still exist on disk + are git repos
-  const uniqueProjects = [...new Set(merged.map((s) => s.project))];
-  const projectExistsMap = new Map<string, boolean>();
-  const projectIsGitMap = new Map<string, boolean>();
-  for (const p of uniqueProjects) {
-    if (!merged.some((session) => session.project === p && session.location?.kind !== "ssh")) {
-      continue;
-    }
-    const resolved =
-      p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? join(home, p.slice(2)) : p;
-    try {
-      const s = await stat(resolved);
-      projectExistsMap.set(p, s.isDirectory());
-      if (s.isDirectory()) {
-        try {
-          await stat(join(resolved, ".git"));
-          projectIsGitMap.set(p, true);
-        } catch {
-          projectIsGitMap.set(p, false);
-        }
-      }
-    } catch {
-      projectExistsMap.set(p, false);
-    }
-  }
-
-  // Check which source sessions already have replays
-  // Match by both slug and sessionId — replay directory name may differ from source slug
-  // (e.g. source slug "mighty-questing-waffle" vs replay dir "045ef7d9" from sessionId)
-  const existingReplays = await scanSessions(baseDir);
-  const replayMaps = buildReplayMaps(existingReplays);
-  const sourceSlugCounts = providerSlugCounts(merged);
-
-  const previousBySessionId = new Map<string, SourceSummaryRecord>();
-  const previousByKey = new Map<string, SourceSummaryRecord>();
-  for (const prev of previousSources) {
-    const targetId = prev.location?.kind === "ssh" ? prev.location.id : undefined;
-    const key = sourceSessionKey(prev.provider, prev.project, prev.slug, targetId);
-    previousByKey.set(key, prev);
-    if (typeof prev.sessionId === "string" && prev.sessionId) {
-      previousBySessionId.set(providerSessionKey(prev.provider, prev.sessionId, targetId), prev);
-    }
-  }
-
-  return merged.map((s) => {
-    const previous = pickSourceRecordForSession(s, previousBySessionId, previousByKey);
-    const replay = findReplayForSource(s, replayMaps, sourceSlugCounts);
-    const promptCount = s.promptCount ?? previous?.promptCount;
-    const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
-    const gitRepo =
-      s.gitRepo ?? (typeof previous?.gitRepo === "string" ? previous.gitRepo : undefined);
-    const projectIdentity =
-      s.projectIdentity ||
-      classifyProject(s.project, {
-        provider: s.provider,
-        hasSdk: s.hasSdk,
-        sdkWorkspaceRef: s.workspacePath,
-        gitRepo,
-      });
-    return {
-      provider: s.provider,
-      location: s.location,
-      transcriptStatus: s.transcriptStatus,
-      sessionId: s.sessionId,
-      slug: s.slug,
-      title: normalizeTitle(cleanPromptText(typeof s.title === "string" ? s.title : "")),
-      project: s.project,
-      projectIdentity,
-      timestamp: s.timestamp,
-      fileSize: s.fileSize,
-      lineCount: s.lineCount,
-      promptCount,
-      toolCallCount,
-      firstPrompt: previewPrompt(s.firstPrompt),
-      prompts: s.prompts?.map((p) => previewPrompt(p)),
-      filePaths: s.filePaths,
-      toolPaths: s.toolPaths,
-      hasSqlite: s.hasSqlite,
-      hasSdk: s.hasSdk,
-      sourceFingerprint: s.sourceFingerprint,
-      gitBranch: s.gitBranch,
-      gitRepo,
-      model: s.model,
-      durationMsEst: s.durationMsEst,
-      editCountEst: s.editCountEst,
-      compactionCount: s.compactionCount,
-      hasPR: s.hasPR,
-      isStarred: s.isStarred,
-      spaceId: s.spaceId,
-      spaceIdSetBy: s.spaceIdSetBy,
-      pluginsEnabled: s.pluginsEnabled,
-      skillsEnabled: s.skillsEnabled,
-      fsDetectedFiles: s.fsDetectedFiles,
-      expiresInDays:
-        s.provider === "claude-code" && cleanupPeriodDays > 0
-          ? computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays)
-          : undefined,
-      existingReplay: replay ? (replay.slug as string) : null,
-      projectExists:
-        s.location?.kind === "ssh" ? undefined : (projectExistsMap.get(s.project) ?? false),
-      isGitRepo: s.location?.kind === "ssh" ? undefined : (projectIsGitMap.get(s.project) ?? false),
-      replay: replay ? cachedReplaySummary(replay) : undefined,
-    };
-  });
 }
 
 export async function startServer(
