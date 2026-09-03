@@ -1,8 +1,9 @@
 ---
-title: "What Does Hermes Store on Your Machine? A Deep Dive into state.db and Profiles"
+title: "What Does Hermes Store Locally? state.db + Profiles"
 excerpt: "Hermes keeps session metadata, token accounting, reasoning, and tool calls in SQLite — with named profiles and two different compaction signals."
 cover: "/blog/hermes-storage/storage-map.png"
 date: 2026-08-05
+updated: 2026-09-03
 readTime: "7 min read"
 ---
 

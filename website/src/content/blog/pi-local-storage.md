@@ -1,8 +1,9 @@
 ---
-title: "What Does Pi Coding Agent Store on Your Machine? A Deep Dive into Session JSONL"
+title: "What Does Pi Coding Agent Store? Session JSONL Explained"
 excerpt: "Pi stores a session as a JSONL tree, not a flat transcript: entries point to parents, branches can be abandoned, and compaction is its own event."
 cover: "/blog/pi-storage/session-tree.png"
 date: 2026-06-06
+updated: 2026-09-03
 readTime: "7 min read"
 ---
 

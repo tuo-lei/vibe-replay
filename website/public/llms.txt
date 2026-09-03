@@ -2,7 +2,7 @@
 
 > vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
 
-vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders it as a scrubbable timeline showing every prompt, AI response, tool call, file diff, and thinking block. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
+vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
 
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
@@ -18,7 +18,7 @@ License: MIT
 ## What it does
 
 - **All your sessions, one place**: a local dashboard (`npx vibe-replay -d`) lists every session across all supported agents with activity heatmaps, per-project analytics, and cost estimates. Search and filter by git repo, tool, MCP server/tool, or skill.
-- **Full replay**: step through every prompt, thinking block, tool call, and code diff with All/Compact/Custom view modes, outline navigation, search, and playback controls.
+- **Full replay**: step through recorded prompts, thinking blocks, tool calls, and code diffs with All/Compact/Custom view modes, outline navigation, search, and playback controls.
 - **Session insights**: per-session analytics — token burn and cost per turn, context window usage, cache hit rates, tool call distribution, model breakdown, and data-quality hints.
 - **Personal insights**: GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, provider breakdown, and cost tracking across all sessions.
 - **AI Studio**: embedded Pi runtime for replay analysis, translation, and tone adjustment with the provider/model selected by the user, including OpenAI-compatible endpoints.
@@ -40,21 +40,21 @@ License: MIT
 
 ## Blog posts
 
-- [Where Does Cursor's SDK Actually Store Your Agents? A Deep Dive into sdk-agent-store](https://vibe-replay.com/blog/cursor-sdk-deep-dive/): Inside the Cursor SDK's local storage layer — its own schema, event stream, and tool-result format.
-- [What Does OpenCode Store on Your Machine? A Deep Dive into opencode.db](https://vibe-replay.com/blog/opencode-local-storage/): How OpenCode's SQLite session, message, and part tables encode prompts, reasoning, tools, and compaction.
-- [What Does Hermes Store on Your Machine? A Deep Dive into state.db and Profiles](https://vibe-replay.com/blog/hermes-local-storage/): How Hermes stores profile-aware sessions, usage, tools, reasoning, costs, and compaction markers in SQLite.
-- [What Does Pi Coding Agent Store on Your Machine? A Deep Dive into Session JSONL](https://vibe-replay.com/blog/pi-local-storage/): How Pi's parent-linked JSONL tree represents branches, tool results, model changes, and compaction.
-- [What Does Codex Store on Your Machine? A Deep Dive into Rollout JSONL and state_5.sqlite](https://vibe-replay.com/blog/codex-local-storage/): How Codex combines rollout events, the thread catalog, and its append-only session-name index.
-- [Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch](https://vibe-replay.com/blog/dispatch-deep-dive/): How vibe-replay captures Claude Desktop Cowork / autonomous sessions, including the technical challenges and the parser changes required.
-- [878 Sessions, 52.9k Tool Calls — What a Year of Vibe Coding Looks Like](https://vibe-replay.com/blog/personal-insights/): Year-long usage breakdown: prompts, tool calls, model distribution, and what the data reveals about real AI coding habits.
-- [What Actually Happens When Claude Code /simplify Cleans Your Codebase](https://vibe-replay.com/blog/simplify-codebase-with-ai/): Behavioral analysis of Claude Code's `/simplify` slash command and the kinds of refactors it produces.
-- [Claude Code's Source Leaked. We Read It and Shipped 5 Features in a Day](https://vibe-replay.com/blog/claude-code-source-leak/): Findings from the Claude Code source leak, with concrete features built on that knowledge.
-- [What Does Cursor Store on Your Machine? A Deep Dive into ~/.cursor/](https://vibe-replay.com/blog/cursor-local-storage/): Walkthrough of Cursor's local storage layout — SQLite `store.db`, `state.vscdb`, JSONL fallback, and how vibe-replay merges them.
-- [What Does Claude Code Store on Your Machine? A Deep Dive into ~/.claude/](https://vibe-replay.com/blog/claude-code-local-storage/): JSONL transcripts, project mapping, hooks/plugins, and what each file in `~/.claude/` actually contains.
-- [From Prompt to MVP in 53 Minutes — with Full AI Session Replay](https://vibe-replay.com/blog/introducing-vibe-replay/): Project introduction and the 53-minute build session that produced the first working version.
+- [Where Does Cursor SDK Store Agents? sdk-agent-store Explained](https://vibe-replay.com/blog/cursor-sdk-deep-dive/): How Cursor SDK's SQLite run catalog and JSONL transcript join into one replay.
+- [What Does OpenCode Store Locally? opencode.db Explained](https://vibe-replay.com/blog/opencode-local-storage/): How OpenCode's SQLite session, message, and part tables encode prompts, reasoning, tools, and compaction.
+- [What Does Hermes Store Locally? state.db + Profiles](https://vibe-replay.com/blog/hermes-local-storage/): How Hermes stores profile-aware sessions, usage, tools, reasoning, costs, and compaction markers in SQLite.
+- [What Does Pi Coding Agent Store? Session JSONL Explained](https://vibe-replay.com/blog/pi-local-storage/): How Pi's parent-linked JSONL tree represents branches, tool results, model changes, and compaction.
+- [What Does Codex Store Locally? Rollout JSONL + state_5.sqlite](https://vibe-replay.com/blog/codex-local-storage/): How Codex combines rollout events, the thread catalog, and its append-only session-name index.
+- [How Claude Cowork Stores Autonomous Agent Sessions](https://vibe-replay.com/blog/dispatch-deep-dive/): How Claude Desktop Cowork stores autonomous audit logs separately from Claude Code transcripts.
+- [What AI Coding Insights Reveal Over Time](https://vibe-replay.com/blog/personal-insights/): How local metrics, heatmaps, model usage, and optional sharing help analyze AI coding activity without exporting conversation text.
+- [What Happens When Claude Code /simplify Runs?](https://vibe-replay.com/blog/simplify-codebase-with-ai/): How to inspect `/simplify` file discovery, delegated review, refactors, and verification in a replay.
+- [What Claude Code's Source Map Revealed About Sessions and MCP](https://vibe-replay.com/blog/claude-code-source-leak/): How source-level clues clarified JSONL metadata, compaction, skills, MCP tools, and pricing mappings.
+- [What Does Cursor Store Locally? ~/.cursor/ + state.vscdb](https://vibe-replay.com/blog/cursor-local-storage/): A version-aware map of Cursor's SQLite, JSONL, global state, checkpoints, and attribution layers.
+- [What Does Claude Code Store Locally? A ~/.claude/ Deep Dive](https://vibe-replay.com/blog/claude-code-local-storage/): Where Claude Code keeps JSONL transcripts, sub-agent records, file snapshots, usage fields, and other local metadata.
+- [From Prompt to MVP: Why AI Coding Sessions Need Replay](https://vibe-replay.com/blog/introducing-vibe-replay/): Why a replay preserves prompts, tool calls, decisions, and verification that a final diff cannot show.
 
 ## Optional
 
 - [GitHub repository](https://github.com/tuo-lei/vibe-replay): Source code, issues, releases.
-- [npm package](https://www.npmjs.com/package/vibe-replay): Install via `npm i -g vibe-replay` or one-shot `npx vibe-replay`.
+- [npm package](https://www.npmjs.com/package/vibe-replay): Install with one-shot `npx vibe-replay` or through your preferred package manager.
 - [RSS feed](https://vibe-replay.com/rss.xml): Blog updates.

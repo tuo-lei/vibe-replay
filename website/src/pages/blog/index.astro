@@ -32,6 +32,8 @@ const blogIndexJsonLd = [
       "headline": p.data.title,
       "description": p.data.excerpt,
       "datePublished": p.data.date.toISOString(),
+      "dateModified": (p.data.updated ?? p.data.date).toISOString(),
+      ...(p.data.cover ? { "image": new URL(p.data.cover, siteBase).href } : {}),
       "url": new URL(`/blog/${p.id}/`, siteBase).href,
       "author": { "@type": "Person", "name": p.data.author, "url": p.data.authorUrl },
     })),
@@ -62,7 +64,7 @@ const blogIndexJsonLd = [
           <span class="bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</span>
           <span class="text-text-primary"> blog</span>
         </h1>
-        <p class="text-text-secondary text-lg">Stories, insights, and updates from building with AI.</p>
+        <p class="text-text-secondary text-lg">Reader-first guides to AI agent storage, session replay, and coding workflows.</p>
       </header>
 
       <!-- Post list -->
