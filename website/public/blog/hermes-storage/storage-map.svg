@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Hermes local session storage map</title>
+  <desc id="desc">Hermes combines a default SQLite database and profile databases, with sessions and messages inside each.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#1b1115"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7d8590"/></marker>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)"/>
+  <path d="M0 120H1200" stroke="#30363d" opacity=".5"/>
+  <text x="64" y="68" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="30" font-weight="700">Hermes local session storage</text>
+  <text x="64" y="101" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">One installation, multiple profile-aware databases</text>
+
+  <rect x="64" y="166" width="432" height="112" rx="16" fill="#161b22" stroke="#f85149" stroke-opacity=".65"/>
+  <text x="94" y="206" fill="#f85149" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">DEFAULT PROFILE</text>
+  <text x="94" y="244" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="20">~/.hermes/state.db</text>
+
+  <rect x="64" y="316" width="432" height="112" rx="16" fill="#161b22" stroke="#d29922" stroke-opacity=".65"/>
+  <text x="94" y="356" fill="#d29922" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">NAMED PROFILES</text>
+  <text x="94" y="394" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="20">profiles/&lt;name&gt;/state.db</text>
+
+  <path d="M496 222H600V366" fill="none" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M496 372H600" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="600" y="310" width="536" height="144" rx="18" fill="#111923" stroke="#f85149" stroke-opacity=".6"/>
+  <text x="634" y="354" fill="#f85149" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">SESSIONS</text>
+  <text x="634" y="389" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">model · tokens · cost · Git metadata</text>
+  <text x="634" y="420" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">profile name and activity timestamps stay in the catalog</text>
+
+  <path d="M868 454V510" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="600" y="514" width="536" height="108" rx="18" fill="#111923" stroke="#22d3ee" stroke-opacity=".6"/>
+  <text x="634" y="554" fill="#22d3ee" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">MESSAGES</text>
+  <text x="634" y="586" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">user · assistant · tool · reasoning</text>
+  <text x="634" y="611" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">tool calls join results by tool_call_id</text>
+
+  <rect x="64" y="500" width="432" height="122" rx="16" fill="#0d1117" stroke="#30363d"/>
+  <text x="94" y="540" fill="#79b8ff" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">COMPACTION</text>
+  <text x="94" y="575" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">compacted=1 boundaries</text>
+  <text x="94" y="601" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">plus [CONTEXT COMPACTION] summary rows</text>
+</svg>

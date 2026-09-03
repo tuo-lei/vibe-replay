@@ -1,6 +1,7 @@
 ---
 title: "What Does Pi Coding Agent Store on Your Machine? A Deep Dive into Session JSONL"
 excerpt: "Pi stores a session as a JSONL tree, not a flat transcript: entries point to parents, branches can be abandoned, and compaction is its own event."
+cover: "/blog/pi-storage/session-tree.png"
 date: 2026-06-06
 readTime: "7 min read"
 ---
@@ -20,6 +21,8 @@ session header
       │                    └── alternate branch
       └── compaction / model change / custom context
 ```
+
+![Diagram of a Pi session JSONL tree with an active parentId chain and an alternate branch](/blog/pi-storage/session-tree.png)
 
 That tree is what makes Pi powerful for interactive work — and what makes a line-by-line parser subtly wrong.
 

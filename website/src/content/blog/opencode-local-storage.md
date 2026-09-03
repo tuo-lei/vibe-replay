@@ -1,6 +1,7 @@
 ---
 title: "What Does OpenCode Store on Your Machine? A Deep Dive into opencode.db"
 excerpt: "OpenCode stores sessions, messages, and tool parts in SQLite instead of a folder of JSONL files. Here's the schema, the compaction trap, and how to read it safely."
+cover: "/blog/opencode-storage/storage-map.png"
 date: 2026-08-03
 readTime: "7 min read"
 ---
@@ -16,6 +17,8 @@ session row   → identity, title, project, timestamps, model, cost
 message rows  → user/assistant boundaries and message metadata
 part rows     → text, reasoning, tools, files, results, compaction markers
 ```
+
+![Diagram of the OpenCode opencode.db session, message, and part tables](/blog/opencode-storage/storage-map.png)
 
 vibe-replay treats those rows as one logical conversation and turns them into the same replay vocabulary used for Claude Code, Cursor, Codex, Hermes, and Pi.
 

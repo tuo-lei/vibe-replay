@@ -1,6 +1,7 @@
 ---
 title: "What Does Codex Store on Your Machine? A Deep Dive into Rollout JSONL and state_5.sqlite"
 excerpt: "Codex keeps the replay in rollout JSONL, the /resume metadata in SQLite, and renamed threads in an append-only index. Here's how the pieces fit together."
+cover: "/blog/codex-storage/storage-map.png"
 date: 2026-04-27
 readTime: "7 min read"
 ---
@@ -23,6 +24,8 @@ state_5.sqlite        → thread catalog and resume metadata
 session_index.jsonl   → explicit thread-name history
 sessions/**/*.jsonl   → rollout transcript and event stream
 ```
+
+![Diagram of Codex local storage: rollout JSONL, state_5.sqlite, and session_index.jsonl joining into one replay](/blog/codex-storage/storage-map.png)
 
 That is the layer vibe-replay has to reconcile before it can show a faithful replay.
 

@@ -1,6 +1,7 @@
 ---
 title: "What Does Hermes Store on Your Machine? A Deep Dive into state.db and Profiles"
 excerpt: "Hermes keeps session metadata, token accounting, reasoning, and tool calls in SQLite — with named profiles and two different compaction signals."
+cover: "/blog/hermes-storage/storage-map.png"
 date: 2026-08-05
 readTime: "7 min read"
 ---
@@ -20,6 +21,8 @@ The practical mental model is:
         ├── sessions       → catalog, usage, cost, Git metadata
         └── messages       → prompts, reasoning, tool calls, results
 ```
+
+![Diagram of Hermes local storage: default and named-profile state.db files feeding session and message records](/blog/hermes-storage/storage-map.png)
 
 vibe-replay discovers those databases together, keeps profile identity out of the prompt text, and renders the result as the same replay format used for other providers.
 
