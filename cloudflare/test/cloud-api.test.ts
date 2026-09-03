@@ -1,8 +1,7 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { Miniflare } from "miniflare";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { applyMigrations } from "./migration-utils";
 
 const TEST_USER_ID = "user-test-1";
 const OTHER_USER_ID = "user-test-2";
@@ -55,21 +54,6 @@ async function dispatch(path: string, init: RequestInit = {}, userId = TEST_USER
   );
   await waitOnCtx(ctx);
   return response;
-}
-
-async function applyMigrations(db: D1Database) {
-  const migrationsDir = join(process.cwd(), "drizzle");
-  const files = (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort();
-  for (const file of files) {
-    const sql = await readFile(join(migrationsDir, file), "utf-8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((statement) => statement.trim())
-      .filter(Boolean);
-    for (const statement of statements) {
-      await db.prepare(statement).run();
-    }
-  }
 }
 
 async function resetDb() {

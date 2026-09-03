@@ -7,6 +7,7 @@
     "test": "vitest run --config vitest.config.ts",
     "deploy": "wrangler deploy",
     "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
     "db:migrate:local": "wrangler d1 migrations apply vibe-replay-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply vibe-replay-db --remote"
   },
