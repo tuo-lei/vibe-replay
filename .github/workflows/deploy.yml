@@ -38,3 +38,9 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
           workingDirectory: cloudflare
+
+      - name: Smoke-test deployed API
+        working-directory: cloudflare
+        env:
+          VIBE_REPLAY_SMOKE_URL: https://vibe-replay.com
+        run: pnpm smoke
