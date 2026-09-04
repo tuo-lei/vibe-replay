@@ -113,7 +113,9 @@ export function registerLiveRoutes(app: Hono): void {
       const isCursorProvider = providerName === "cursor";
       const isCodexProvider = providerName === "codex";
       const isPiProvider = providerName === "pi";
-      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider || isPiProvider;
+      const isGrokBotProvider = providerName === "grok-bot";
+      const isJsonlLiveProvider =
+        isClaudeProvider || isCodexProvider || isPiProvider || isGrokBotProvider;
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
       let cursorDbWatchAttached = false;
       const cursorDbWatchedSessionIds = new Set<string>();

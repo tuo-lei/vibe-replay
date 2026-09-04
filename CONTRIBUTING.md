@@ -113,7 +113,7 @@ pnpm monorepo with shared foundations, provider packages, and app layers:
 
 - **`packages/types`** — Shared TypeScript types (`@vibe-replay/types`). Both CLI and viewer re-export from here.
 - **`packages/provider-contract` / `provider-core`** — Stable provider interfaces and shared discovery/parser utilities.
-- **`packages/provider-*`** — Provider-owned discovery and parsing for Claude, Codex, Cursor, OpenCode, Hermes, and Pi.
+- **`packages/provider-*`** — Provider-owned discovery and parsing for Claude, Codex, Cursor, OpenCode, Hermes, Pi, and Grok Bot.
 - **`packages/providers-default`** — Default provider registry and cross-provider discovery deduplication.
 - **`packages/replay-core`** — Provider-neutral scene transformation, redaction, token estimates, and pricing.
 - **AI Studio** — `packages/cli/src/ai-runtime.ts` embeds Pi's provider/auth runtime and
@@ -162,7 +162,7 @@ mode is deliberately disabled.
 
 The dashboard uses product terminology that distinguishes original AI sessions from generated replays:
 
-- **Sessions** in the UI are **Source Sessions**: raw/discovered AI coding sessions from providers such as Claude, Cursor, Codex, OpenCode, Hermes, and Pi. They may or may not have a generated replay yet.
+- **Sessions** in the UI are **Source Sessions**: raw/discovered AI coding sessions from providers such as Claude, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot. They may or may not have a generated replay yet.
 - **Raw transcript/provider data** is provider-owned local storage, such as Claude JSONL, Codex JSONL, Pi JSONL under `~/.pi/agent/sessions`, or Cursor SQLite/globalStorage data.
 - **Replays** are generated Vibe Replay artifacts under `vibe-replay/<slug>/`, including `index.html` and `replay.json`.
 - **Replay Summaries** are lightweight listings of generated replay artifacts.

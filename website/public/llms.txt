@@ -1,8 +1,8 @@
 # vibe-replay
 
-> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
+> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
 
-vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
+vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`, Grok Bot `/home/box/agent-data/agent-transcripts` or `~/.grok-bot/agent-transcripts`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
 
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
@@ -11,7 +11,7 @@ License: MIT
 ## Core pages
 
 - [Homepage](https://vibe-replay.com/): Product overview, install instructions, feature list.
-- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi).
+- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot).
 - [Insights dashboard](https://vibe-replay.com/insights/): Personal AI coding analytics — sessions, prompts, tool calls, costs, streaks across machines and providers.
 - [Blog](https://vibe-replay.com/blog/): Deep-dives on AI-agent local storage, coding workflows, and replayable sessions.
 
