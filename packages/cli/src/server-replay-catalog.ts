@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { isCursorPlaceholderTitle } from "@vibe-replay/provider-cursor/sanitize";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
 import { classifyProject } from "@vibe-replay/types";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
@@ -280,15 +281,20 @@ export async function buildSourcesResult(
         sdkWorkspaceRef: session.workspacePath,
         gitRepo,
       });
+    const sourceTitle = normalizeTitle(
+      cleanPromptText(typeof session.title === "string" ? session.title : ""),
+    );
+    const title =
+      session.provider === "cursor" && isCursorPlaceholderTitle(sourceTitle)
+        ? normalizeTitle(previewPrompt(session.firstPrompt)) || sourceTitle
+        : sourceTitle;
     return {
       provider: session.provider,
       location: session.location,
       transcriptStatus: session.transcriptStatus,
       sessionId: session.sessionId,
       slug: session.slug,
-      title: normalizeTitle(
-        cleanPromptText(typeof session.title === "string" ? session.title : ""),
-      ),
+      title,
       project: session.project,
       projectIdentity,
       timestamp: session.timestamp,

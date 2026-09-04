@@ -7,6 +7,7 @@
  */
 
 import { cleanPromptText } from "./clean-prompt.js";
+import { isCursorPlaceholderTitle } from "@vibe-replay/provider-cursor/sanitize";
 import {
   ENRICHMENT_SCORE_WEIGHTS,
   RECENT_SESSION_WINDOW_MS,
@@ -345,5 +346,5 @@ function stringArrayFromUnknown(value: unknown): string[] | undefined {
 
 function looksLikeCursorDisplayNoise(value: unknown): boolean {
   if (typeof value !== "string" || !value.trim()) return false;
-  return !cleanPromptText(value);
+  return isCursorPlaceholderTitle(value) || !cleanPromptText(value);
 }

@@ -59,6 +59,58 @@ describe("parseCursorSession", () => {
     expect(mockedParseCursorSqlite).toHaveBeenCalledWith("/repo", "sqlite-session");
   });
 
+  it("replaces a Cursor placeholder title with the discovered prompt", async () => {
+    mockedParseCursorSqlite.mockResolvedValueOnce({
+      sessionId: "sqlite-session",
+      slug: "sqlite-s",
+      cwd: "/repo",
+      title: "New Agent",
+      turns: [{ role: "user", blocks: [{ type: "text", text: "hello" }] }],
+      dataSource: "sqlite",
+      dataSourceInfo: {
+        primary: "sqlite",
+        sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+      },
+    });
+
+    const dir = await mkdtemp(join(tmpdir(), "cursor-parser-title-"));
+    tempDirs.push(dir);
+    const transcript = join(dir, "session.jsonl");
+    await writeFile(
+      transcript,
+      `${JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<user_query>Inspect the Gateway Lens capture flow</user_query>",
+            },
+          ],
+        },
+      })}\n`,
+      "utf-8",
+    );
+
+    const parsed = await parseCursorSession(transcript, {
+      provider: "cursor",
+      sessionId: "sqlite-session",
+      slug: "sqlite-s",
+      project: "/repo",
+      cwd: "/repo",
+      version: "",
+      timestamp: new Date().toISOString(),
+      lineCount: 1,
+      fileSize: 1,
+      filePath: transcript,
+      filePaths: [transcript],
+      hasSqlite: true,
+      firstPrompt: "Inspect the Gateway Lens capture flow",
+    });
+
+    expect(parsed.title).toBe("Inspect the Gateway Lens capture flow");
+  });
+
   it("parses explicit Cursor store.db session paths without discovery metadata", async () => {
     const sessionId = "ee3500f9-cfc2-4396-a5f2-1b556f8ac573";
     mockedParseCursorSqlite.mockResolvedValueOnce({

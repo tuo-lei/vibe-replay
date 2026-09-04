@@ -31,6 +31,14 @@ export function sanitizeCursorUserText(value: string): string {
     .trim();
 }
 
+/** Cursor uses these names for sessions without a meaningful title. */
+export function isCursorPlaceholderTitle(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    /^(?:new agent|new chat|untitled)$/i.test(value.replace(/\s+/g, " ").trim())
+  );
+}
+
 /** Read Cursor's leading human-readable prompt timestamp and normalize it to ISO. */
 export function extractCursorTimestamp(value: string): string | undefined {
   const match = /^\s*<timestamp>([^<]*?)<\/timestamp>/i.exec(value);

@@ -28,6 +28,7 @@ import type {
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import {
+  isCursorPlaceholderTitle,
   sanitizeCursorAssistantText,
   sanitizeCursorReasoningText,
   sanitizeCursorUserText,
@@ -1530,14 +1531,15 @@ export async function discoverSqliteOnlySessions(
       const meta = metaPreview.meta;
 
       const project = hashToProject.get(entry.workspaceHash) || "";
-      const firstPrompt = meta.name || "(sqlite-only session)";
+      const title = meaningfulCursorTitle(meta.name);
+      const firstPrompt = title || "(sqlite-only session)";
       const timestamp = toIsoTimestamp(meta.createdAt) || new Date(entry.mtimeMs).toISOString();
 
       sessions.push({
         provider: "cursor",
         sessionId: entry.sessionId,
         slug: entry.sessionId.slice(0, 8),
-        title: meta.name,
+        title,
         project: shortenPath(project),
         cwd: project,
         version: "",
@@ -1676,6 +1678,15 @@ async function hasReplayableGlobalStateComposer(
   });
 }
 
+function meaningfulCursorTitle(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = candidate.replace(/\s+/g, " ").trim();
+    if (normalized && !isCursorPlaceholderTitle(normalized)) return normalized;
+  }
+  return undefined;
+}
+
 function firstUserTextSnippet(turns: ParsedTurn[]): string | undefined {
   const firstUser = turns.find((t) => t.role === "user");
   const firstText = firstUser?.blocks.find(
@@ -1782,11 +1793,7 @@ export async function discoverGlobalStateOnlySessions(
         toIsoTimestamp(composer?.lastUpdatedAt ?? row.lastUpdatedAt) ||
         toIsoTimestamp(composer?.createdAt ?? row.createdAt) ||
         new Date().toISOString();
-      const title =
-        typeof (composer?.name ?? row.title) === "string" &&
-        valueToString(composer?.name ?? row.title).trim()
-          ? valueToString(composer?.name ?? row.title).trim()
-          : undefined;
+      const title = meaningfulCursorTitle(composer?.name ?? row.title);
       const firstPrompt = title || "(cursor global state session)";
       const projectPath = rawComposer
         ? inferProjectFromComposerDataFast(rawComposer, decodedWorkspacePaths)
@@ -2214,7 +2221,7 @@ function buildCursorStoreResult(
 ): ProviderParseResult {
   const { turns, turnStats, totalDurationMs } = messagesToTurns(messages);
   const slug = sessionId.slice(0, 8);
-  const title = metaJson.name || firstUserTextSnippet(turns);
+  const title = meaningfulCursorTitle(metaJson.name, firstUserTextSnippet(turns));
   const hasDurationStats = turnStats.some((stat) => (stat.durationMs || 0) > 0);
 
   const notes: string[] = [];
@@ -3617,8 +3624,7 @@ async function parseCursorGlobalStateDb(
     return {
       sessionId,
       slug: sessionId.slice(0, 8),
-      title:
-        (typeof composer.name === "string" && composer.name.trim()) || firstUserTextSnippet(turns),
+      title: meaningfulCursorTitle(composer.name, firstUserTextSnippet(turns)),
       cwd: inferredProject || "",
       model: modelName,
       startTime,
