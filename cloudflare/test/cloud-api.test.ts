@@ -169,6 +169,8 @@ describe("Cloud API integration", () => {
       SENTRY_DSN: "https://example.invalid/1",
     } as Parameters<typeof createSentryOptions>[0]);
     expect(options.sendDefaultPii).toBe(false);
+    expect(options.tracesSampleRate).toBe(0.1);
+    expect(options.traceLifecycle).toBe("stream");
     expect(options.dataCollection).toEqual({
       userInfo: false,
       cookies: false,

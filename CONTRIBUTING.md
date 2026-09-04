@@ -287,8 +287,9 @@ pnpm exec wrangler secret put SENTRY_DSN
 ```
 
 The Worker disables Sentry user information and HTTP request bodies so prompts,
-replay contents, and credentials are not sent as event data. Local and test
-environments remain reporting-disabled when `SENTRY_DSN` is absent.
+replay contents, and credentials are not sent as event data. It samples 10% of
+traces and streams sampled spans from the Worker. Local and test environments
+remain reporting-disabled when `SENTRY_DSN` is absent.
 
 ## Key conventions
 
