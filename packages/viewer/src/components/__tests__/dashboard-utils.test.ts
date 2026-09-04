@@ -617,6 +617,16 @@ describe("dashboard prompt and title helpers", () => {
       "Inspect the Gateway Lens capture flow",
     );
   });
+
+  it("skips Cursor placeholder prompt previews when choosing a title", () => {
+    const source = makeSource({
+      title: "New Agent",
+      prompts: ["New Agent", "Inspect the Gateway Lens capture flow"],
+      firstPrompt: "Fallback prompt",
+    });
+
+    expect(sourceDisplayTitle(source)).toBe("Inspect the Gateway Lens capture flow");
+  });
 });
 
 describe("formatDataSourceLabel", () => {

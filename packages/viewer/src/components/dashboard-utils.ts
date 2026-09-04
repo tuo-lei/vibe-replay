@@ -406,7 +406,7 @@ function sourcePromptTitle(
   if (explicitTitle) return explicitTitle;
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
-    const cleaned = normalizeTitleText(cleanPrompt(candidate || ""));
+    const cleaned = sessionTitleValue(s.provider, candidate);
     if (cleaned) return cleaned;
   }
   return s.slug;
