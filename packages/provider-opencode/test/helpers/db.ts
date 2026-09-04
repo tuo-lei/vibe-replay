@@ -28,6 +28,8 @@ export interface MessageSeed {
   finish?: string;
   timeCreated?: number;
   tokens?: { input?: number; output?: number; cache?: { read?: number; write?: number } };
+  cost?: number;
+  error?: { name?: string } | string;
   parts: Array<Record<string, unknown>>;
 }
 
@@ -110,6 +112,8 @@ export async function buildOpencodeDb(seeds: {
     if (m.modelID) meta.modelID = m.modelID;
     if (m.finish) meta.finish = m.finish;
     if (m.tokens) meta.tokens = m.tokens;
+    if (m.cost !== undefined) meta.cost = m.cost;
+    if (m.error !== undefined) meta.error = m.error;
     db.run("INSERT INTO message (id, session_id, time_created, data) VALUES (?,?,?,?)", [
       m.id,
       m.sessionId,
