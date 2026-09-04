@@ -77,6 +77,13 @@ describe("local telemetry", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("does not send from the pnpm dev launcher", async () => {
+    process.env.VIBE_REPLAY_DEV_MENU = "1";
+    recordTelemetry("cli.started");
+    await flushTelemetry();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("does not send telemetry to a non-HTTPS collector", async () => {
     process.env.VIBE_REPLAY_API_URL = "http://collector.example";
     recordTelemetry("cli.started");
