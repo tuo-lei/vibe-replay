@@ -383,6 +383,32 @@ describe("sources enrichment helpers", () => {
     expect(candidates).toHaveLength(0);
   });
 
+  it("re-enriches Cursor sources that still have the default agent title", () => {
+    const merged = [
+      makeCursorSession({
+        promptCount: 1,
+        toolCallCount: 1,
+        model: "gpt-5.6-luna-max",
+      }),
+    ];
+    const baseSources: SourceSummaryRecord[] = [
+      {
+        provider: "cursor",
+        sessionId: "cursor-session-a",
+        slug: "aaaaaaaa",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        filePaths: ["/tmp/session-a.jsonl"],
+        promptCount: 1,
+        toolCallCount: 1,
+        title: "New Agent",
+        model: "gpt-5.6-luna-max",
+      },
+    ];
+
+    expect(selectCursorEnrichmentCandidates(merged, baseSources)).toHaveLength(1);
+  });
+
   it("selects only missing-count cursor sessions and respects recency", () => {
     const merged = [
       makeCursorSession({

@@ -270,6 +270,16 @@ export function normalizeTitleText(value?: string): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
 }
 
+const CURSOR_PLACEHOLDER_TITLES = new Set(["new agent", "new chat", "untitled"]);
+
+function sessionTitleValue(provider: string, value?: string): string {
+  const normalized = normalizeTitleText(cleanPrompt(value || ""));
+  if (provider === "cursor" && CURSOR_PLACEHOLDER_TITLES.has(normalized.toLowerCase())) {
+    return "";
+  }
+  return normalized;
+}
+
 /** Detect system-generated user messages that aren't real human prompts */
 function isSystemGeneratedMessage(text: string): boolean {
   return (
@@ -390,9 +400,9 @@ export function shortCoworkSpaceId(spaceId: string): string {
 }
 
 function sourcePromptTitle(
-  s: Pick<SourceSession, "slug" | "title" | "prompts" | "firstPrompt">,
+  s: Pick<SourceSession, "provider" | "slug" | "title" | "prompts" | "firstPrompt">,
 ): string {
-  const explicitTitle = s.title ? normalizeTitleText(cleanPrompt(s.title)) : "";
+  const explicitTitle = sessionTitleValue(s.provider, s.title);
   if (explicitTitle) return explicitTitle;
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
@@ -405,7 +415,7 @@ function sourcePromptTitle(
 export function sourceSuggestedTitle(s: SourceSession): string {
   const promptTitle = sourcePromptTitle(s);
   if (s.replay?.title) {
-    const replayTitle = normalizeTitleText(s.replay.title);
+    const replayTitle = sessionTitleValue(s.provider, s.replay.title);
     if (replayTitle) return replayTitle;
   }
   return promptTitle;
@@ -417,10 +427,10 @@ export function sourceDisplayTitle(
     title?: string;
   } | null,
 ): string {
-  const sourceTitle = normalizeTitleText(cleanPrompt(s.title || ""));
+  const sourceTitle = sessionTitleValue(s.provider, s.title);
   const promptTitle = sourcePromptTitle(s);
   const replayTitle = normalizeTitleText(s.replay?.title);
-  const scanTitle = normalizeTitleText(cleanPrompt(scanData?.title || ""));
+  const scanTitle = sessionTitleValue(s.provider, scanData?.title);
   if (sourceTitle) return sourceTitle;
   if (scanTitle) return scanTitle;
   if (promptTitle && promptTitle !== s.slug) return promptTitle;
