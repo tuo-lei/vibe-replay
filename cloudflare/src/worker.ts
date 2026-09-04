@@ -27,6 +27,13 @@ import {
 const CLOUD_REPLAY_ID_RE = /^[a-zA-Z0-9_-]{10,16}$/;
 const GIST_ID_RE = /^[a-f0-9]{20,40}$/;
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
+// JSON string escaping can nearly double a 10 MB replay/gist payload when it
+// is nested inside the request envelope, so leave headroom above the stored
+// content limit while still bounding chunked requests without Content-Length.
+const MAX_JSON_BODY_BYTES = 24 * 1024 * 1024;
+const MAX_INSIGHTS_SYNC_BODY_BYTES = 32 * 1024 * 1024;
+const MAX_FILE_UPLOAD_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_LEGACY_REPLAY_BODY_BYTES = 64 * 1024;
 // D1 starts failing once the user+machine+dates lookup goes past ~100 bound params.
 // Reuse the same conservative chunk size for both query and write paths so older clients
 // that still send large sync payloads stay under the database ceiling server-side too.
@@ -78,9 +85,44 @@ type HonoEnv = { Bindings: Env };
 
 type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
 
-async function readJsonBody(c: Context<HonoEnv>): Promise<JsonBodyResult> {
+async function readJsonBody(
+  c: Context<HonoEnv>,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<JsonBodyResult> {
+  const contentLength = Number(c.req.header("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return { ok: false, response: c.json({ error: "Request body too large" }, 413) };
+  }
+
+  const body = c.req.raw.body;
+  if (!body) return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
   try {
-    return { ok: true, body: await c.req.json() };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, response: c.json({ error: "Request body too large" }, 413) };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  try {
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
   } catch {
     return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
   }
@@ -506,6 +548,9 @@ app.post("/api/cloud-replays", async (c) => {
   const parsedBody = await readJsonBody(c);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   if (!body.replay || typeof body.replay !== "object") {
     return c.json({ error: "replay object required" }, 400);
   }
@@ -689,6 +734,9 @@ app.patch("/api/cloud-replays/:id", async (c) => {
   const parsedBody = await readJsonBody(c);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   const { visibility } = body;
   if (!visibility || !VALID_VISIBILITY.has(visibility)) {
     return c.json({ error: "Invalid visibility (must be public, unlisted, or private)" }, 400);
@@ -751,7 +799,12 @@ app.post("/api/gists", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   if (!body.filename || typeof body.filename !== "string" || body.filename.length > 255) {
     return c.json({ error: "filename required (max 255 chars)" }, 400);
   }
@@ -875,7 +928,12 @@ app.patch("/api/gists/:gistId", async (c) => {
     return c.json({ error: "Invalid gist ID" }, 400);
   }
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   if (!body.filename || typeof body.filename !== "string" || body.filename.length > 255) {
     return c.json({ error: "filename required (max 255 chars)" }, 400);
   }
@@ -1166,23 +1224,48 @@ app.post("/api/insights/sync", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const parsedBody = await readJsonBody(c);
+  const parsedBody = await readJsonBody(c, MAX_INSIGHTS_SYNC_BODY_BYTES);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   if (!Array.isArray(body.days) || body.days.length === 0) {
     return c.json({ error: "days array required" }, 400);
   }
   if (body.days.length > MAX_DAILY_BATCH) {
     return c.json({ error: `Max ${MAX_DAILY_BATCH} days per batch` }, 400);
   }
+  if (
+    body.days.some(
+      (day: unknown) =>
+        !day ||
+        typeof day !== "object" ||
+        Array.isArray(day) ||
+        !isValidCalendarDate((day as { date?: unknown }).date),
+    )
+  ) {
+    return c.json({ error: "Each day must have a valid YYYY-MM-DD date" }, 400);
+  }
 
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
   // Pre-fetch existing rows for this user+machine combo
-  const machineId = body.machineId?.slice(0, 64);
-  if (!machineId) return c.json({ error: "machineId required" }, 400);
+  if (typeof body.machineId !== "string" || !body.machineId.trim()) {
+    return c.json({ error: "machineId required" }, 400);
+  }
+  const machineId = body.machineId.trim().slice(0, 64);
+  const machineName = boundedString(body.machineName, 200);
 
-  const dates = body.days.map((d: any) => String(d.date)).filter(Boolean);
+  // A retry may contain the same date more than once. Keep the last sample so
+  // one request cannot enqueue duplicate inserts for the unique date key.
+  const daysByDate = new Map<string, Record<string, unknown>>();
+  for (const day of body.days as Record<string, unknown>[]) {
+    daysByDate.set(day.date as string, day);
+  }
+  const days = [...daysByDate.values()];
+
+  const dates = [...daysByDate.keys()];
   const existingMap = new Map<string, string>();
   for (const dateChunk of chunkItems(dates, SAFE_DAILY_SYNC_DB_CHUNK)) {
     if (dateChunk.length === 0) continue;
@@ -1200,10 +1283,9 @@ app.post("/api/insights/sync", async (c) => {
   const statements: D1PreparedStatement[] = [];
   let synced = 0;
 
-  for (const day of body.days) {
-    if (!day.date || !/^\d{4}-\d{2}-\d{2}$/.test(day.date)) continue;
-
-    const existingId = existingMap.get(day.date);
+  for (const day of days) {
+    const date = day.date as string;
+    const existingId = existingMap.get(date);
     if (existingId) {
       statements.push(
         c.env.DB.prepare(
@@ -1216,11 +1298,11 @@ app.post("/api/insights/sync", async (c) => {
           clamp(day.toolCalls, 0, 1_000_000),
           clamp(day.edits, 0, 1_000_000),
           clamp(day.durationMs, 0, 86_400_000),
-          Math.max(0, Math.min(Number(day.cost) || 0, 100_000)),
-          day.projects ? String(day.projects).slice(0, 50_000) : null,
-          day.models ? String(day.models).slice(0, 10_000) : null,
-          day.providers ? String(day.providers).slice(0, 10_000) : null,
-          body.machineName?.slice(0, 200) || null,
+          clamp(day.cost, 0, 100_000),
+          boundedString(day.projects, 50_000),
+          boundedString(day.models, 10_000),
+          boundedString(day.providers, 10_000),
+          machineName,
           now,
           existingId,
         ),
@@ -1237,20 +1319,20 @@ app.post("/api/insights/sync", async (c) => {
           id,
           userId,
           machineId,
-          body.machineName?.slice(0, 200) || null,
-          day.date,
+          machineName,
+          date,
           clamp(day.sessions, 0, 10_000),
           clamp(day.prompts, 0, 100_000),
           clamp(day.toolCalls, 0, 1_000_000),
           clamp(day.edits, 0, 1_000_000),
           clamp(day.durationMs, 0, 86_400_000),
-          Math.max(0, Math.min(Number(day.cost) || 0, 100_000)),
-          day.projects ? String(day.projects).slice(0, 50_000) : null,
-          day.models ? String(day.models).slice(0, 10_000) : null,
-          day.providers ? String(day.providers).slice(0, 10_000) : null,
+          clamp(day.cost, 0, 100_000),
+          boundedString(day.projects, 50_000),
+          boundedString(day.models, 10_000),
+          boundedString(day.providers, 10_000),
         ),
       );
-      existingMap.set(day.date, id);
+      existingMap.set(date, id);
     }
     synced++;
   }
@@ -1517,6 +1599,9 @@ app.post("/api/insights/profile", async (c) => {
   const parsedBody = await readJsonBody(c);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
 
   const slug = body.slug ? String(body.slug).toLowerCase().trim() : null;
   if (slug && !SLUG_RE.test(slug)) {
@@ -1868,9 +1953,12 @@ app.post("/api/files", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const parsedBody = await readJsonBody(c);
+  const parsedBody = await readJsonBody(c, MAX_FILE_UPLOAD_BODY_BYTES);
   if (!parsedBody.ok) return parsedBody.response;
   const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
   const { content, contentType, filename, parentReplayId, visibility: vis } = body;
 
   if (!content || typeof content !== "string") {
@@ -2150,10 +2238,17 @@ function validateReplaySchema(replay: any): string | null {
   if (!Array.isArray(replay.scenes)) {
     return "Missing scenes array";
   }
-  // Validate scenes have a type field (don't enforce specific types — future-proof)
-  for (let i = 0; i < Math.min(replay.scenes.length, 5); i++) {
+  // Validate every scene has a type field (don't enforce specific types —
+  // future-proof). Checking only a prefix lets malformed later scenes crash
+  // the viewer and can leave an R2 object orphaned during metadata extraction.
+  for (let i = 0; i < replay.scenes.length; i++) {
     const scene = replay.scenes[i];
-    if (!scene || typeof scene.type !== "string") {
+    if (
+      !scene ||
+      typeof scene !== "object" ||
+      Array.isArray(scene) ||
+      typeof scene.type !== "string"
+    ) {
       return `Invalid scene at index ${i}: missing type`;
     }
   }
@@ -2163,7 +2258,13 @@ function validateReplaySchema(replay: any): string | null {
 function extractFirstUserPrompt(replay: any): string | null {
   const scenes = replay?.scenes;
   if (!Array.isArray(scenes)) return null;
-  const first = scenes.find((s: any) => s.type === "user-prompt");
+  const first = scenes.find(
+    (scene: unknown) =>
+      scene &&
+      typeof scene === "object" &&
+      !Array.isArray(scene) &&
+      (scene as { type?: unknown }).type === "user-prompt",
+  ) as { content?: unknown } | undefined;
   return first?.content ? String(first.content).slice(0, 300) : null;
 }
 
@@ -2350,9 +2451,14 @@ export default Sentry.withSentry(createSentryOptions, worker);
 // POST /api/replays — register or refresh a replay
 // ---------------------------------------------------------------------------
 
-async function handlePostReplay(c: { env: Env; req: { json: () => Promise<any> } }) {
+async function handlePostReplay(c: Context<HonoEnv>) {
   try {
-    const body = await c.req.json();
+    const parsedBody = await readJsonBody(c, MAX_LEGACY_REPLAY_BODY_BYTES);
+    if (!parsedBody.ok) return parsedBody.response;
+    const body = parsedBody.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return Response.json({ error: "Request body must be an object" }, { status: 400 });
+    }
 
     if (!body.gist_id || typeof body.gist_id !== "string") {
       return Response.json({ error: "gist_id required" }, { status: 400 });
@@ -2726,7 +2832,22 @@ function extractFirstMessage(json: string): string | null {
   return null;
 }
 
-function clamp(val: number | undefined, min: number, max: number): number {
-  const n = Number(val) || 0;
+function isValidCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
+function boundedString(value: unknown, maxLength: number): string | null {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, maxLength) : null;
+}
+
+function clamp(val: unknown, min: number, max: number): number {
+  const parsed = typeof val === "number" ? val : Number(val);
+  const n = Number.isFinite(parsed) ? parsed : min;
   return Math.max(min, Math.min(max, n));
 }
