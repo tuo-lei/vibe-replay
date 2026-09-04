@@ -1,6 +1,7 @@
 import { Miniflare } from "miniflare";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import worker from "../src/worker";
+import * as Sentry from "@sentry/cloudflare";
+import worker, { createSentryOptions, scrubSentryRequest } from "../src/worker";
 import { applyMigrations } from "./migration-utils";
 
 const TEST_USER_ID = "user-test-1";
@@ -161,6 +162,43 @@ describe("Cloud API integration", () => {
   beforeEach(async () => {
     await resetDb();
     await clearR2();
+  });
+
+  it("disables sensitive request data in Sentry events", () => {
+    const options = createSentryOptions({
+      SENTRY_DSN: "https://example.invalid/1",
+    } as Parameters<typeof createSentryOptions>[0]);
+    expect(options.sendDefaultPii).toBe(false);
+    expect(options.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      queryParams: false,
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      stackFrameVariables: false,
+      frameContextLines: 0,
+    });
+
+    const event = scrubSentryRequest({
+      request: {
+        url: "https://example.test/api?query=sentinel",
+        headers: { Authorization: "authorization-sentinel" },
+        cookies: "cookie-sentinel",
+        query_string: "query-sentinel",
+        data: "body-sentinel",
+      },
+    } as Sentry.ErrorEvent);
+
+    expect(event.request?.url).toBe("https://example.test/api");
+    expect(event.request?.headers).toBeUndefined();
+    expect(event.request?.cookies).toBeUndefined();
+    expect(event.request?.query_string).toBeUndefined();
+    expect(event.request?.data).toBeUndefined();
+    expect(JSON.stringify(event)).not.toContain("sentinel");
   });
 
   it("keeps Better Auth account writes compatible with the issuer migration", async () => {

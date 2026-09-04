@@ -90,6 +90,14 @@ async function readJsonBody(c: Context<HonoEnv>): Promise<JsonBodyResult> {
 
 const app = new Hono<HonoEnv>();
 
+// Hono handles route exceptions internally, so the outer Sentry wrapper would
+// otherwise never observe them. Preserve Hono's default 500 response while
+// reporting the exception in the active request scope.
+app.onError((error, c) => {
+  Sentry.captureException(error);
+  return c.text("Internal Server Error", 500);
+});
+
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
@@ -2272,17 +2280,51 @@ const worker = {
   },
 };
 
-export default Sentry.withSentry(
-  (env: Env) => ({
+export function scrubSentryRequest(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
+  if (!event.request) return event;
+
+  event.request = {
+    ...event.request,
+    headers: undefined,
+    cookies: undefined,
+    data: undefined,
+    query_string: undefined,
+    url: event.request.url?.split(/[?#]/, 1)[0],
+  };
+  return event;
+}
+
+export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
+  return {
     dsn: env.SENTRY_DSN,
     sendDefaultPii: false,
     dataCollection: {
       userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: false,
+        response: false,
+      },
       httpBodies: [],
+      queryParams: false,
+      urlQueryParams: false,
+      graphQL: {
+        document: false,
+        variables: false,
+      },
+      genAI: {
+        inputs: false,
+        outputs: false,
+      },
+      databaseQueryData: false,
+      stackFrameVariables: false,
+      frameContextLines: 0,
     },
-  }),
-  worker,
-);
+    beforeSend: scrubSentryRequest,
+  };
+}
+
+export default Sentry.withSentry(createSentryOptions, worker);
 
 // ---------------------------------------------------------------------------
 // POST /api/replays — register or refresh a replay
