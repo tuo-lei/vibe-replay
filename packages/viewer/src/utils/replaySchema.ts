@@ -9,6 +9,49 @@ const SCENE_TYPES = new Set([
   "tool-call",
 ]);
 
+const CONTENT_SCENE_TYPES = new Set([
+  "user-prompt",
+  "compaction-summary",
+  "context-injection",
+  "thinking",
+  "text-response",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateScene(scene: unknown, index: number): void {
+  if (!isRecord(scene) || typeof scene.type !== "string" || !SCENE_TYPES.has(scene.type)) {
+    throw new Error(`Invalid replay: unsupported scene at index ${index}`);
+  }
+
+  if (CONTENT_SCENE_TYPES.has(scene.type) && typeof scene.content !== "string") {
+    throw new Error(`Invalid replay: scene ${index} is missing string content`);
+  }
+  if (scene.type === "user-prompt" && scene.images !== undefined) {
+    if (!Array.isArray(scene.images) || scene.images.some((image) => typeof image !== "string")) {
+      throw new Error(`Invalid replay: scene ${index} has invalid images`);
+    }
+  }
+  if (scene.type === "context-injection" && scene.injectionType !== undefined) {
+    if (typeof scene.injectionType !== "string") {
+      throw new Error(`Invalid replay: scene ${index} has invalid injectionType`);
+    }
+  }
+  if (scene.type === "tool-call") {
+    if (typeof scene.toolName !== "string") {
+      throw new Error(`Invalid replay: scene ${index} is missing toolName`);
+    }
+    if (!isRecord(scene.input)) {
+      throw new Error(`Invalid replay: scene ${index} is missing tool input`);
+    }
+    if (typeof scene.result !== "string") {
+      throw new Error(`Invalid replay: scene ${index} is missing tool result`);
+    }
+  }
+}
+
 /** Validate replay identity, scene envelopes, and forward schema compatibility. */
 export function parseReplaySession(value: unknown): ReplaySession {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -42,16 +85,7 @@ export function parseReplaySession(value: unknown): ReplaySession {
     throw new Error("Invalid replay: missing scenes array");
   }
   for (let index = 0; index < replay.scenes.length; index++) {
-    const scene = replay.scenes[index];
-    if (
-      !scene ||
-      typeof scene !== "object" ||
-      Array.isArray(scene) ||
-      typeof (scene as { type?: unknown }).type !== "string" ||
-      !SCENE_TYPES.has((scene as { type: string }).type)
-    ) {
-      throw new Error(`Invalid replay: unsupported scene at index ${index}`);
-    }
+    validateScene(replay.scenes[index], index);
   }
   return value as ReplaySession;
 }

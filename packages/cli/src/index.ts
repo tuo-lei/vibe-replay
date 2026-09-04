@@ -20,6 +20,7 @@ import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   DEFAULT_API_URL,
   getAuthFilePath,
+  isAllowedApiUrl,
   loadAuthToken,
   publishCloudWithOverlays,
   removeAuthTokenSync,
@@ -916,13 +917,9 @@ authCmd
     const crypto = await import("node:crypto");
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
 
-    // Only allow official domain or localhost to prevent phishing via crafted --api-url
-    const parsed = new URL(apiUrl);
-    if (
-      parsed.hostname !== "vibe-replay.com" &&
-      parsed.hostname !== "localhost" &&
-      parsed.hostname !== "127.0.0.1"
-    ) {
+    // Only allow official HTTPS or loopback URLs to prevent phishing and
+    // plaintext token transport via crafted --api-url values.
+    if (!isAllowedApiUrl(apiUrl)) {
       console.error(chalk.red(`\n  ✗ Untrusted API URL: ${apiUrl}`));
       console.error(chalk.dim("  Only https://vibe-replay.com and localhost are allowed.\n"));
       process.exit(1);

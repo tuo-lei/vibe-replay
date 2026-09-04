@@ -38,6 +38,10 @@ function redactFilePath(s: string): string {
   return process.platform === "win32" ? redacted.replaceAll("\\", "/") : redacted;
 }
 
+function redactSubAgentDescription(description: string): string {
+  return redactSecrets(redactPath(description));
+}
+
 function replaceRemoteHomeInText(value: string, remoteHome: string): string {
   const home = remoteHome.replace(/\/+$/, "");
   if (!home) return value;
@@ -265,7 +269,7 @@ export function transformToReplay(
             parentComposerId: sa.parentComposerId,
             toolCallId: sa.toolCallId,
             agentType: sa.agentType,
-            description: sa.description,
+            ...(sa.description ? { description: redactSubAgentDescription(sa.description) } : {}),
             prompt: redactSecrets(redactPath(sa.prompt || "")),
             toolCalls: sa.toolCalls,
             thinkingBlocks: sa.thinkingBlocks,
@@ -281,7 +285,9 @@ export function transformToReplay(
             syntheticSubAgentSummary.push({
               agentId: minimal.agentId,
               agentType: minimal.agentType,
-              description: minimal.description,
+              ...(minimal.description
+                ? { description: redactSubAgentDescription(minimal.description) }
+                : {}),
               toolCalls: minimal.toolCalls,
               model: minimal.model,
             });
@@ -359,7 +365,14 @@ export function transformToReplay(
       ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,
       ...(parsed.subAgentSummary && parsed.subAgentSummary.length > 0
-        ? { subAgentSummary: parsed.subAgentSummary }
+        ? {
+            subAgentSummary: parsed.subAgentSummary.map((summary) => ({
+              ...summary,
+              ...(summary.description
+                ? { description: redactSubAgentDescription(summary.description) }
+                : {}),
+            })),
+          }
         : syntheticSubAgentSummary.length > 0
           ? { subAgentSummary: syntheticSubAgentSummary }
           : {}),
@@ -400,7 +413,15 @@ export function transformToReplay(
       ...(parsed.mcpServersUsed ? { mcpServersUsed: parsed.mcpServersUsed } : {}),
       ...(parsed.truncatedResponses ? { truncatedResponses: parsed.truncatedResponses } : {}),
       ...(parsed.agentName ? { agentName: parsed.agentName } : {}),
-      ...(parsed.worktree ? { worktree: parsed.worktree } : {}),
+      ...(parsed.worktree
+        ? {
+            worktree: {
+              ...(parsed.worktree.name ? { name: parsed.worktree.name } : {}),
+              ...(parsed.worktree.path ? { path: redactFilePath(parsed.worktree.path) } : {}),
+              ...(parsed.worktree.branch ? { branch: parsed.worktree.branch } : {}),
+            },
+          }
+        : {}),
       ...(parsed.queueOperationStats ? { queueOperationStats: parsed.queueOperationStats } : {}),
     },
     scenes,

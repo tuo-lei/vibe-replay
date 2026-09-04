@@ -274,6 +274,53 @@ describe("path redaction", () => {
     expect(replay.meta.cwd).toBe("~/my-workspace");
   });
 
+  it("redacts local worktree paths and subagent descriptions", () => {
+    const parsed = makeParsed(
+      [
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              id: "agent-1",
+              name: "Agent",
+              input: {},
+              _subAgent: {
+                agentId: "agent-1",
+                agentType: "Explore",
+                description: `Inspect ${HOME}/child-worktree`,
+                prompt: "Inspect the project",
+                toolCalls: 0,
+                thinkingBlocks: 0,
+                textResponses: 0,
+                scenes: [],
+              },
+            },
+          ],
+        },
+      ],
+      {
+        worktree: { path: `${HOME}/worktrees/feature`, branch: "feature" },
+        subAgentSummary: [
+          {
+            agentId: "agent-1",
+            agentType: "Explore",
+            description: `Inspect ${HOME}/child-worktree`,
+            toolCalls: 0,
+          },
+        ],
+      },
+    );
+
+    const replay = transform(parsed);
+    const agentScene = replay.scenes.find((scene) => scene.type === "tool-call") as ToolCallScene;
+
+    expect(replay.meta.worktree?.path).toBe("~/worktrees/feature");
+    expect(agentScene.subAgent?.description).not.toContain(HOME);
+    expect(agentScene.subAgent?.description).toContain("~/child-worktree");
+    expect(replay.meta.subAgentSummary?.[0]?.description).toContain("~/child-worktree");
+  });
+
   it("redacts remote paths only in known path fields", () => {
     const remoteHome = "/remote/home";
     const parsed = makeParsed(

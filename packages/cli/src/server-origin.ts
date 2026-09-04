@@ -47,8 +47,18 @@ export function isSameOriginSettingsRequest(c: Context): boolean {
   return true;
 }
 
+/** Reject requests whose Host header has been replaced by DNS rebinding. */
+export function isLoopbackApiRequest(c: Context): boolean {
+  try {
+    return isLoopbackHostname(new URL(c.req.url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Protect every mutating local API route from cross-site requests.
+ * Protect every local API route from DNS rebinding and mutating routes from
+ * cross-site requests.
  *
  * The dashboard server is intentionally unauthenticated and listens on
  * loopback, so a malicious web page could otherwise issue CSRF requests to a
@@ -57,6 +67,9 @@ export function isSameOriginSettingsRequest(c: Context): boolean {
  */
 export function registerSameOriginMutationGuard(app: Hono): void {
   app.use("/api/*", async (c, next) => {
+    if (!isLoopbackApiRequest(c)) {
+      return c.json({ error: "API requests must target loopback" }, 403);
+    }
     const method = c.req.method;
     const mutating =
       method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";

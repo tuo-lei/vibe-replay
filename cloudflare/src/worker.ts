@@ -2906,6 +2906,7 @@ async function fetchGistMeta(
   if (!gistResp.ok) return null;
 
   const gistData = (await gistResp.json()) as {
+    public?: boolean;
     owner?: { login?: string };
     files?: Record<
       string,
@@ -2918,6 +2919,7 @@ async function fetchGistMeta(
       }
     >;
   };
+  if (gistData.public !== true) return null;
 
   const jsonFile = Object.values(gistData.files || {}).find((f) => f.filename?.endsWith(".json"));
   if (!jsonFile) return null;
