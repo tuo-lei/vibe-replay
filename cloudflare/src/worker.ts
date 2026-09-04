@@ -98,6 +98,8 @@ const app = new Hono<HonoEnv>();
 app.onError((error, c) => {
   if (!c.env.SENTRY_DSN) {
     console.error(error);
+  } else {
+    Sentry.logger.error("Unhandled Worker request error");
   }
   Sentry.captureException(error);
   return c.text("Internal Server Error", 500);
@@ -125,6 +127,13 @@ app.use("/api/*", async (c, next) => {
     credentials: true,
   });
   return mw(c, next);
+});
+
+app.use("/api/*", async (c, next) => {
+  await next();
+  if (!c.env.SENTRY_DSN) return;
+  Sentry.logger.info("Worker API request");
+  Sentry.metrics.count("worker.api_requests", 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -2304,6 +2313,8 @@ export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
     dsn: env.SENTRY_DSN,
     release: env.CF_VERSION_METADATA?.id,
     sendDefaultPii: false,
+    enableLogs: true,
+    enableMetrics: true,
     // Keep tracing useful without sending every static asset request.
     tracesSampleRate: 0.1,
     traceLifecycle: "stream",
