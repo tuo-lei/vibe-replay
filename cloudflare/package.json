@@ -13,6 +13,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply vibe-replay-db --remote"
   },
   "dependencies": {
+    "@sentry/cloudflare": "^10.73.0",
     "better-auth": "^1.7.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.5",

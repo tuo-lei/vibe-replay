@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import * as Sentry from "@sentry/cloudflare";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -67,6 +68,8 @@ type Env = AuthEnv & {
   TEST_AUTH_USER_ID?: string;
   TEST_AUTH_USER_EMAIL?: string;
   TEST_AUTH_USER_NAME?: string;
+  /** Sentry project DSN; absent in local/test environments disables reporting. */
+  SENTRY_DSN?: string;
 };
 
 type HonoEnv = { Bindings: Env };
@@ -86,6 +89,17 @@ async function readJsonBody(c: Context<HonoEnv>): Promise<JsonBodyResult> {
 // ---------------------------------------------------------------------------
 
 const app = new Hono<HonoEnv>();
+
+// Hono handles route exceptions internally, so the outer Sentry wrapper would
+// otherwise never observe them. Preserve Hono's default 500 response while
+// reporting the exception in the active request scope.
+app.onError((error, c) => {
+  if (!c.env.SENTRY_DSN) {
+    console.error(error);
+  }
+  Sentry.captureException(error);
+  return c.text("Internal Server Error", 500);
+});
 
 // ---------------------------------------------------------------------------
 // CORS
@@ -2199,10 +2213,10 @@ function extractMetaFromJson(json: string): ReplayMetaSummary {
 // Export — fetch + scheduled (cron for expired replay cleanup)
 // ---------------------------------------------------------------------------
 
-export default {
+const worker = {
   fetch: app.fetch,
 
-  async scheduled(_event: ScheduledEvent, env: Env) {
+  async scheduled(_controller: ScheduledController, env: Env) {
     const db = drizzle(env.DB);
     const BATCH = 50;
     // R2 grace period: keep data 7 days after expiry for potential recovery.
@@ -2268,6 +2282,52 @@ export default {
     }
   },
 };
+
+export function scrubSentryRequest(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
+  if (!event.request) return event;
+
+  event.request = {
+    ...event.request,
+    headers: undefined,
+    cookies: undefined,
+    data: undefined,
+    query_string: undefined,
+    url: event.request.url?.split(/[?#]/, 1)[0],
+  };
+  return event;
+}
+
+export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
+  return {
+    dsn: env.SENTRY_DSN,
+    sendDefaultPii: false,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: false,
+        response: false,
+      },
+      httpBodies: [],
+      queryParams: false,
+      urlQueryParams: false,
+      graphQL: {
+        document: false,
+        variables: false,
+      },
+      genAI: {
+        inputs: false,
+        outputs: false,
+      },
+      databaseQueryData: false,
+      stackFrameVariables: false,
+      frameContextLines: 0,
+    },
+    beforeSend: scrubSentryRequest,
+  };
+}
+
+export default Sentry.withSentry(createSentryOptions, worker);
 
 // ---------------------------------------------------------------------------
 // POST /api/replays — register or refresh a replay
