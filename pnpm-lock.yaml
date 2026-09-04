@@ -148,6 +148,9 @@ importers:
       '@vibe-replay/provider-cursor':
         specifier: workspace:*
         version: link:../provider-cursor
+      '@vibe-replay/provider-grok-bot':
+        specifier: workspace:*
+        version: link:../provider-grok-bot
       '@vibe-replay/provider-hermes':
         specifier: workspace:*
         version: link:../provider-hermes
@@ -292,6 +295,7 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
+
   packages/provider-hermes:
     dependencies:
       '@vibe-replay/provider-contract':
@@ -375,6 +379,9 @@ importers:
       '@vibe-replay/provider-cursor':
         specifier: workspace:*
         version: link:../provider-cursor
+      '@vibe-replay/provider-grok-bot':
+        specifier: workspace:*
+        version: link:../provider-grok-bot
       '@vibe-replay/provider-hermes':
         specifier: workspace:*
         version: link:../provider-hermes
@@ -6757,7 +6764,7 @@ snapshots:
 
   '@types/sax@1.2.7':
     dependencies:
-      '@types/node': 24.13.3
+      '@types/node': 26.4.1
 
   '@types/unist@3.0.3': {}
 
