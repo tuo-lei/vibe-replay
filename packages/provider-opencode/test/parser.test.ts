@@ -465,6 +465,31 @@ describe("opencode parser", () => {
     }
   });
 
+  it("counts truncation even when the truncated message produced no blocks", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_len_empty",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_010_500,
+          finish: "length",
+          parts: [],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.truncatedResponses).toBe(1);
+      expect(result.turns).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("records failed assistant finishes as privacy-safe apiErrors", async () => {
     const db = await buildOpencodeDb({
       session: [baseSession],

@@ -329,14 +329,9 @@ export function parseSessionFromDb(
           }
         }
       }
-      if (blocks.length === 0 && meta.finish !== "error") continue;
-      for (const block of blocks) {
-        if (block.type !== "tool_use" || !block._skillName) continue;
-        skillsUsed.add(block._skillName);
-        skillActivations.push(block._skillName);
-      }
       // opencode (AI SDK) reports truncated generations as finish "length";
-      // "max_tokens" is the Anthropic-style spelling kept for safety.
+      // "max_tokens" is the Anthropic-style spelling kept for safety. Count
+      // truncation and API failures even when no renderable block survived.
       const isTruncated = meta.finish === "length" || meta.finish === "max_tokens";
       if (isTruncated) truncatedResponses++;
       if (meta.finish === "error" && timestamp) {
@@ -345,6 +340,11 @@ export function parseSessionFromDb(
         apiErrors.push({ timestamp, ...errorTypeFromMeta(meta.error) });
       }
       if (blocks.length === 0) continue;
+      for (const block of blocks) {
+        if (block.type !== "tool_use" || !block._skillName) continue;
+        skillsUsed.add(block._skillName);
+        skillActivations.push(block._skillName);
+      }
 
       const modelForTurn = meta.modelID || model;
       turns.push({
