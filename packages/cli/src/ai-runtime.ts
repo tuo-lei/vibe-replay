@@ -877,9 +877,9 @@ function positiveNumber(value: unknown, fallback: number): number {
 }
 
 function modelInput(raw: Record<string, unknown>): ("text" | "image")[] {
-  const modalities = [raw.modalities, raw.input_modalities, raw.input].find((value) =>
-    Array.isArray(value),
-  ) as unknown[] | undefined;
+  const modalities = [raw.modalities, raw.input_modalities, raw.input].find(
+    (value): value is unknown[] => Array.isArray(value),
+  );
   if (modalities?.some((value) => typeof value === "string" && /image|vision/i.test(value))) {
     return ["text", "image"];
   }
