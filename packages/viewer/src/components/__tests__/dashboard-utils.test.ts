@@ -705,6 +705,14 @@ describe("provider display helpers", () => {
     expect(providerFamily("codex")).toBe("purple");
   });
 
+  it("labels Grok Bot as a first-class provider", () => {
+    expect(providerBadgeLabel("grok-bot")).toBe("Grok");
+    expect(providerDisplayName("grok-bot")).toBe("Grok Bot");
+    expect(providerBadgeClass("grok-bot")).toContain("terminal-yellow");
+    expect(providerBarClass("grok-bot")).toBe("bg-terminal-yellow");
+    expect(providerFamily("grok-bot")).toBe("yellow");
+  });
+
   it("labels Pi as a first-class provider", () => {
     expect(providerBadgeLabel("pi")).toBe("Pi");
     expect(providerDisplayName("pi")).toBe("Pi");

@@ -1,0 +1,8 @@
+{"role":"user","message":{"content":[{"type":"text","text":"[SAND_HIDDEN_PROMPT][first run] ..."}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"send_message","input":{"text":{"content":"Hey — good to meet you."}}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"send_message","result":{"success":{"timestamp":"1788485400095","messageId":"tbs0"}}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"[t0u]\n你给我介绍grok bot"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"private scratch reasoning"},{"type":"tool_use","name":"send_message","input":{"text":{"content":"先给你讲清楚…"}}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"send_message","result":{"success":{"messageId":"t0s0"}}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"read","input":{"path":"/home/box/reference/app-ui.md"}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"read","result":{"success":{"content":"# The Grok Bot app UI…"}}}]}}
