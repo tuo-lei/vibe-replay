@@ -237,7 +237,7 @@ export function mergeGrokBotGroupParses(
   for (const item of items) {
     const turn = item.turn;
     if (turn.subtype === "context-injection" && isGroupHeaderTurn(turn)) {
-      const signature = turnText(turn).trim().toLowerCase();
+      const signature = groupHeaderDedupeKey(turnText(turn));
       if (seenHeaders.has(signature)) continue;
       seenHeaders.add(signature);
       turns.push(turn);
@@ -341,6 +341,15 @@ function extractPlainText(content: unknown): string {
 
 function isGroupHeaderTurn(turn: ParsedTurn): boolean {
   return /^group chat\b/i.test(turnText(turn));
+}
+
+/** Title + participants only — mentions can differ per agent's wake. */
+function groupHeaderDedupeKey(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.trim().toLowerCase())
+    .filter((line) => line.startsWith("group chat") || line.startsWith("participants:"))
+    .join("\n");
 }
 
 function isForeignAssistantTurn(turn: ParsedTurn, ownerName?: string): boolean {

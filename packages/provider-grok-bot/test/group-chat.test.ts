@@ -304,6 +304,7 @@ It's your turn, Vibe Replay Eng.`,
     ]);
     expect(parsed.title).toBe("Group: Vibe Replay launch");
     expect(parsed.diagnosticNotes?.some((note) => /merged group room/i.test(note))).toBe(true);
+    expect(parsed.turns.filter((turn) => turn.subtype === "context-injection")).toHaveLength(1);
 
     const humans = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
     expect(humans).toHaveLength(1);

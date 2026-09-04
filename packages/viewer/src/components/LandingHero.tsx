@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
+import { assistantSpeakerLabel, userSpeakerLabel } from "../utils/speaker-label";
 import { providerDisplayName, rollupProject } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
@@ -21,10 +22,12 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
     if (!firstPromptScene || firstPromptScene.type !== "user-prompt") return null;
 
     const prompt = firstPromptScene.content;
+    const userSpeaker = firstPromptScene.speaker;
     const toolBreakdown: Record<string, number> = {};
     let responses = 0;
     let totalTools = 0;
     let lastResponse = "";
+    let assistantSpeaker: string | undefined;
     let seenPrompts = 0;
 
     for (const scene of scenes) {
@@ -40,13 +43,24 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
         toolBreakdown[name] = (toolBreakdown[name] || 0) + 1;
       } else if (scene.type === "text-response") {
         responses++;
-        lastResponse = scene.content;
+        if (!lastResponse) {
+          lastResponse = scene.content;
+          assistantSpeaker = scene.speaker;
+        }
       }
     }
 
     const toolEntries = Object.entries(toolBreakdown).sort((a, b) => b[1] - a[1]);
 
-    return { prompt, responses, totalTools, toolEntries, lastResponse };
+    return {
+      prompt,
+      userSpeaker,
+      assistantSpeaker,
+      responses,
+      totalTools,
+      toolEntries,
+      lastResponse,
+    };
   }, [scenes]);
 
   const filesModified = useMemo(() => {
@@ -216,7 +230,7 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
             <div className="rounded-2xl px-5 py-4 ml-4 md:ml-12 bg-terminal-green-subtle border border-terminal-green/30 shadow-layer-sm hover:bg-terminal-green-emphasis transition-all duration-200 ease-material">
               <div className="flex items-center gap-2 mb-2.5">
                 <span className="text-[10px] font-sans font-semibold text-terminal-green uppercase tracking-widest">
-                  You
+                  {userSpeakerLabel(firstTurn.userSpeaker)}
                 </span>
               </div>
               <div className="text-terminal-green font-mono text-sm whitespace-pre-wrap break-words line-clamp-3">
@@ -228,7 +242,7 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
             <div className="rounded-xl px-5 py-4 bg-terminal-surface shadow-layer-sm">
               <div className="flex items-center gap-2 mb-2.5">
                 <span className="text-[10px] font-sans font-semibold text-secondary-text uppercase tracking-widest">
-                  Assistant
+                  {assistantSpeakerLabel(firstTurn.assistantSpeaker)}
                 </span>
               </div>
               {/* Stats pills */}

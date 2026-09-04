@@ -5,6 +5,7 @@ import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Annotation, Scene, TurnStat } from "../types";
 import { textHighlightsByScene, type TextHighlight } from "../utils/annotation-highlights";
+import { assistantSpeakerLabel, userSpeakerLabel } from "../utils/speaker-label";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import { fmtNum, formatTokens, formatToolDuration } from "./StatsPanel";
@@ -60,18 +61,6 @@ function sceneSpeaker(scene: Scene): string | undefined {
   return "speaker" in scene && typeof scene.speaker === "string" && scene.speaker.trim()
     ? scene.speaker.trim()
     : undefined;
-}
-
-function isGenericHumanSpeaker(name?: string): boolean {
-  return !name || /^(user|you|human)$/i.test(name);
-}
-
-function userSpeakerLabel(name?: string): string {
-  return isGenericHumanSpeaker(name) ? "You" : name!;
-}
-
-function assistantSpeakerLabel(name?: string): string {
-  return name?.trim() || "Assistant";
 }
 
 interface StickyPromptSummary {
