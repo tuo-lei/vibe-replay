@@ -23,7 +23,7 @@
   <rect x="600" y="310" width="536" height="144" rx="18" fill="#111923" stroke="#f85149" stroke-opacity=".6"/>
   <text x="634" y="354" fill="#f85149" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">SESSIONS</text>
   <text x="634" y="389" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">model · tokens · cost · Git metadata</text>
-  <text x="634" y="420" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">profile name and activity timestamps stay in the catalog</text>
+  <text x="634" y="420" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">profile, hidden Bot Chat, and empty-cwd cron stay in the catalog</text>
 
   <path d="M868 454V510" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
   <rect x="600" y="514" width="536" height="108" rx="18" fill="#111923" stroke="#22d3ee" stroke-opacity=".6"/>
