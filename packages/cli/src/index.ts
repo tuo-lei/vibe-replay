@@ -1289,7 +1289,9 @@ program
       ?.parseAsync(["login", ...process.argv.slice(3)], { from: "user" });
   });
 
-const telemetryCmd = program.command("telemetry").description("Manage anonymous usage telemetry");
+const telemetryCmd = program
+  .command("telemetry")
+  .description("Manage pseudonymous usage telemetry");
 
 const showTelemetryStatus = async () => {
   const status = await getTelemetryStatus();
@@ -1301,17 +1303,17 @@ telemetryCmd.action(showTelemetryStatus);
 telemetryCmd.command("status").description("Show telemetry status").action(showTelemetryStatus);
 telemetryCmd
   .command("enable")
-  .description("Enable anonymous usage telemetry")
+  .description("Enable pseudonymous usage telemetry")
   .action(async () => {
     await setTelemetryEnabled(true);
-    console.log("Anonymous telemetry enabled.");
+    console.log("Pseudonymous telemetry enabled.");
   });
 telemetryCmd
   .command("disable")
-  .description("Disable anonymous usage telemetry")
+  .description("Disable pseudonymous usage telemetry")
   .action(async () => {
     await setTelemetryEnabled(false);
-    console.log("Anonymous telemetry disabled.");
+    console.log("Pseudonymous telemetry disabled.");
   });
 
 await program.parseAsync();

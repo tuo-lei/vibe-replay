@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -57,7 +57,12 @@ function telemetryForcedOnByEnvironment(): boolean {
 }
 
 function getApiOrigin(): string {
-  return (process.env.VIBE_REPLAY_API_URL || "https://vibe-replay.com").replace(/\/$/, "");
+  try {
+    const url = new URL(process.env.VIBE_REPLAY_API_URL || "https://vibe-replay.com");
+    return url.protocol === "https:" ? url.origin : "";
+  } catch {
+    return "";
+  }
 }
 
 async function readTelemetryState(): Promise<TelemetryState | null> {
@@ -147,13 +152,17 @@ export async function setTelemetryEnabled(enabled: boolean): Promise<void> {
 /** Returns the one-time notice for default-on telemetry, if it has not been shown. */
 export async function getTelemetryNotice(): Promise<string | null> {
   if (telemetryDisabledByEnvironment() || telemetryForcedOnByEnvironment()) return null;
-  const state = await ensureTelemetryState();
-  if (state.notified) return null;
-  const nextState = { ...state, notified: true };
-  await writeTelemetryState(nextState);
-  telemetryStatePromise = Promise.resolve(nextState);
+  try {
+    const state = await ensureTelemetryState();
+    if (state.notified) return null;
+    const nextState = { ...state, notified: true };
+    await writeTelemetryState(nextState);
+    telemetryStatePromise = Promise.resolve(nextState);
+  } catch {
+    return null;
+  }
   return (
-    "vibe-replay collects anonymous feature counts and coarse scan-size buckets " +
+    "vibe-replay collects pseudonymous feature counts and coarse scan-size buckets " +
     "to improve the CLI. It never sends replay content, prompts, paths, or IDs. " +
     "Disable with `vibe-replay telemetry disable`."
   );
@@ -181,33 +190,42 @@ function telemetryPlatform(): "darwin" | "win32" | "linux" | "other" {
   return "other";
 }
 
+function monthlyInstallationToken(installationId: string): string {
+  const month = new Date().toISOString().slice(0, 7);
+  return createHash("sha256").update(`${month}:${installationId}`).digest("hex");
+}
+
 async function sendTelemetry(
   event: TelemetryEventName,
   properties?: Record<string, string>,
 ): Promise<void> {
   if (telemetryDisabledByEnvironment()) return;
-  const state = await ensureTelemetryState();
-  if (!effectiveTelemetryStatus(state).enabled) return;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
   try {
-    await fetch(`${getApiOrigin()}${TELEMETRY_ENDPOINT_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        installationId: state.installationId,
-        event,
-        version: CLI_VERSION,
-        platform: telemetryPlatform(),
-        properties: sanitizeProperties(properties),
-      }),
-      signal: controller.signal,
-    });
+    const origin = getApiOrigin();
+    if (!origin) return;
+    const state = await ensureTelemetryState();
+    if (!effectiveTelemetryStatus(state).enabled) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
+    try {
+      await fetch(`${origin}${TELEMETRY_ENDPOINT_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          installationId: monthlyInstallationToken(state.installationId),
+          event,
+          version: CLI_VERSION,
+          platform: telemetryPlatform(),
+          properties: sanitizeProperties(properties),
+        }),
+        signal: controller.signal,
+        redirect: "error",
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     // Telemetry is strictly best-effort and must never affect the CLI.
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -217,15 +235,22 @@ export function recordTelemetry(
 ): void {
   const request = sendTelemetry(event, properties);
   pendingRequests.add(request);
-  void request.finally(() => pendingRequests.delete(request));
+  void request.finally(() => pendingRequests.delete(request)).catch(() => {});
 }
 
 export async function flushTelemetry(timeoutMs = TELEMETRY_TIMEOUT_MS): Promise<void> {
   if (pendingRequests.size === 0) return;
-  await Promise.race([
-    Promise.allSettled(pendingRequests),
-    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(pendingRequests),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function bucketCount(value: number): string {

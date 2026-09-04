@@ -62,6 +62,31 @@ const TELEMETRY_PROPERTY_KEYS = new Set([
   "size",
   "storage",
 ]);
+const TELEMETRY_ALLOWED_VALUES: Record<string, Set<string>> = {
+  duration: new Set(["<1s", "1-9s", "10-59s", "1-4m", "5m+"]),
+  matches: new Set(["0", "1-9", "10-99", "100-999", "1k-9k", "10k+"]),
+  mode: new Set(["basic", "richer"]),
+  provider: new Set([
+    "claude-code",
+    "claude-cowork",
+    "claude-desktop",
+    "codex",
+    "cursor",
+    "grok-bot",
+    "hermes",
+    "opencode",
+    "pi",
+    "unknown",
+  ]),
+  scan: new Set(["basic", "richer"]),
+  scenes: new Set(["0", "1-9", "10-99", "100-999", "1k-9k", "10k+"]),
+  sessions: new Set(["0", "1-9", "10-99", "100-999", "1k-9k", "10k+"]),
+  size: new Set(["0", "<1mb", "1-9mb", "10-99mb", "100mb+"]),
+  storage: new Set(["r2", "gist", "legacy-gist"]),
+};
+const MAX_TELEMETRY_EVENTS_PER_DAY = 100_000;
+const MAX_TELEMETRY_EVENTS_PER_INSTALLATION = 1_000;
+const telemetryRateLimits = new Map<string, { day: string; count: number }>();
 
 // GitHub API constants — shared across user gist routes and worker-side fetches.
 const GITHUB_API_ACCEPT = "application/vnd.github+json";
@@ -122,7 +147,7 @@ function telemetryDimensions(value: unknown): string | null {
       ([key, item]) =>
         TELEMETRY_PROPERTY_KEYS.has(key) &&
         typeof item === "string" &&
-        /^[a-z0-9_.+-]{1,32}$/i.test(item),
+        TELEMETRY_ALLOWED_VALUES[key]?.has(item) === true,
     )
     .sort(([a], [b]) => a.localeCompare(b));
   if (entries.length > 8) return null;
@@ -149,6 +174,19 @@ async function hashTelemetryInstallation(
   return Array.from(new Uint8Array(signature))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function allowTelemetryInstallation(day: string, installationHash: string): boolean {
+  const key = `${day}:${installationHash}`;
+  const previous = telemetryRateLimits.get(key);
+  if (!previous || previous.day !== day) {
+    if (telemetryRateLimits.size > 10_000) telemetryRateLimits.clear();
+    telemetryRateLimits.set(key, { day, count: 1 });
+    return true;
+  }
+  if (previous.count >= MAX_TELEMETRY_EVENTS_PER_INSTALLATION) return false;
+  previous.count += 1;
+  return true;
 }
 
 type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
@@ -266,7 +304,7 @@ app.post("/api/telemetry", async (c) => {
     typeof event !== "string" ||
     !TELEMETRY_EVENTS.has(event) ||
     typeof version !== "string" ||
-    !/^[a-z0-9+._-]{1,64}$/i.test(version) ||
+    !/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version) ||
     typeof platform !== "string" ||
     !TELEMETRY_PLATFORMS.has(platform)
   ) {
@@ -284,6 +322,13 @@ app.post("/api/telemetry", async (c) => {
     month,
     installationId,
   );
+  const dailyTotal = await c.env.DB.prepare(
+    "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?",
+  )
+    .bind(day)
+    .first<{ count: number }>();
+  if ((dailyTotal?.count || 0) >= MAX_TELEMETRY_EVENTS_PER_DAY) return c.body(null, 204);
+  if (!allowTelemetryInstallation(day, installationHash)) return c.body(null, 204);
 
   await c.env.DB.batch([
     c.env.DB.prepare(

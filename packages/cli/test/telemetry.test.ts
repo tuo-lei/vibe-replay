@@ -37,7 +37,7 @@ describe("local telemetry", () => {
 
   it("defaults on, shows one notice, and supports disable/enable", async () => {
     expect((await getTelemetryStatus()).enabled).toBe(true);
-    expect(await getTelemetryNotice()).toContain("anonymous feature counts");
+    expect(await getTelemetryNotice()).toContain("pseudonymous feature counts");
     expect(await getTelemetryNotice()).toBeNull();
 
     await setTelemetryEnabled(false);
@@ -60,17 +60,25 @@ describe("local telemetry", () => {
     expect(payload.event).toBe("scan.completed");
     expect(payload.version).toBeTruthy();
     expect(payload.platform).toBeTruthy();
-    expect(payload.installationId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(payload.installationId).toMatch(/^[0-9a-f]{64}$/i);
     expect(payload.properties).toEqual({ sessions: "10-99", duration: "1-9s" });
     expect(JSON.stringify(payload)).not.toContain("prompt");
     expect(JSON.stringify(payload)).not.toContain("replay");
 
     const state = JSON.parse(await readFile(process.env.VIBE_REPLAY_TELEMETRY_FILE!, "utf8"));
-    expect(state.installationId).toBe(payload.installationId);
+    expect(state.installationId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(payload.installationId).not.toBe(state.installationId);
   });
 
   it("does not send when explicitly disabled", async () => {
     await setTelemetryEnabled(false);
+    recordTelemetry("cli.started");
+    await flushTelemetry();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not send telemetry to a non-HTTPS collector", async () => {
+    process.env.VIBE_REPLAY_API_URL = "http://collector.example";
     recordTelemetry("cli.started");
     await flushTelemetry();
     expect(fetch).not.toHaveBeenCalled();

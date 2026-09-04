@@ -303,7 +303,7 @@ URLs, IDs, and replay contents are not included.
 
 ### CLI usage telemetry
 
-The CLI sends opt-out, anonymous usage events to the Cloudflare telemetry
+The CLI sends opt-out, pseudonymous usage events to the Cloudflare telemetry
 collector after a one-time notice. It reports only allowlisted feature names,
 CLI version, coarse platform, and bucketed counts/sizes/durations. It never
 sends prompts, replay/session contents, paths, project names, or user IDs.

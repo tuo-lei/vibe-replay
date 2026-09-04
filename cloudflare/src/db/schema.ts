@@ -272,7 +272,7 @@ export const dailyInsights = sqliteTable(
   ],
 );
 
-// Anonymous CLI telemetry aggregates. Raw installation IDs are never stored.
+// Pseudonymous CLI telemetry aggregates. Raw installation IDs are never stored.
 export const telemetryDaily = sqliteTable(
   "telemetry_daily",
   {

@@ -211,7 +211,7 @@ describe("Cloud API integration", () => {
     expect(JSON.stringify(event)).not.toContain("sentinel");
   });
 
-  it("aggregates anonymous telemetry without storing installation IDs", async () => {
+  it("aggregates pseudonymous telemetry without storing installation IDs", async () => {
     const payload = {
       installationId: "123e4567-e89b-12d3-a456-426614174000",
       event: "scan.completed",
