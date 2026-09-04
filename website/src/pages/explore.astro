@@ -6,7 +6,7 @@ import Layout from "../layouts/Layout.astro";
 const exploreFaq = [
   {
     q: "What are AI coding session replays?",
-    a: "Replays capture every prompt, tool call, file edit, and AI thinking step from a Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, or Pi session, then render them as an interactive timeline you can scrub through. Browse public replays here to see how others build with AI.",
+    a: "Replays capture every prompt, tool call, file edit, and AI thinking step from a Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, or Grok Bot session, then render them as an interactive timeline you can scrub through. Browse public replays here to see how others build with AI.",
   },
   {
     q: "How do I share my own replay?",
@@ -14,7 +14,7 @@ const exploreFaq = [
   },
   {
     q: "Which agents can I replay?",
-    a: "Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — all auto-discovered from local files, no extra instrumentation. vibe-replay reads JSONL for Claude Code and SQLite/JSONL for Cursor, and every provider renders with full prompt history, tool calls, diffs, and thinking blocks.",
+    a: "Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot — all auto-discovered from local files, no extra instrumentation. vibe-replay reads JSONL for Claude Code and SQLite/JSONL for Cursor, and every provider renders with full prompt history, tool calls, diffs, and thinking blocks.",
   },
   {
     q: "Are replays self-contained?",
@@ -63,7 +63,7 @@ const exploreJsonLd = [
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>
           <h1 class="text-2xl font-bold text-text-primary mb-1">Public AI coding replays</h1>
-          <p class="text-text-muted text-sm font-mono">Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes &amp; Pi sessions shared by the community</p>
+          <p class="text-text-muted text-sm font-mono">Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi &amp; Grok Bot sessions shared by the community</p>
         </div>
         <div class="flex items-center gap-1 rounded-lg border border-border overflow-hidden w-fit shrink-0">
           <button
@@ -87,7 +87,7 @@ const exploreJsonLd = [
       <section class="mb-8 text-text-secondary text-sm leading-relaxed max-w-3xl">
         <p>
           Watch real <a href="/blog/" class="text-accent hover:underline">AI coding sessions</a> from
-          Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi &mdash; full prompts, tool calls, file diffs, and thinking blocks
+          Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot &mdash; full prompts, tool calls, file diffs, and thinking blocks
           rendered as an interactive timeline. Each replay is a self-contained HTML file you can open
           offline, embed in a PR, or share as a link.
         </p>

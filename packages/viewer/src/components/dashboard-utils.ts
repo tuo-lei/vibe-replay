@@ -406,7 +406,7 @@ function sourcePromptTitle(
   if (explicitTitle) return explicitTitle;
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
-    const cleaned = normalizeTitleText(cleanPrompt(candidate || ""));
+    const cleaned = sessionTitleValue(s.provider, candidate);
     if (cleaned) return cleaned;
   }
   return s.slug;
@@ -642,6 +642,7 @@ export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-cowork": "bg-terminal-sienna-subtle text-terminal-sienna",
   codex: "bg-terminal-purple-subtle text-terminal-purple",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
+  "grok-bot": "bg-terminal-yellow-subtle text-terminal-yellow",
   opencode: "bg-terminal-green-subtle text-terminal-green",
   hermes: "bg-terminal-red-subtle text-terminal-red",
   pi: "bg-terminal-cyan-subtle text-terminal-cyan",
@@ -653,6 +654,7 @@ const PROVIDER_BADGE_LABELS: Record<string, string> = {
   "claude-cowork": "Cowork",
   codex: "Codex",
   cursor: "Cursor",
+  "grok-bot": "Grok",
   opencode: "OpenCode",
   hermes: "Hermes",
   pi: "Pi",
@@ -666,6 +668,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "claude-cowork": "Claude Cowork",
   codex: "Codex",
   cursor: "Cursor",
+  "grok-bot": "Grok Bot",
   opencode: "OpenCode",
   hermes: "Hermes",
   pi: "Pi",
@@ -679,6 +682,7 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
   "claude-cowork": "bg-terminal-sienna",
   codex: "bg-terminal-purple",
   cursor: "bg-terminal-blue",
+  "grok-bot": "bg-terminal-yellow",
   opencode: "bg-terminal-green",
   hermes: "bg-terminal-red",
   pi: "bg-terminal-cyan",
@@ -696,6 +700,7 @@ const PROVIDER_FAMILY: Record<
   "claude-cowork": "sienna",
   codex: "purple",
   cursor: "blue",
+  "grok-bot": "yellow",
   opencode: "green",
   hermes: "red",
   pi: "cyan",

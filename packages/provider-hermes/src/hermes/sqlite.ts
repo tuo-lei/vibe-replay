@@ -56,6 +56,18 @@ export function hermesRootDir(): string {
 }
 
 /**
+ * Directory for a named Hermes profile (`<root>/profiles/<name>`).
+ * Returns undefined for empty or path-like names so Bot Chat project labels
+ * cannot be steered with `../` or separators in `profile_name`.
+ */
+export function hermesProfileDir(profileName: string | null | undefined): string | undefined {
+  const name = profileName?.trim();
+  if (!name || name === "." || name === "..") return undefined;
+  if (name.includes("/") || name.includes("\\") || name.includes("\0")) return undefined;
+  return join(hermesRootDir(), "profiles", name);
+}
+
+/**
  * All `state.db` paths that belong to this Hermes install: the default home
  * plus every named profile's DB (`<root>/profiles/<name>/state.db`). Missing
  * locations are skipped so partial installs still work.

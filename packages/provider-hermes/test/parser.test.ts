@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSessionFromDb } from "../src/hermes/parser.js";
+import { hermesProfileDir } from "../src/hermes/sqlite.js";
 import { mapHermesToolArgs, mapHermesToolName } from "../src/hermes/tool-mapping.js";
 import { buildHermesDb, toolCallsFor } from "./helpers/db.js";
 
@@ -77,6 +78,9 @@ describe("hermes parser", () => {
         id: "call_1",
         input: { command: "ls providers" },
         _result: "cursor codex",
+        _durationMs: 1000,
+        _durationSource: "timestamp",
+        _durationAnchor: "start",
       });
 
       expect(result.startTime).toBe("2027-01-15T08:00:01.000Z");
@@ -597,6 +601,189 @@ describe("hermes parser", () => {
       const profileDbPath = "/Users/test/.hermes/profiles/codex/state.db";
       const result = parseSessionFromDb(db, baseSession.id, undefined, profileDbPath);
       expect(result.dataSourceInfo?.sources).toEqual([profileDbPath]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("infers tool duration from assistant and tool timestamps for activity insights", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([
+            { id: "call_dur1", name: "terminal", args: { command: "sleep 1" } },
+          ]),
+          timestamp: 1_800_000_002,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_dur1",
+          content: "done",
+          timestamp: 1_800_000_003,
+        },
+        {
+          id: 3,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_dur2", name: "read_file", args: { path: "a.ts" } }]),
+          timestamp: 1_800_000_004,
+        },
+        {
+          id: 4,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "read_file",
+          toolCallId: "call_dur2",
+          content: "file content",
+          timestamp: 1_800_000_004.5,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      const tools = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      ) as Array<Extract<(typeof result.turns)[number]["blocks"][number], { type: "tool_use" }>>;
+      expect(tools).toHaveLength(2);
+      expect(tools[0]._durationMs).toBe(1000);
+      expect(tools[0]._durationSource).toBe("timestamp");
+      expect(tools[0]._durationAnchor).toBe("start");
+      expect(tools[1]._durationMs).toBe(500);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not assign tool duration when timestamps would imply an unrealistic gap", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_long", name: "terminal", args: { command: "x" } }]),
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_long",
+          content: "done",
+          timestamp: 1_800_000_001 + 60 * 60, // 1 hour later — should be treated as idle, not tool time
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      const tool = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      )[0] as Extract<(typeof result.turns)[number]["blocks"][number], { type: "tool_use" }>;
+      expect(tool._durationMs).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not assign tool duration for same-second or exactly 30-minute gaps", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_same", name: "terminal", args: { command: "x" } }]),
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_same",
+          content: "done",
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 3,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_cap", name: "read_file", args: { path: "a.ts" } }]),
+          timestamp: 1_800_000_010,
+        },
+        {
+          id: 4,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "read_file",
+          toolCallId: "call_cap",
+          content: "body",
+          timestamp: 1_800_000_010 + 30 * 60,
+        },
+        {
+          id: 5,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([
+            { id: "call_under", name: "search_files", args: { pattern: "a" } },
+          ]),
+          timestamp: 1_800_000_100,
+        },
+        {
+          id: 6,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "search_files",
+          toolCallId: "call_under",
+          content: "matches",
+          timestamp: 1_800_000_100 + 30 * 60 - 1,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      const tools = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      ) as Array<Extract<(typeof result.turns)[number]["blocks"][number], { type: "tool_use" }>>;
+      expect(tools).toHaveLength(3);
+      expect(tools[0]._durationMs).toBeUndefined();
+      expect(tools[1]._durationMs).toBeUndefined();
+      expect(tools[2]._durationMs).toBe((30 * 60 - 1) * 1000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses the Hermes profile directory as cwd for Bot Chat sessions", async () => {
+    const db = await buildHermesDb({
+      sessions: [{ ...baseSession, cwd: "", profileName: "ru" }],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "hello bot",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.cwd).toBe(hermesProfileDir("ru"));
     } finally {
       db.close();
     }

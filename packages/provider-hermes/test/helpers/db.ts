@@ -25,6 +25,7 @@ export interface HermesSessionSeed {
   gitBranch?: string | null;
   gitRepoRoot?: string | null;
   pinned?: number;
+  profileName?: string | null;
 }
 
 export interface HermesMessageSeed {
@@ -138,13 +139,13 @@ export async function buildHermesDb(seeds: {
          id, source, title, cwd, model, started_at, ended_at, last_activity_at,
          message_count, tool_call_count, input_tokens, output_tokens,
          cache_read_tokens, cache_write_tokens, reasoning_tokens,
-         git_branch, git_repo_root, pinned
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         git_branch, git_repo_root, pinned, profile_name
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         s.id,
         "cli",
         s.title ?? null,
-        s.cwd ?? "/Users/test/project",
+        s.cwd === undefined ? "/Users/test/project" : s.cwd,
         s.model ?? "deepseek-v4-flash-free",
         startedAt,
         s.endedAt ?? null,
@@ -159,6 +160,7 @@ export async function buildHermesDb(seeds: {
         s.gitBranch ?? null,
         s.gitRepoRoot ?? null,
         s.pinned ?? 0,
+        s.profileName ?? null,
       ],
     );
   }

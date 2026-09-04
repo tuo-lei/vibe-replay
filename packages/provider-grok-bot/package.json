@@ -1,0 +1,44 @@
+{
+  "name": "@vibe-replay/provider-grok-bot",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/grok-bot/index.ts",
+      "import": "./src/grok-bot/index.ts"
+    },
+    "./config": {
+      "types": "./src/grok-bot/config.ts",
+      "import": "./src/grok-bot/config.ts"
+    },
+    "./discover": {
+      "types": "./src/grok-bot/discover.ts",
+      "import": "./src/grok-bot/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/grok-bot/parser.ts",
+      "import": "./src/grok-bot/parser.ts"
+    },
+    "./tool-mapping": {
+      "types": "./src/grok-bot/tool-mapping.ts",
+      "import": "./src/grok-bot/tool-mapping.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,8 +1,8 @@
 # vibe-replay
 
-> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
+> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
 
-vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
+vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`, Grok Bot `/home/box/agent-data/agent-transcripts` or `~/.grok-bot/agent-transcripts`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
 
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
@@ -11,7 +11,7 @@ License: MIT
 ## Core pages
 
 - [Homepage](https://vibe-replay.com/): Product overview, install instructions, feature list.
-- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi).
+- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot).
 - [Insights dashboard](https://vibe-replay.com/insights/): Personal AI coding analytics — sessions, prompts, tool calls, costs, streaks across machines and providers.
 - [Blog](https://vibe-replay.com/blog/): Deep-dives on AI-agent local storage, coding workflows, and replayable sessions.
 
@@ -37,9 +37,11 @@ License: MIT
 - OpenCode (SQLite sessions, tools, reasoning, and compaction)
 - Hermes (SQLite sessions, tools, reasoning, and compaction)
 - Pi (JSONL tree sessions, branching, compaction summaries)
+- Grok Bot (cloud-box JSONL, `send_message` replies, group-chat speaker split)
 
 ## Blog posts
 
+- [What Does Grok Bot Store Locally? agent-transcripts JSONL Explained](https://vibe-replay.com/blog/grok-bot-local-storage/): How Grok Bot stores one JSONL per agent on the cloud box, promotes `send_message` to visible replies, and splits group wakes by speaker.
 - [Where Does Cursor SDK Store Agents? sdk-agent-store Explained](https://vibe-replay.com/blog/cursor-sdk-deep-dive/): How Cursor SDK's SQLite run catalog and JSONL transcript join into one replay.
 - [What Does OpenCode Store Locally? opencode.db Explained](https://vibe-replay.com/blog/opencode-local-storage/): How OpenCode's SQLite session, message, and part tables encode prompts, reasoning, tools, and compaction.
 - [What Does Hermes Store Locally? state.db + Profiles](https://vibe-replay.com/blog/hermes-local-storage/): How Hermes stores profile-aware sessions, usage, tools, reasoning, costs, and compaction markers in SQLite.

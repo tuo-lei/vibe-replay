@@ -1,5 +1,6 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isHermesSessionId } from "../src/hermes/sqlite.js";
+import { hermesProfileDir, hermesRootDir, isHermesSessionId } from "../src/hermes/sqlite.js";
 
 describe("isHermesSessionId", () => {
   it("recognizes timestamp-prefixed session ids", () => {
@@ -15,5 +16,21 @@ describe("isHermesSessionId", () => {
     expect(isHermesSessionId("ses_111")).toBe(false);
     expect(isHermesSessionId("/some/path.jsonl")).toBe(false);
     expect(isHermesSessionId("")).toBe(false);
+  });
+});
+
+describe("hermesProfileDir", () => {
+  it("joins a simple profile name onto the Hermes root", () => {
+    expect(hermesProfileDir("ru")).toBe(join(hermesRootDir(), "profiles", "ru"));
+  });
+
+  it("rejects empty and path-like profile names", () => {
+    expect(hermesProfileDir("")).toBeUndefined();
+    expect(hermesProfileDir("   ")).toBeUndefined();
+    expect(hermesProfileDir(".")).toBeUndefined();
+    expect(hermesProfileDir("..")).toBeUndefined();
+    expect(hermesProfileDir("../etc")).toBeUndefined();
+    expect(hermesProfileDir("foo/bar")).toBeUndefined();
+    expect(hermesProfileDir("foo\\bar")).toBeUndefined();
   });
 });

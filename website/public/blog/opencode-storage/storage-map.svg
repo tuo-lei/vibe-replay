@@ -18,9 +18,9 @@
   <rect x="64" y="340" width="310" height="186" rx="16" fill="#111923" stroke="#3fb950" stroke-opacity=".55"/>
   <text x="94" y="382" fill="#3fb950" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="20" font-weight="700">session</text>
   <text x="94" y="421" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">id · slug · title</text>
-  <text x="94" y="448" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">directory · model</text>
-  <text x="94" y="475" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">timestamps · cost</text>
-  <text x="94" y="505" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">one row per conversation</text>
+  <text x="94" y="448" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">directory · model JSON</text>
+  <text x="94" y="475" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">timestamps · cost · parent_id</text>
+  <text x="94" y="505" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">child rows are subagent sessions</text>
 
   <path d="M374 432H444" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
   <rect x="444" y="340" width="310" height="186" rx="16" fill="#111923" stroke="#79b8ff" stroke-opacity=".55"/>
@@ -34,11 +34,11 @@
   <rect x="824" y="340" width="312" height="186" rx="16" fill="#111923" stroke="#22d3ee" stroke-opacity=".55"/>
   <text x="854" y="382" fill="#22d3ee" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="20" font-weight="700">part</text>
   <text x="854" y="421" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">text · reasoning</text>
-  <text x="854" y="448" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">tool · patch · file</text>
+  <text x="854" y="448" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">tool · patch · step markers</text>
   <text x="854" y="475" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">result · compaction</text>
   <text x="854" y="505" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">the replay’s actual content</text>
 
   <rect x="64" y="590" width="1072" height="1" fill="#30363d"/>
-  <text x="64" y="625" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">Query shape: session → message → part · compaction parts are not human prompts</text>
+  <text x="64" y="625" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">Query shape: session → message → part · hide parent_id children · compaction is not a prompt</text>
   <text x="64" y="660" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">Live databases may also have newer frames in opencode.db-wal</text>
 </svg>

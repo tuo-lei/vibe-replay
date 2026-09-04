@@ -617,6 +617,16 @@ describe("dashboard prompt and title helpers", () => {
       "Inspect the Gateway Lens capture flow",
     );
   });
+
+  it("skips Cursor placeholder prompt previews when choosing a title", () => {
+    const source = makeSource({
+      title: "New Agent",
+      prompts: ["New Agent", "Inspect the Gateway Lens capture flow"],
+      firstPrompt: "Fallback prompt",
+    });
+
+    expect(sourceDisplayTitle(source)).toBe("Inspect the Gateway Lens capture flow");
+  });
 });
 
 describe("formatDataSourceLabel", () => {
@@ -693,6 +703,14 @@ describe("provider display helpers", () => {
     expect(providerBadgeClass("codex")).toContain("terminal-purple");
     expect(providerBarClass("codex")).toBe("bg-terminal-purple");
     expect(providerFamily("codex")).toBe("purple");
+  });
+
+  it("labels Grok Bot as a first-class provider", () => {
+    expect(providerBadgeLabel("grok-bot")).toBe("Grok");
+    expect(providerDisplayName("grok-bot")).toBe("Grok Bot");
+    expect(providerBadgeClass("grok-bot")).toContain("terminal-yellow");
+    expect(providerBarClass("grok-bot")).toBe("bg-terminal-yellow");
+    expect(providerFamily("grok-bot")).toBe("yellow");
   });
 
   it("labels Pi as a first-class provider", () => {

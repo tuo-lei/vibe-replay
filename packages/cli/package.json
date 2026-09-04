@@ -59,6 +59,7 @@
     "@vibe-replay/provider-contract": "workspace:*",
     "@vibe-replay/provider-core": "workspace:*",
     "@vibe-replay/provider-cursor": "workspace:*",
+    "@vibe-replay/provider-grok-bot": "workspace:*",
     "@vibe-replay/provider-hermes": "workspace:*",
     "@vibe-replay/provider-opencode": "workspace:*",
     "@vibe-replay/provider-pi": "workspace:*",

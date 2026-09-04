@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"[Group chat: \"Vibe Replay launch\" - with Vibe Replay Eng]\nParticipants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)\nNew messages in the room (oldest first):\nUser: Let's ship the Grok Bot replay provider this week.\n\nIt's your turn, Vibe Replay GTM. The room is wrapping up after this round."}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"send_message","input":{"text":{"content":"On it — I'll draft the launch note."}}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"send_message","result":{"success":{"timestamp":"1788485600000","messageId":"t0s0"}}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"[Group chat: \"Vibe Replay launch\" - with Vibe Replay Eng]\nParticipants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)\nNo new messages in the room since your last turn.\nIt's your turn, Vibe Replay GTM."}]}}

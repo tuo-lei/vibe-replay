@@ -95,6 +95,9 @@ function providerNotes(provider: string): string[] | undefined {
       "Usage is read from the active JSONL branch; zero cache values mean none were recorded.",
     ];
   }
+  if (provider === "grok-bot") {
+    return ["Grok Bot JSONL does not record token usage or thinking blobs in v1."];
+  }
   if (provider === "claude-code" || provider === "claude-desktop") {
     return [
       "Usage is deduplicated by provider message ID; cache read/write fields are provider-reported.",
