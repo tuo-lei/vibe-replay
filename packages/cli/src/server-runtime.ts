@@ -92,7 +92,7 @@ import {
 import type { SessionInfo } from "./types.js";
 import { localDayKey, normalizeTitle } from "./utils.js";
 
-import { isSameOriginSettingsRequest } from "./server-origin.js";
+import { isSameOriginSettingsRequest, registerSameOriginMutationGuard } from "./server-origin.js";
 
 interface SourcesEnrichmentStatus {
   running: boolean;
@@ -977,6 +977,8 @@ export async function startServer(
   }
 
   const app = new Hono();
+
+  registerSameOriginMutationGuard(app);
 
   // Dashboard APIs are mutable scan snapshots. Prevent browser/proxy caching
   // from serving an earlier aggregate after a background scan completes.

@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, Hono } from "hono";
 
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -36,4 +36,24 @@ export function isSameOriginSettingsRequest(c: Context): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Protect every mutating local API route from cross-site requests.
+ *
+ * The dashboard server is intentionally unauthenticated and listens on
+ * loopback, so a malicious web page could otherwise issue CSRF requests to a
+ * known dashboard port and mutate or delete local replay data. Read-only GETs
+ * remain available to support the dashboard's normal loading flow.
+ */
+export function registerSameOriginMutationGuard(app: Hono): void {
+  app.use("/api/*", async (c, next) => {
+    const method = c.req.method;
+    const mutating =
+      method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+    if (mutating && !isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "API requests must be same-origin" }, 403);
+    }
+    return next();
+  });
 }
