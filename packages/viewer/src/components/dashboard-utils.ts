@@ -270,6 +270,16 @@ export function normalizeTitleText(value?: string): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
 }
 
+const CURSOR_PLACEHOLDER_TITLES = new Set(["new agent", "new chat", "untitled"]);
+
+function sessionTitleValue(provider: string, value?: string): string {
+  const normalized = normalizeTitleText(cleanPrompt(value || ""));
+  if (provider === "cursor" && CURSOR_PLACEHOLDER_TITLES.has(normalized.toLowerCase())) {
+    return "";
+  }
+  return normalized;
+}
+
 /** Detect system-generated user messages that aren't real human prompts */
 function isSystemGeneratedMessage(text: string): boolean {
   return (
@@ -390,9 +400,9 @@ export function shortCoworkSpaceId(spaceId: string): string {
 }
 
 function sourcePromptTitle(
-  s: Pick<SourceSession, "slug" | "title" | "prompts" | "firstPrompt">,
+  s: Pick<SourceSession, "provider" | "slug" | "title" | "prompts" | "firstPrompt">,
 ): string {
-  const explicitTitle = s.title ? normalizeTitleText(cleanPrompt(s.title)) : "";
+  const explicitTitle = sessionTitleValue(s.provider, s.title);
   if (explicitTitle) return explicitTitle;
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
@@ -405,7 +415,7 @@ function sourcePromptTitle(
 export function sourceSuggestedTitle(s: SourceSession): string {
   const promptTitle = sourcePromptTitle(s);
   if (s.replay?.title) {
-    const replayTitle = normalizeTitleText(s.replay.title);
+    const replayTitle = sessionTitleValue(s.provider, s.replay.title);
     if (replayTitle) return replayTitle;
   }
   return promptTitle;
@@ -417,10 +427,10 @@ export function sourceDisplayTitle(
     title?: string;
   } | null,
 ): string {
-  const sourceTitle = normalizeTitleText(cleanPrompt(s.title || ""));
+  const sourceTitle = sessionTitleValue(s.provider, s.title);
   const promptTitle = sourcePromptTitle(s);
   const replayTitle = normalizeTitleText(s.replay?.title);
-  const scanTitle = normalizeTitleText(cleanPrompt(scanData?.title || ""));
+  const scanTitle = sessionTitleValue(s.provider, scanData?.title);
   if (sourceTitle) return sourceTitle;
   if (scanTitle) return scanTitle;
   if (promptTitle && promptTitle !== s.slug) return promptTitle;
@@ -442,6 +452,47 @@ export function replaySuggestedTitle(s: SessionSummary): string {
 
 export type NavigationValue = string | readonly string[] | null;
 
+function isDashboardUrl(url: URL): boolean {
+  return (
+    url.searchParams.get("view") === "dashboard" ||
+    (!url.searchParams.has("session") &&
+      !url.searchParams.has("gist") &&
+      !url.searchParams.has("url"))
+  );
+}
+
+/** Persist navigable dashboard state before leaving it for a resource URL. */
+export function persistDashboardState(url = new URL(window.location.href)): void {
+  if (!isDashboardUrl(url)) return;
+  const dashboardState: Record<string, string | string[]> = {};
+  DASHBOARD_PARAMS.forEach((p) => {
+    if (DASHBOARD_TRANSIENT_PARAMS.has(p)) return;
+    const values = url.searchParams.getAll(p);
+    if (values.length === 1) dashboardState[p] = values[0]!;
+    else if (values.length > 1) dashboardState[p] = values;
+  });
+  if (Object.keys(dashboardState).length > 0) {
+    safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
+  } else {
+    safeStorageRemove(sessionStorage, "vibe_dashboard_state");
+  }
+}
+
+/** Navigate to a same-origin permalink while preserving dashboard return state. */
+export function navigateToPermalink(permalink: string): boolean {
+  try {
+    const current = new URL(window.location.href);
+    const target = new URL(permalink, current.href);
+    if (target.origin !== current.origin) return false;
+    if (target.searchParams.has("session")) persistDashboardState(current);
+    window.history.pushState({}, "", target.href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function navigateTo(
   params: Record<string, NavigationValue>,
   options: { replace?: boolean; notify?: boolean } = {},
@@ -449,24 +500,7 @@ export function navigateTo(
   const url = new URL(window.location.href);
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
-  const isCurrentlyDashboard =
-    url.searchParams.get("view") === "dashboard" ||
-    (!url.searchParams.has("session") &&
-      !url.searchParams.has("gist") &&
-      !url.searchParams.has("url"));
-  if (isCurrentlyDashboard) {
-    const dashboardState: Record<string, string | string[]> = {};
-    DASHBOARD_PARAMS.forEach((p) => {
-      const values = url.searchParams.getAll(p);
-      if (values.length === 1) dashboardState[p] = values[0]!;
-      else if (values.length > 1) dashboardState[p] = values;
-    });
-    if (Object.keys(dashboardState).length > 0) {
-      safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
-    } else {
-      safeStorageRemove(sessionStorage, "vibe_dashboard_state");
-    }
-  }
+  persistDashboardState(url);
 
   // 2. If we are entering a session, remove dashboard params from URL
   if (params.session) {
@@ -478,6 +512,9 @@ export function navigateTo(
     // Also remove 'view' if we are going to a session
     if (params.view === undefined) {
       url.searchParams.delete("view");
+    }
+    if (params.drawer === undefined) {
+      url.searchParams.delete("drawer");
     }
   }
 
@@ -509,6 +546,7 @@ export function navigateTo(
     // Clean up viewer params when going back to dashboard
     url.searchParams.delete("v");
     url.searchParams.delete("s");
+    url.searchParams.delete("drawer");
   }
 
   for (const [key, value] of Object.entries(params)) {
@@ -537,7 +575,13 @@ export function navigateTo(
 export const DASHBOARD_PARAMS = [
   "tab",
   "settingsSection",
+  "selected",
+  "selectedProvider",
+  "selectedSessionId",
+  "selectedTargetId",
   "project",
+  "projectView",
+  "insightsSection",
   "targetId",
   "q",
   "archived",
@@ -552,6 +596,18 @@ export const DASHBOARD_PARAMS = [
   "insightsRange",
   "replay",
 ] as const;
+
+/**
+ * Selection links are stable permalinks while visible, but must not be
+ * restored after leaving the dashboard via sessionStorage. Otherwise a
+ * harmless dashboard navigation could reopen an old source-session modal.
+ */
+const DASHBOARD_TRANSIENT_PARAMS = new Set([
+  "selected",
+  "selectedProvider",
+  "selectedSessionId",
+  "selectedTargetId",
+]);
 
 /**
  * Navigate to live mode for a running source session.

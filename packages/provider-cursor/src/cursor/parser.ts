@@ -11,6 +11,7 @@ import {
 import type { DataSourceInfo, ProviderParseResult } from "@vibe-replay/provider-contract";
 import type { Scene, SubAgent, TurnStat } from "@vibe-replay/types";
 import {
+  isCursorPlaceholderTitle,
   sanitizeCursorAssistantText,
   extractCursorTimestamp,
   sanitizeCursorReasoningText,
@@ -128,6 +129,12 @@ async function parseCursorSessionWithDependencies(
           jsonlThinking.turns,
         );
         mergeJsonlTimingIntoCursorResult(sqliteResult, jsonlThinking);
+        if (isCursorPlaceholderTitle(sqliteResult.title)) {
+          const fallbackTitle = sessionInfo?.firstPrompt?.trim();
+          if (fallbackTitle && !isCursorPlaceholderTitle(fallbackTitle)) {
+            sqliteResult.title = fallbackTitle;
+          }
+        }
         const thinkingAfter = countThinkingBlocks(sqliteResult.turns);
         const userImagesAfter = countUserImages(sqliteResult.turns);
         const timestampsAfter = countTurnTimestamps(sqliteResult.turns);

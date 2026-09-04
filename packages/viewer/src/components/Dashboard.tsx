@@ -1918,6 +1918,7 @@ function FacetSection({
               <button
                 key={value}
                 aria-pressed={active}
+                aria-label={`${labelFor(value)} ${count}`}
                 onClick={() => onToggle(value)}
                 title={`${titleFor?.(value) || labelFor(value)} · ${count}`}
                 className={`max-w-full inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-all duration-200 ease-material ${
@@ -1941,6 +1942,7 @@ function FacetSection({
             <button
               key={value}
               aria-pressed={active}
+              aria-label={`${labelFor(value)} ${count}`}
               onClick={() => onToggle(value)}
               title={titleFor?.(value) || labelFor(value)}
               className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material flex items-center justify-between gap-2 group ${
@@ -2279,7 +2281,8 @@ function SessionsPanel() {
   //   2. If SessionsPanel is already mounted (user on Sessions tab clicked
   //      from a still-rendered Projects view, or back-button), the URL push
   //      doesn't trigger a re-mount, so listen for the event live.
-  // Strip `?selected` afterward so a refresh doesn't keep re-opening it.
+  // Keep `?selected` while the popup is open so source sessions have a stable
+  // deep link. The close handler removes it explicitly.
   useEffect(() => {
     const consumeUrl = () => {
       const params = new URLSearchParams(window.location.search);
@@ -2299,12 +2302,6 @@ function SessionsPanel() {
             })
           : null,
       );
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      url.searchParams.delete("selectedProvider");
-      url.searchParams.delete("selectedSessionId");
-      url.searchParams.delete("selectedTargetId");
-      window.history.replaceState(null, "", url);
     };
     consumeUrl();
     const handler = (e: Event) => {
@@ -2329,15 +2326,17 @@ function SessionsPanel() {
             })
           : null,
       );
-      // Dashboard's root handler also writes `?selected=slug` for the
-      // cold-mount path. Strip it here so a tab round-trip after dismissing
-      // the popup doesn't reopen it on remount.
-      const url = new URL(window.location.href);
-      url.searchParams.delete("selected");
-      url.searchParams.delete("selectedProvider");
-      url.searchParams.delete("selectedSessionId");
-      url.searchParams.delete("selectedTargetId");
-      window.history.replaceState(null, "", url);
+      if (new URLSearchParams(window.location.search).get("tab") === "sessions") {
+        navigateTo(
+          {
+            selected: slug,
+            selectedProvider: detail.provider || null,
+            selectedSessionId: detail.sessionId || null,
+            selectedTargetId: detail.location?.kind === "ssh" ? detail.location.id : null,
+          },
+          { replace: true, notify: false },
+        );
+      }
     };
     window.addEventListener("vibe-open-session", handler);
     return () => window.removeEventListener("vibe-open-session", handler);
@@ -2376,6 +2375,15 @@ function SessionsPanel() {
   const selectSession = (session: SourceSession) => {
     setSelectedSlug(session.slug);
     setSelectedSessionKey(sessionIdentityKey(session));
+    navigateTo(
+      {
+        selected: session.slug,
+        selectedProvider: session.provider,
+        selectedSessionId: session.sessionId || null,
+        selectedTargetId: session.location?.kind === "ssh" ? session.location.id : null,
+      },
+      { notify: false },
+    );
   };
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
@@ -4252,6 +4260,15 @@ function SessionsPanel() {
             onClose={() => {
               setSelectedSlug(null);
               setSelectedSessionKey(null);
+              navigateTo(
+                {
+                  selected: null,
+                  selectedProvider: null,
+                  selectedSessionId: null,
+                  selectedTargetId: null,
+                },
+                { replace: true, notify: false },
+              );
             }}
             onGenerate={submitGenerate}
             onViewReplay={(slug, location) =>
@@ -5646,6 +5663,8 @@ export default function Dashboard({
     navigateTo({
       tab: id,
       settingsSection: null,
+      projectView: null,
+      insightsSection: null,
       project: null,
       q: null,
       archived: null,

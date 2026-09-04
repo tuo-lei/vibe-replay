@@ -1,7 +1,8 @@
 ---
-title: "Where Does Cursor's SDK Actually Store Your Agents? A Deep Dive into sdk-agent-store"
-excerpt: "The Cursor SDK lets you run coding agents programmatically from TypeScript. The result is a brand-new local storage layer — separate from the IDE chat database, with its own schema, its own event stream, and its own tool-result format. Here's what's inside."
+title: "Where Does Cursor SDK Store Agents? sdk-agent-store Explained"
+excerpt: "Cursor SDK agents use a separate sdk-agent-store: SQLite for runs and results, JSONL for prompts. Here's how to join the two safely."
 date: 2026-05-22
+updated: 2026-09-03
 readTime: "8 min read"
 ---
 
@@ -13,7 +14,7 @@ find ~/.cursor/projects -name index.db -path '*/sdk-agent-store/*' 2>/dev/null
 
 Anything that prints is a Cursor session you didn't create from the IDE. It came from `@cursor/sdk` — Cursor's TypeScript SDK for running coding agents programmatically — and it lives in a completely different storage layer than your regular Cursor chats. Different folder, different schema, different event stream. The IDE's session picker doesn't list these. None of the usual [`~/.cursor/chats/` and `state.vscdb` advice](/blog/cursor-local-storage/) applies.
 
-I learned this the hard way while adding SDK support to [vibe-replay](https://github.com/tuo-lei/vibe-replay) in v0.2.1. Below is the map I wish I had on day one.
+That separation matters when a replay tool discovers sessions automatically. Below is the storage map to keep in mind before you inspect an SDK workspace.
 
 ---
 
@@ -48,7 +49,7 @@ On macOS, every SDK agent lands at:
 A few things worth flagging right away:
 
 - **`<workspace-slug>`** is the same folder the existing Cursor provider already walks for IDE transcripts. The SDK is reusing the per-project root, just in a new `sdk-agent-store/` subdirectory.
-- **`<projectHash>`** is an opaque hex-looking identifier — I haven't reverse-engineered exactly what's being hashed, but treat it as "one stable directory per project + how you opened it."
+- **`<projectHash>`** is an opaque hex-looking identifier — the exact hash input is not documented, so treat it as "one stable directory per project + how you opened it."
 - **`index.db`** is the per-project catalog. It is *not* the per-agent blob store (more on that below).
 
 Each project hash gets its own `index.db`, plus a sibling per-agent store:
@@ -63,7 +64,7 @@ Each project hash gets its own `index.db`, plus a sibling per-agent store:
 
 The interesting bit is that the agent ID directory is **hashed**. If you `ls agents/` you'll see a bunch of 64-character hex names with no obvious correspondence to the agent IDs in `index.db`. To find the store for a given agent, you have to hash the agent ID yourself.
 
-For replay purposes I never had to crack open `store.db` — the catalog already contains everything that ends up rendered in the UI. But it's good to know the blob store is there if you ever need to recover raw payloads.
+For replay purposes, the catalog may contain everything needed for the rendered session, so a reader can avoid opening `store.db`. The blob store still matters if raw payload recovery is required.
 
 ---
 
@@ -83,14 +84,14 @@ What you find on inspection:
 
 | Column | Meaning |
 |---|---|
-| `agent_id` | UUID-ish identifier, prefixed `agent-` in our experience |
+| `agent_id` | UUID-ish identifier, commonly prefixed `agent-` |
 | `workspace_ref` | Path or ref back to the workspace |
 | `status` | e.g. `IDLE`, `RUNNING`, `COMPLETED` |
 | `name` | Optional human label for the agent |
 | `created_at` / `updated_at` | ISO timestamps |
 | `latest_checkpoint_ref_json` | Pointer into the blob store |
 
-We don't read `latest_checkpoint_ref_json` in vibe-replay — it's a pointer into the per-agent `store.db` we never need to open. Mentioning it for completeness; if you ever want raw blob recovery, this is the column to start from.
+vibe-replay does not need to read `latest_checkpoint_ref_json` — it points into the per-agent `store.db`. If raw blob recovery is required, this is the column to investigate first.
 
 The `agent-` prefix on `agent_id` is load-bearing for tooling — it's the only reliable way to tell an SDK agent apart from a plain IDE chat session (which is a bare UUID).
 
@@ -108,7 +109,7 @@ One row per turn. This is where the per-turn metadata sits:
 | `started_at` / `finished_at` | ISO timestamps |
 | `result` | Final assistant text for the run (if recorded) |
 
-A subtle but useful fact: **`model` is per run, not per agent.** If you switch models mid-conversation, the SDK records each turn's actual model — which is great for cost attribution, and matches what we already do for Claude Code's per-turn model field.
+A subtle but useful fact: **`model` is per run, not per agent.** If you switch models mid-conversation, the SDK records each turn's actual model — useful for cost attribution and consistent with per-turn model data from other providers.
 
 ### `run_events`
 
@@ -118,10 +119,10 @@ This is the firehose. Every streamed SDK message becomes a row:
 |---|---|
 | `run_id` | FK back to `runs.run_id` |
 | `seq` | Monotonic sequence within a run |
-| `event_type` | Always `run_stream_event` in our reads |
+| `event_type` | Commonly `run_stream_event` in observed stores |
 | `payload_json` | The actual `sdk_message` envelope |
 
-In practice we only `SELECT run_id, seq, payload_json` — `event_type` is on the schema but we never branch on it, because every row in this table has been `run_stream_event` so far. If Cursor introduces other event types later, that's the column to start filtering on.
+In practice a reader can start with `SELECT run_id, seq, payload_json` — `event_type` is on the schema, even though current rows may all be `run_stream_event`. If Cursor introduces other event types, that is the column to filter on.
 
 `payload_json` is the JSON payload from the SDK's `agent.events()` stream. Each row's `message.type` tells you what kind of event it is — assistant text deltas, tool calls, tool results, thinking blocks, and so on.
 
@@ -170,7 +171,7 @@ A few things to notice:
 2. **`result` is a `{ status, value }` envelope.** Not raw text. For Bash-shaped tools `value` carries `stdout`, `stderr`, `exitCode`. For file reads `value.content`. For edits `value.diffString`.
 3. **`args` may grow across updates.** Sometimes the early "running" event has a thin args object and the args fill in by the next update. The right strategy is to overwrite `args` on *every* update where the new payload is non-empty — not just the terminal event. By the time you reach `completed`, you have the fullest known args object.
 
-That last one bit me. My first pass just used the args from the first `running` event and missed late-arriving fields on long-running tools. Switching to "non-empty update wins" fixed it.
+An initial parser that only uses the first `running` event can miss late-arriving fields on long-running tools. The safer rule is "non-empty update wins."
 
 ---
 
@@ -180,7 +181,7 @@ Here's the gotcha that surprised me most.
 
 **User prompts don't appear in `run_events`.**
 
-I expected the SDK to log everything in one place, but the event stream is purely about agent output: thinking, tool calls, tool results, assistant text. The user-facing prompts that *triggered* those runs aren't in there.
+It is tempting to expect the SDK to log everything in one place, but the event stream is primarily agent output: thinking, tool calls, tool results, and assistant text. The user-facing prompts that *triggered* those runs are not necessarily in the event rows.
 
 So where do they live?
 
@@ -216,7 +217,7 @@ sessionId starts with "agent-"  →  SDK session
 sessionId is a bare UUID         →  IDE chat session
 ```
 
-That's literally the check we use in `vibe-replay`. It avoids paying SQLite cost on every IDE session probe (and avoids the messy job of joining UUIDs across the IDE's three storage layers).
+That is the cheap check used by `vibe-replay`. It avoids paying the SQLite cost on every IDE session probe and avoids joining UUIDs across the IDE's multiple storage layers.
 
 A more robust check, if you don't trust the prefix on future versions:
 
@@ -229,7 +230,7 @@ For now the prefix is good enough.
 
 ## Tool name and arg quirks
 
-The SDK uses different tool names than the IDE chat. Some examples we hit:
+The SDK uses different tool names than the IDE chat. Examples include:
 
 - `shell.execute` instead of `Bash`
 - `file.read` instead of `Read`
@@ -237,7 +238,7 @@ The SDK uses different tool names than the IDE chat. Some examples we hit:
 
 For replay we map them back to canonical tool names so the UI looks consistent across providers. The mapping is shared with the IDE Cursor reader (`mapCursorToolName`) so adding a new tool only takes one edit.
 
-The `args` shapes are usually close to the canonical Cursor names, but the **result** shapes are where the SDK diverges most. The biggest one: for `file.edit`, the SDK gives you `value.diffString` (a unified diff), not the `oldString` / `newString` pair the IDE stores. Downstream code that wants to render before/after has to parse the diff back out — or, like we do, wrap the SDK result in the `diff.chunks[].diffString` envelope the existing IDE inference helpers already understand.
+The `args` shapes are usually close to the canonical Cursor names, but the **result** shapes are where the SDK diverges most. For `file.edit`, the SDK gives you `value.diffString` (a unified diff), not the `oldString` / `newString` pair the IDE stores. Downstream code that wants to render before/after has to parse the diff back out — or wrap the SDK result in the `diff.chunks[].diffString` envelope used by the existing IDE inference helpers.
 
 ---
 
@@ -245,7 +246,7 @@ The `args` shapes are usually close to the canonical Cursor names, but the **res
 
 For completeness: each agent has its own `store.db` under `agents/<sha256(agentId)>/`. This is the *per-agent* blob store, distinct from the *project-level* `index.db`.
 
-We haven't found anything in there that isn't already reachable from `index.db` + the JSONL transcript. So `sdk-reader.ts` never opens it.
+The catalog and JSONL transcript may already expose everything needed for replay, so `sdk-reader.ts` does not open the per-agent store today.
 
 If Cursor changes that — e.g. starts writing thinking blocks or images there instead of the JSONL — we'd add a second pass. For now, one less thing to merge.
 
@@ -295,7 +296,7 @@ If Cursor's SDK keeps growing, this is probably going to become the *cleaner* of
 
 ## What `vibe-replay` does with all this
 
-As of v0.2.1, [vibe-replay](https://github.com/tuo-lei/vibe-replay) automatically detects SDK sessions (the `agent-` prefix trick), opens `index.db` read-only, and merges its run/event data onto the JSONL transcript so:
+Current [vibe-replay](https://github.com/tuo-lei/vibe-replay) builds automatically detect SDK sessions (the `agent-` prefix trick), open `index.db` read-only, and merge run/event data onto the JSONL transcript so:
 
 - tool calls show real outputs (stdout, file content, diffs) instead of "result pending"
 - each assistant turn carries the actual model used
@@ -304,6 +305,8 @@ As of v0.2.1, [vibe-replay](https://github.com/tuo-lei/vibe-replay) automaticall
 If the `find` command at the top of this post printed anything, those agents are already replayable — the next `npx vibe-replay` run will pick them up alongside your regular Cursor and Claude Code sessions, same picker, same dashboard, same HTML output.
 
 If it printed nothing, you haven't run an SDK agent on this machine yet. Spin one up, then come back and check.
+
+The JSONL transcript and SDK database can contain prompts, workspace references, command arguments, tool results, and file content. Keep the read path read-only and review a replay before sharing it.
 
 ---
 

@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](./LICENSE)
 
-Turn Claude, Cursor, Codex, OpenCode, Hermes, and Pi sessions into shareable, interactive replays.
+Turn Claude, Cursor, Codex, OpenCode, Hermes, and Pi sessions into shareable, interactive replays — then analyze them with local insights, AI Studio, and Ask Replay.
 
 ### The problem
 
@@ -12,7 +12,7 @@ AI agents write code in long, complex sessions — dozens of tool calls, hundred
 
 ### The fix
 
-One command. One self-contained HTML file. Every prompt, every thought, every tool call — animated and interactive.
+One command. One self-contained HTML file. Every prompt, every thought, every tool call — animated, searchable, and ready to share.
 
 ```bash
 npx vibe-replay
@@ -99,6 +99,15 @@ GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage
   <img src="docs/screenshots/personal-insights.png" alt="Personal insights — GitHub-style heatmap, streaks, session stats, and cost tracking" width="800" />
 </p>
 
+### AI Studio and Ask Replay
+
+Go beyond playback without sending your session history to a hosted service. **AI Studio** uses the
+embedded Pi runtime to analyze a replay, translate it, or adjust its tone with the provider you
+choose — including OpenAI-compatible endpoints and local gateways. **Ask Replay** is a read-only
+assistant for searching sessions, explaining usage and Insights, inspecting scenes and overlays, and
+jumping to stable dashboard or replay links. It never edits files, publishes, or mutates data on its
+own; any requested action is handed back to you for review.
+
 ## Claude Code Plugin
 
 vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/docs/en/plugins). Once installed, your agent learns how to generate replays autonomously — it can find the current session, produce GitHub-ready artifacts, and embed them in PRs, all without you running any CLI commands.
@@ -158,16 +167,18 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 
 ## Features
 
-- **Zero config** — one command, no setup, no account. Works instantly with existing sessions
+- **Local-first** — one command and no account required for local replays; sign in only when you want cloud publishing or synced insights
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
 - **Claude, Cursor, Codex, OpenCode, Hermes, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
 - **Remote SSH sources** — optionally combine remote Codex, Claude Code, and Pi JSONL sessions with local sessions using standard OpenSSH configuration
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
+- **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including OpenAI-compatible local or remote endpoints
+- **Ask Replay** — ask read-only questions about sessions, scenes, annotations, overlays, usage, coverage, projects, and Insights; get stable permalinks instead of opaque chat answers
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
-- **Live mode** — `vibe-replay live` streams a running Claude Code or Codex session into the viewer, pinned to the latest turn as it lands on disk
+- **Live mode** — `vibe-replay live` follows a running local session as new turns land on disk; SSH-backed live mode is intentionally disabled
 
 ## Supported Providers
 
@@ -203,10 +214,12 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   headless CLI is required. You can also add an OpenAI-compatible proxy (including LiteLLM) in
   the editor; AI Studio discovers models from its `/models` endpoint and sends Chat Completions
   requests to the configured local or remote API root.
-- **Ask Replay** — ask read-only questions about local sessions, replay scenes, usage, and
-  insights from the Dashboard or Editor. Answers include citations and explicit navigation actions;
-  SSH-backed data stays hidden unless you enable it in Settings. The setting is browser-local and
-  can be changed at any time.
+- **Ask Replay** — ask read-only questions about local sessions, replay scenes, comments, AI Studio
+  overlays, usage, coverage, projects, and Insights ranges from the Dashboard or Editor. It mirrors
+  the explorer's provider/repository/tool/MCP/skill/compaction filters and returns stable permalinks
+  for resources and user-reviewed mutation handoffs; it never performs a mutation itself. SSH-backed
+  data stays hidden unless you enable it in Settings. The setting is browser-local and can be changed
+  at any time.
 - **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
@@ -260,7 +273,7 @@ VIBE_VIEWER_PORT=5175 VIBE_WEBSITE_PORT=4322 pnpm dev:website
 The requested ports must be free and different within the same launcher. If
 only one port is overridden, automatic selection skips that port as well.
 
-CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and
+CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 7 and
 requires Node.js >= 22.12.0. Its scripts use a cross-platform Node launcher
 that searches standard nvm-managed installations when needed. If a global
 package-manager shim selects an older Node for child commands, verify

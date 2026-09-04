@@ -1,7 +1,8 @@
 ---
-title: "Claude Code's Source Leaked. We Read It and Shipped 5 Features in a Day."
-excerpt: "513,000 lines of TypeScript, extracted from a source map left in the npm package. We found undocumented JSONL fields, hidden metadata, and MCP tool naming conventions — then turned them into product improvements."
+title: "What Claude Code's Source Map Revealed About Sessions and MCP"
+excerpt: "A source-map discovery clarified Claude Code's JSONL fields, compaction markers, MCP names, and pricing metadata. Here's what changed in replay tooling."
 date: 2026-04-02
+updated: 2026-09-03
 readTime: "7 min read"
 ---
 
@@ -31,7 +32,7 @@ When Claude Code runs out of context, it compacts the conversation into a summar
 
 We'd been detecting this with a string prefix match. Fragile — if Anthropic ever changed the wording, our detection would silently break.
 
-The source revealed that every compaction summary message carries `isCompactSummary: true` as a top-level field. A reliable, future-proof flag that was sitting in the data all along.
+The source revealed that compaction summary messages carry `isCompactSummary: true` as a top-level field. That is a more reliable signal than depending on wording that may change between releases.
 
 We now use the flag as the primary detection, with the string prefix as a fallback for older sessions.
 
@@ -45,14 +46,14 @@ Claude Code injects system messages into the conversation that are invisible in 
 
 Our parser was treating them as regular user turns. In replays, they'd show up as mysterious user prompts with XML tags or skill configuration text that the user never actually typed.
 
-After reading the source, we understood the taxonomy (counts from one developer machine, 129 sessions):
+After reading the source, we could separate the categories more clearly:
 
-| `isMeta` pattern | Frequency | Value |
-|---|---|---|
-| `<local-command-caveat>` | 108 | Low — just a wrapper telling the model to ignore |
-| Skill injection (`Base directory for this skill:`) | 14 | High — shows which skills were activated |
-| `/insights` output | 1 | High — slash command data |
-| Image injection metadata | 6 | Medium |
+| `isMeta` pattern | Why it matters |
+|---|---|
+| `<local-command-caveat>` | Usually low-value wrapper text |
+| Skill injection (`Base directory for this skill:`) | Indicates which skills were activated |
+| Slash-command output | Preserves useful command context |
+| Image injection metadata | Explains why an image entered the conversation |
 
 We now classify each `isMeta` message and handle them differently:
 - **Skill injections** become `context-injection` scenes with a specific label like "Skill: playwright-cli" — visible in the replay with blue styling, distinct from user prompts
@@ -79,7 +80,7 @@ We now track this per-message and surface it:
 - The viewer shows a small "Response truncated (max_tokens reached)" indicator
 - Session metadata includes `truncatedResponses` count
 
-Across all sessions on one test machine, we found 211 truncated responses — far more than we expected.
+The count is useful as a session-level data-quality signal, but it should be measured per corpus rather than presented as a universal rate.
 
 ---
 
@@ -100,7 +101,7 @@ Before the leak, these names rendered verbatim in replays — long, ugly, and ha
 3. **Format display names** as `server · tool` (e.g., "claude-in-chrome · navigate")
 4. **Use a plug icon** instead of the generic gear for MCP tools
 
-On one test machine, 21 sessions used MCP tools across over 1,000 total calls — primarily `claude-in-chrome` (454 calls) and `playwright` (16 calls).
+The server and tool names can then be aggregated per session without exposing the full tool arguments. That is useful for answering “which MCP integrations did this workflow use?” while keeping the replay readable.
 
 ---
 
@@ -108,7 +109,7 @@ On one test machine, 21 sessions used MCP tools across over 1,000 total calls �
 
 The `usage` object on assistant messages includes a `service_tier` field (e.g., `"standard"`) that we'd been ignoring. We now extract it as session metadata.
 
-More importantly, the source at `src/utils/modelCost.ts` contains the exact pricing tiers:
+More importantly, the source at `src/utils/modelCost.ts` contains the pricing tiers used by that Claude Code release. The table below is a historical snapshot of that package, not a current quote; check the [official Anthropic pricing](https://www.anthropic.com/pricing) before using it for a bill:
 
 | Model | Input | Output | Cache write | Cache read |
 |---|---|---|---|---|
@@ -118,7 +119,7 @@ More importantly, the source at `src/utils/modelCost.ts` contains the exact pric
 | Haiku 4.5 | $1/Mtok | $5/Mtok | $1.25/Mtok | $0.10/Mtok |
 | Opus 4.6 fast mode | $30/Mtok | $150/Mtok | $37.50/Mtok | $3.00/Mtok |
 
-We validated our cost estimation against these exact numbers. The Sonnet 4 (non-4.5/4.6) model had been falling through to a generic rate — we added an explicit entry matching Claude Code's `COST_TIER_3_15`.
+We used those tiers to validate cost estimation and added an explicit mapping for a model alias that had previously fallen through to a generic rate. Pricing is versioned data: a parser should keep provider-reported usage separate from its local price table and make the table easy to update.
 
 ---
 
@@ -146,10 +147,12 @@ We've been parsing Claude Code's JSONL output for months, treating it as an opaq
 
 The `isMeta` bug is a good example: we'd never noticed the skill injection messages leaking into replays because they were rare and looked vaguely plausible. Without the source telling us that `isMeta: true` marks system-injected content, we might never have caught it.
 
-The full implementation is across two PRs: [#116](https://github.com/tuo-lei/vibe-replay/pull/116) (parser improvements, context-injection scenes, skill detection) and [#119](https://github.com/tuo-lei/vibe-replay/pull/119) (MCP server detection, tool name display). Both are merged.
+The implementation was split across parser, context-injection, skill, and MCP changes. The important lesson is less about a particular patch number and more about the contract: preserve provider metadata, classify it explicitly, and avoid presenting injected context as if it were a user prompt.
 
 If you want to see these improvements in action, install vibe-replay and run `vibe-replay -d` to open the dashboard — sessions with skills and MCP tools will now show the new badges and labels.
 
 ```bash
 npx vibe-replay -d
 ```
+
+For the storage layout that those parser changes consume, see [What Does Claude Code Store Locally?](/blog/claude-code-local-storage/).

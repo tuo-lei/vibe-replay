@@ -9,6 +9,7 @@ vi.mock("../SessionRelationshipsView", () => ({ default: () => null }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  window.history.replaceState({}, "", "/");
 });
 
 function contextValue(): ReturnType<typeof InsightsPanel.useScanInsightsContext> {
@@ -58,6 +59,25 @@ function contextValue(): ReturnType<typeof InsightsPanel.useScanInsightsContext>
 }
 
 describe("ProjectsPanel project insights", () => {
+  it("opens the Timeline view by default and when selecting a project", () => {
+    const context = contextValue();
+    vi.spyOn(InsightsPanel, "useScanInsightsContext").mockReturnValue(context);
+
+    render(<ProjectsPanel onNavigate={vi.fn()} />);
+
+    const timelineTab = screen.getByRole("button", { name: "Timeline" });
+    expect(timelineTab.className).toContain("bg-terminal-green-subtle");
+
+    const overviewTab = screen.getByRole("button", { name: "Overview" });
+    fireEvent.click(overviewTab);
+    expect(overviewTab.className).toContain("bg-terminal-green-subtle");
+
+    fireEvent.click(screen.getAllByRole("button", { name: /example/i })[0]);
+
+    expect(screen.getByRole("heading", { name: /example/i })).toBeDefined();
+    expect(timelineTab.className).toContain("bg-terminal-green-subtle");
+  });
+
   it("fetches detailed insights only after selecting a project", () => {
     const context = contextValue();
     vi.spyOn(InsightsPanel, "useScanInsightsContext").mockReturnValue(context);

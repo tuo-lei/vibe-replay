@@ -44,6 +44,7 @@ import type {
   SessionTranscriptStatus,
   SessionUsageSummary,
   TokenUsage,
+  TurnMetric,
   UsageEvent,
 } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
@@ -72,7 +73,9 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v34: persist provider/session diagnostic events and Pi compaction evidence.
 // v35: retain Pi usage from assistant records without visible replay content.
 // v36: index privacy-safe provider context composition metadata.
-export const SCANNER_VERSION = 36;
+// v37: count concrete SKILL.md reads as skill activations across providers.
+// v38: retain compact per-turn duration/tool/token metrics for distributions.
+export const SCANNER_VERSION = 38;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -143,6 +146,8 @@ export interface SessionScanResult {
   turnStatCount?: number;
   /** Per-turn durations in ms — used for median time-to-intervention */
   turnDurations?: number[];
+  /** Compact numeric metrics used for per-turn distributions. */
+  turnMetrics?: TurnMetric[];
 }
 
 interface ScanCacheEntry {
@@ -333,15 +338,105 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
   return undefined;
 }
 
+const SKILL_PATH_ROOTS = new Set(["skills", "skills-cursor"]);
+const SKILL_READ_COMMANDS = new Set(["cat", "head", "less", "more", "sed", "tail"]);
+const SKILL_INPUT_KEYS = new Set([
+  "command",
+  "cmd",
+  "file_path",
+  "file_paths",
+  "filepath",
+  "filePath",
+  "path",
+  "paths",
+]);
+
+function skillNameFromPath(value: string): string | undefined {
+  const segments = value.replaceAll("\\", "/").split("/").filter(Boolean);
+  for (let index = segments.length - 1; index >= 0; index--) {
+    if (segments[index]?.toLowerCase() !== "skill.md") continue;
+
+    let candidateIndex = index - 1;
+    if (candidateIndex < 0) continue;
+    // rbx-skills snapshots store skills as skills/<name>/<commit>/SKILL.md.
+    if (/^[0-9a-f]{20,}$/i.test(segments[candidateIndex] || "")) candidateIndex--;
+    const candidate = segments[candidateIndex]?.trim();
+    if (
+      !candidate ||
+      candidate === "**" ||
+      candidate === "*" ||
+      candidate.startsWith("<") ||
+      candidate === "." ||
+      candidate === ".."
+    ) {
+      continue;
+    }
+
+    // Prefer the explicit skills root. This handles both normal installations
+    // and nested snapshot/backup directories without treating every README
+    // that happens to be named SKILL.md as a skill.
+    for (let rootIndex = candidateIndex - 1; rootIndex >= 0; rootIndex--) {
+      if (SKILL_PATH_ROOTS.has(segments[rootIndex]?.toLowerCase() || "")) return candidate;
+    }
+
+    // Glob patterns such as **/ros-cli/SKILL.md do not contain a skills root,
+    // but still name one concrete skill. Keep the fallback narrow so a bare
+    // **/SKILL.md search is not counted.
+    if (index - candidateIndex >= 1 && candidateIndex < index - 1) return candidate;
+    if (candidateIndex === index - 1 && candidateIndex > 0) {
+      const previous = segments[candidateIndex - 1];
+      if (previous === "**" || previous === "*") return candidate;
+    }
+  }
+  return undefined;
+}
+
+function skillNameFromCommand(command: string): string | undefined {
+  const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|([^\s]+)/g)].map(
+    (match) => match[1] ?? match[2] ?? match[3] ?? "",
+  );
+  const executable = tokens[0]?.split("/").pop()?.toLowerCase();
+  if (!executable || !SKILL_READ_COMMANDS.has(executable)) return undefined;
+
+  for (const token of tokens.slice(1)) {
+    const argument = token.replace(/^[;|&]+|[;|&]+$/g, "");
+    if (!argument || argument === "--" || argument.startsWith("-")) continue;
+    const skillName = skillNameFromPath(argument);
+    if (skillName) return skillName;
+  }
+  return undefined;
+}
+
+function skillNameFromInput(input: Record<string, unknown>): string | undefined {
+  for (const [key, value] of Object.entries(input)) {
+    if (!SKILL_INPUT_KEYS.has(key)) continue;
+    const values = Array.isArray(value) ? value : [value];
+    for (const candidate of values) {
+      if (typeof candidate !== "string") continue;
+      const skillName =
+        key === "command" || key === "cmd"
+          ? skillNameFromCommand(candidate)
+          : skillNameFromPath(candidate);
+      if (skillName) return skillName;
+    }
+  }
+  return undefined;
+}
+
 function skillNameFromTool(block: Extract<ContentBlock, { type: "tool_use" }>): string | undefined {
   if (block._skillName?.trim()) return block._skillName.trim();
   const normalizedName = block.name.trim().toLowerCase();
-  if (normalizedName !== "skill" && normalizedName !== "skill_view") return undefined;
-  for (const key of ["name", "skill", "skillName", "skill_name", "slug"]) {
-    const value = block.input?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+  if (normalizedName === "skill" || normalizedName === "skill_view") {
+    for (const key of ["name", "skill", "skillName", "skill_name", "slug"]) {
+      const value = block.input?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
   }
-  return undefined;
+  // Cursor, Codex, and Pi commonly activate a skill by reading its SKILL.md
+  // with their ordinary file/shell tools rather than emitting a provider-native
+  // Skill tool. The input is concrete invocation evidence; injected lists of
+  // available skills are not scanned here and therefore do not inflate counts.
+  return skillNameFromInput(block.input);
 }
 
 /** Results that still need the rich Cursor pass before usage facets are complete. */
@@ -1485,6 +1580,80 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
   return buildScanResultFromParsed(input, parsed);
 }
 
+function isMetricUserPrompt(turn: ProviderParseResult["turns"][number]): boolean {
+  if (turn.role !== "user" || turn.subtype) return false;
+  return turn.blocks.some(
+    (block) =>
+      (block.type === "text" && block.text.trim().length > 0) ||
+      (block.type === "_user_images" && block.images.length > 0),
+  );
+}
+
+function turnToolCallCount(blocks: ContentBlock[]): number {
+  let count = 0;
+  for (const block of blocks) {
+    if (block.type !== "tool_use") continue;
+    count++;
+    const subAgent = (
+      block as {
+        _subAgent?: {
+          usageEvents?: UsageEvent[];
+          scenes?: Array<{ type?: string }>;
+        };
+      }
+    )._subAgent;
+    const nestedEvents = subAgent?.usageEvents;
+    if (nestedEvents?.length) {
+      count += nestedEvents.filter((event) => event.kind === "tool").length;
+    } else if (subAgent?.scenes) {
+      count += subAgent.scenes.filter((scene) => scene.type === "tool-call").length;
+    }
+  }
+  return count;
+}
+
+function addTurnTokenTotal(metric: TurnMetric, usage: TokenUsage): void {
+  const total =
+    usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  metric.tokens = (metric.tokens || 0) + total;
+}
+
+export function buildTurnMetrics(
+  turns: ProviderParseResult["turns"],
+  turnStats: ProviderParseResult["turnStats"],
+): TurnMetric[] | undefined {
+  const metrics: TurnMetric[] = [];
+  let currentTurnIndex = -1;
+
+  const ensureMetric = (turnIndex: number): TurnMetric => {
+    while (metrics.length <= turnIndex) metrics.push({ toolCalls: 0 });
+    return metrics[turnIndex]!;
+  };
+
+  for (const turn of turns) {
+    if (isMetricUserPrompt(turn)) {
+      currentTurnIndex++;
+      ensureMetric(currentTurnIndex);
+      continue;
+    }
+    if (turn.role === "assistant" && currentTurnIndex >= 0) {
+      ensureMetric(currentTurnIndex).toolCalls += turnToolCallCount(turn.blocks);
+    }
+  }
+
+  for (const stat of turnStats || []) {
+    if (!Number.isInteger(stat.turnIndex) || stat.turnIndex < 0) continue;
+    if (stat.turnIndex >= metrics.length) continue;
+    const metric = ensureMetric(stat.turnIndex);
+    if (typeof stat.durationMs === "number" && stat.durationMs > 0) {
+      metric.durationMs = (metric.durationMs || 0) + stat.durationMs;
+    }
+    if (stat.tokenUsage) addTurnTokenTotal(metric, stat.tokenUsage);
+  }
+
+  return metrics.length > 0 ? metrics : undefined;
+}
+
 function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
   const firstPrompt = scanFallbackPrompt(input);
   const hasPrompt = typeof firstPrompt === "string" && firstPrompt.trim().length > 0;
@@ -1780,6 +1949,7 @@ function buildScanResultFromParsed(
   const fallbackStart = parsed.startTime || input.timestamp;
   const durationMs = parsed.totalDurationMs;
   const normalizedEndTime = ensureEndCoversDuration(fallbackStart, parsed.endTime, durationMs);
+  const turnMetrics = buildTurnMetrics(parsed.turns, parsed.turnStats);
   const firstPrompt = input.transcriptStatus
     ? ""
     : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
@@ -1857,6 +2027,7 @@ function buildScanResultFromParsed(
     turnDurations: parsed.turnStats
       ?.map((t) => t.durationMs)
       .filter((d): d is number => d != null && d > 0),
+    turnMetrics,
   };
 }
 

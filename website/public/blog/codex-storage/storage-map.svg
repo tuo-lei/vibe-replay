@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Codex local session storage map</title>
+  <desc id="desc">Codex combines rollout JSONL, a SQLite thread catalog, and an append-only name index before replay.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#111827"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#b392f0"/><stop offset="1" stop-color="#79b8ff"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7d8590"/></marker>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)"/>
+  <path d="M0 120H1200M0 121H1200" stroke="#30363d" opacity=".45"/>
+  <text x="64" y="68" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="30" font-weight="700">Codex local session storage</text>
+  <text x="64" y="101" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">Three local surfaces, one replayable thread</text>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    <rect x="64" y="166" width="430" height="122" rx="16" fill="#161b22" stroke="#b392f0" stroke-opacity=".55"/>
+    <text x="90" y="204" fill="#b392f0" font-size="14" font-weight="700">ROLLOUT TRANSCRIPT</text>
+    <text x="90" y="241" fill="#e6edf3" font-size="19">~/.codex/sessions/**/*.jsonl</text>
+    <text x="90" y="270" fill="#7d8590" font-size="14">prompts · reasoning · tools · results</text>
+
+    <rect x="64" y="324" width="430" height="122" rx="16" fill="#161b22" stroke="#79b8ff" stroke-opacity=".55"/>
+    <text x="90" y="362" fill="#79b8ff" font-size="14" font-weight="700">THREAD CATALOG</text>
+    <text x="90" y="399" fill="#e6edf3" font-size="19">state_5.sqlite</text>
+    <text x="90" y="428" fill="#7d8590" font-size="14">title · cwd · model · timestamps</text>
+
+    <rect x="64" y="482" width="430" height="122" rx="16" fill="#161b22" stroke="#d29922" stroke-opacity=".55"/>
+    <text x="90" y="520" fill="#d29922" font-size="14" font-weight="700">RENAME INDEX</text>
+    <text x="90" y="557" fill="#e6edf3" font-size="19">session_index.jsonl</text>
+    <text x="90" y="586" fill="#7d8590" font-size="14">newest explicit thread name wins</text>
+  </g>
+
+  <path d="M494 227H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M494 385H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M494 543H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="535" y="211" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">join by thread id</text>
+
+  <rect x="650" y="214" width="486" height="270" rx="20" fill="#0d1117" stroke="url(#accent)" stroke-width="2"/>
+  <text x="690" y="262" fill="#3fb950" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">VIBE-REPLAY</text>
+  <text x="690" y="304" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="27" font-weight="700">One coherent replay</text>
+  <text x="690" y="350" fill="#79b8ff" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">event_msg → response_item</text>
+  <text x="690" y="382" fill="#b392f0" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">call_id → tool result</text>
+  <text x="690" y="414" fill="#d29922" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">compacted → context event</text>
+  <text x="690" y="456" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">metadata stays separate from transcript detail</text>
+
+  <rect x="64" y="656" width="1072" height="1" fill="#30363d"/>
+  <text x="64" y="687" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">Read-only inputs · version-tolerant columns · explicit data-quality notes</text>
+</svg>

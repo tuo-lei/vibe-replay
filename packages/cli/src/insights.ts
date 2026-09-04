@@ -119,6 +119,7 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     toolCallCount: scan.toolCallCount,
     editCount: scan.editCount,
     filesModified: scan.filesModified?.length ? scan.filesModified : undefined,
+    turnMetrics: scan.turnMetrics,
     tokenUsage: scan.tokenUsage,
     costEstimate: scan.costEstimate,
     contextBreakdown: scan.contextBreakdown,

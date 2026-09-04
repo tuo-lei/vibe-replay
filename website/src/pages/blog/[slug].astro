@@ -31,7 +31,7 @@ const blogPostJsonLd = [
     headline: post.data.title,
     description: post.data.excerpt,
     datePublished: post.data.date.toISOString(),
-    dateModified: post.data.date.toISOString(),
+    dateModified: (post.data.updated ?? post.data.date).toISOString(),
     author: {
       "@type": "Person",
       name: post.data.author,
@@ -64,8 +64,13 @@ const blogPostJsonLd = [
   title={`${post.data.title} — vibe-replay`}
   description={post.data.excerpt}
   ogImage={post.data.cover}
+  ogImageAlt={post.data.title}
   ogType="article"
-  article={{ publishedTime: post.data.date.toISOString(), author: post.data.author }}
+  article={{
+    publishedTime: post.data.date.toISOString(),
+    modifiedTime: (post.data.updated ?? post.data.date).toISOString(),
+    author: post.data.author,
+  }}
   jsonLd={blogPostJsonLd}
 >
   <Nav active="blog" />
@@ -82,6 +87,12 @@ const blogPostJsonLd = [
           <time datetime={post.data.date.toISOString().split("T")[0]}>
             {formatDate(post.data.date, "long")}
           </time>
+          {post.data.updated && post.data.updated.getTime() !== post.data.date.getTime() && (
+            <>
+              <span>&middot;</span>
+              <span>Updated {formatDate(post.data.updated, "long")}</span>
+            </>
+          )}
           <span>&middot;</span>
           <span>{post.data.readTime}</span>
         </div>

@@ -25,6 +25,7 @@ export type {
   ProviderCoverage,
   TokenUsage,
   TokenUsageMetrics,
+  TurnMetric,
   TurnStat,
   UsageCoverageReport,
   UsageEvent,

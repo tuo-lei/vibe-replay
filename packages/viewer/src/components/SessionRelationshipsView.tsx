@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { matchesProjectFacet } from "../engine/dashboard-filtering";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
 import { plural } from "../utils/format";
@@ -103,8 +104,6 @@ function rangeEmptyLabel(range: TimelineRange): string {
       return "the last 7 days";
     case "30d":
       return "the last 30 days";
-    case "all":
-      return "this scan";
   }
 }
 
@@ -246,7 +245,9 @@ interface TimelineSession {
   heightPx: number;
   fillAlpha: number;
   opacity: number;
-  realDurationFraction: number;
+  /** Actual active interval within the rendered visual bar, 0–1. */
+  actualStartFraction: number;
+  actualEndFraction: number;
   /**
    * True when the bar would overflow the lane's right edge if rendered from
    * its leftPct. Right-anchored bars hug the right edge with their full
@@ -485,9 +486,17 @@ function buildTimeline(
       const leftPct = Math.max(0, rawLeftPct);
       const widthPct = Math.max(0, rawRightPct - leftPct);
       const minWidthPx = minWidthFor(it.score);
-      const realWidthPx = (widthPct / 100) * APPROX_TIMELINE_WIDTH_PX;
-      const visualWidthPx = Math.max(realWidthPx, minWidthPx);
-      const realDurationFraction = visualWidthPx > 0 ? Math.min(1, realWidthPx / visualWidthPx) : 1;
+      const visualStartMs = Math.max(it.startMs, rangeStart);
+      const visualEndMs = Math.min(it.endMs, rangeEnd);
+      const visualDurationMs = Math.max(1, visualEndMs - visualStartMs);
+      const actualStartFraction = Math.max(
+        0,
+        Math.min(1, (Math.max(it.realStartMs, visualStartMs) - visualStartMs) / visualDurationMs),
+      );
+      const actualEndFraction = Math.max(
+        actualStartFraction,
+        Math.min(1, (Math.min(it.realEndMs, visualEndMs) - visualStartMs) / visualDurationMs),
+      );
       tSessions.push({
         session: it.original,
         leftPct,
@@ -498,7 +507,8 @@ function buildTimeline(
         heightPx: heightFor(it.score),
         fillAlpha: fillAlphaFor(it.score),
         opacity: opacityFor(it.score),
-        realDurationFraction,
+        actualStartFraction,
+        actualEndFraction,
         rightAnchored: it.rightAnchored,
       });
     }
@@ -569,18 +579,17 @@ function buildTimeline(
   return { projects, ticks, minMs, maxMs, totalSessions, hiddenAutomatedCount };
 }
 
-type TimelineRange = "1d" | "7d" | "30d" | "all";
+type TimelineRange = "1d" | "7d" | "30d";
 
-const RANGE_OPTIONS: { value: TimelineRange; label: string; days?: number }[] = [
+const RANGE_OPTIONS: { value: TimelineRange; label: string; days: number }[] = [
   { value: "1d", label: "1D", days: 1 },
   { value: "7d", label: "7D", days: 7 },
   { value: "30d", label: "30D", days: 30 },
-  { value: "all", label: "All" },
 ];
 
 function rangeWindow(range: TimelineRange): { start?: number; end?: number } {
   const opt = RANGE_OPTIONS.find((o) => o.value === range);
-  if (!opt || opt.days == null) return {};
+  if (!opt) return {};
   const end = Date.now();
   const start = end - opt.days * 86400000;
   return { start, end };
@@ -629,18 +638,26 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       {/* Range selector + automated toggle */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
-          <div className="text-sm font-sans font-semibold text-terminal-text">Work Timeline</div>
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-terminal-green shadow-[0_0_8px_rgba(34,197,94,0.55)]" />
+            <div className="text-sm font-sans font-semibold text-terminal-text">Work Timeline</div>
+          </div>
           <div className="text-xs font-mono text-terminal-dimmer">
             {totalSessions} {plural(totalSessions, "session")} · rows are projects · bar position
             and width show active time
             {estimatedTimingCount > 0 ? ` · ${estimatedTimingCount} estimated` : ""}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[10px] font-mono text-terminal-dimmer">
+            <span>Hover for details</span>
+            <span className="text-terminal-border">·</span>
+            <span>Click a session to inspect it</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[10px] font-mono">
           {hiddenAutomatedCount > 0 && !showAutomated && (
             <button
               onClick={() => setShowAutomated(true)}
-              className="text-terminal-dimmer hover:text-terminal-text transition-colors"
+              className="rounded-lg bg-terminal-orange-subtle px-2.5 py-1 text-terminal-orange transition-colors hover:bg-terminal-orange-emphasis"
               title="Scheduled / automated sessions are hidden by default"
             >
               + {hiddenAutomatedCount} automated hidden ▸
@@ -649,7 +666,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           {showAutomated && (
             <button
               onClick={() => setShowAutomated(false)}
-              className="text-terminal-purple hover:underline"
+              className="rounded-lg bg-terminal-purple-subtle px-2.5 py-1 text-terminal-purple transition-colors hover:bg-terminal-purple-emphasis"
             >
               hide automated
             </button>
@@ -659,6 +676,8 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
               <button
                 key={opt.value}
                 onClick={() => setRange(opt.value)}
+                aria-pressed={range === opt.value}
+                title={`Show ${opt.label} timeline`}
                 className={`rounded-lg px-2.5 py-1 text-xs font-sans font-semibold transition-all duration-200 ease-material ${
                   range === opt.value
                     ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
@@ -675,17 +694,17 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-40 gap-2 text-terminal-dimmer text-sm font-mono">
           <div>No sessions in {rangeEmptyLabel(range)}.</div>
-          {range !== "all" && (
+          {range !== "30d" && (
             <button
-              onClick={() => setRange("all")}
+              onClick={() => setRange("30d")}
               className="text-terminal-green hover:underline text-xs"
             >
-              Show all sessions →
+              Show 30 days →
             </button>
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+        <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 py-3 shadow-inner">
           <div className="min-w-[760px]">
             {/* Time axis header */}
             <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
@@ -713,14 +732,33 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                 const rowHeight = p.totalRowHeightPx;
                 const accentColor = color.solid;
                 return (
-                  <div key={p.key} className="flex items-stretch rounded-xl group">
+                  <div
+                    key={p.key}
+                    className="group flex items-stretch overflow-hidden rounded-xl border transition-colors"
+                    style={{
+                      borderColor: hexToRgba(accentColor, 0.2),
+                      backgroundColor: hexToRgba(accentColor, 0.025),
+                    }}
+                  >
                     {/* Project label */}
                     <div
-                      className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
-                      style={{ width: LABEL_WIDTH, height: rowHeight }}
+                      className="flex shrink-0 flex-col justify-center overflow-hidden py-1 pl-3 pr-3"
+                      style={{
+                        width: LABEL_WIDTH,
+                        height: rowHeight,
+                        backgroundColor: hexToRgba(accentColor, 0.055),
+                      }}
                     >
-                      <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                        {projectDisplayName(p.project, p.sessions[0]?.session.projectIdentity)}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: accentColor }}
+                        />
+                        <div
+                          className={`min-w-0 text-xs font-sans font-medium truncate ${color.text}`}
+                        >
+                          {projectDisplayName(p.project, p.sessions[0]?.session.projectIdentity)}
+                        </div>
                       </div>
                       <div className="text-[9px] font-mono text-terminal-dimmer truncate">
                         {p.sessions.length} {plural(p.sessions.length, "session")}
@@ -750,8 +788,11 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
 
                     {/* Lane area */}
                     <div
-                      className="relative flex-1 overflow-hidden rounded-xl bg-terminal-surface/45 shadow-layer-sm transition-colors group-hover:bg-terminal-surface-hover/70"
-                      style={{ height: rowHeight }}
+                      className="relative flex-1 overflow-hidden rounded-r-xl shadow-inner"
+                      style={{
+                        height: rowHeight,
+                        backgroundColor: hexToRgba(accentColor, 0.035),
+                      }}
                     >
                       {/* Grid lines */}
                       {ticks.map((t, i) => (
@@ -775,10 +816,6 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                             (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
                           ),
                         );
-                        // Right-anchored bars no longer have their left edge
-                        // at startTime, so a left-aligned wick would be
-                        // misleading. Use the tooltip for exact timing instead.
-                        const showWick = !ts.rightAnchored && ts.realDurationFraction < 0.85;
                         return (
                           <button
                             type="button"
@@ -813,7 +850,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                           >
                             {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
                               <span
-                                className={`pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
+                                className={`relative z-[1] pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
                                   lineClamp === 1
                                     ? "truncate leading-[18px]"
                                     : "overflow-hidden pt-1"
@@ -831,23 +868,20 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                                 {sessionTitle(ts.session)}
                               </span>
                             )}
-                            {showWick && (
-                              <>
-                                {/* Bottom strip + end-tick mark the actual session
-                                    duration inside the min-width-padded bar. */}
-                                <span
-                                  className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
-                                  style={{ width: `${ts.realDurationFraction * 100}%` }}
-                                  title="actual duration"
-                                />
-                                <span
-                                  className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
-                                  style={{
-                                    left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
-                                  }}
-                                />
-                              </>
-                            )}
+                            {/* Every bar gets the same duration rail. The muted
+                                track is the visual bar; the bright segment marks
+                                the actual active interval, including right-anchored
+                                sessions and bars widened for readable hit targets. */}
+                            <span className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[3px] bg-white/20">
+                              <span
+                                className="absolute bottom-0 h-full min-w-[2px] rounded-full bg-white/85"
+                                style={{
+                                  left: `${ts.actualStartFraction * 100}%`,
+                                  right: `${(1 - ts.actualEndFraction) * 100}%`,
+                                }}
+                                title="actual duration"
+                              />
+                            </span>
                           </button>
                         );
                       })}
@@ -860,70 +894,75 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
         </div>
       )}
 
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="fixed pointer-events-none w-80 rounded-xl border border-terminal-border bg-terminal-surface p-3 text-xs font-mono shadow-layer-xl"
-          style={{
-            // Keep the tooltip above hovered timeline bars.
-            zIndex: 1000,
-            left: Math.min(tooltip.x + 12, window.innerWidth - 336),
-            top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
-          }}
-        >
-          <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
-            {sessionTitle(tooltip.session)}
-          </div>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {sessionBadges(tooltip.session).map((badge) => (
-              <span
-                key={badge}
-                className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] text-terminal-dim"
-              >
-                {badge}
-              </span>
-            ))}
-          </div>
-          <div className="text-terminal-dimmer space-y-0.5">
-            {tooltip.session.startTime &&
-              (() => {
-                const startMs = new Date(tooltip.session.startTime).getTime();
-                const endMs = activeEndMs(startMs, tooltip.session);
-                const startISO = tooltip.session.startTime;
-                const endISO = new Date(endMs).toISOString();
-                const sameDay = fmtDate(startISO) === fmtDate(endISO);
-                return (
-                  <div>
-                    {fmtDate(startISO)} {fmtShortTime(startISO)}
-                    {endMs !== startMs && (
-                      <span>
-                        {" → "}
-                        {sameDay ? "" : `${fmtDate(endISO)} `}
-                        {fmtShortTime(endISO)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-            {tooltip.session.durationMs && (
-              <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
-            )}
-            <div>
-              {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
-              {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
-              {plural(tooltip.session.toolCallCount, "tool")}
+      {/* Portal the fixed tooltip out of the scrollable timeline pane. A fixed
+          child can still expand an ancestor's scrollable overflow, which makes
+          the pane jump when hover state toggles. */}
+      {tooltip &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed pointer-events-none w-80 rounded-xl border border-terminal-border bg-terminal-surface p-3 text-xs font-mono shadow-layer-xl"
+            style={{
+              // Keep the tooltip above hovered timeline bars.
+              zIndex: 1000,
+              left: Math.min(tooltip.x + 12, window.innerWidth - 336),
+              top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
+            }}
+          >
+            <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
+              {sessionTitle(tooltip.session)}
             </div>
-            {tooltip.session.gitBranch && (
-              <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>
-            )}
-            {(tooltip.session.costEstimate ?? 0) > 0 && (
-              <div className="text-terminal-orange">
-                ${tooltip.session.costEstimate!.toFixed(3)}
+            <div className="mb-2 flex flex-wrap gap-1">
+              {sessionBadges(tooltip.session).map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] text-terminal-dim"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+            <div className="text-terminal-dimmer space-y-0.5">
+              {tooltip.session.startTime &&
+                (() => {
+                  const startMs = new Date(tooltip.session.startTime).getTime();
+                  const endMs = activeEndMs(startMs, tooltip.session);
+                  const startISO = tooltip.session.startTime;
+                  const endISO = new Date(endMs).toISOString();
+                  const sameDay = fmtDate(startISO) === fmtDate(endISO);
+                  return (
+                    <div>
+                      {fmtDate(startISO)} {fmtShortTime(startISO)}
+                      {endMs !== startMs && (
+                        <span>
+                          {" → "}
+                          {sameDay ? "" : `${fmtDate(endISO)} `}
+                          {fmtShortTime(endISO)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              {tooltip.session.durationMs && (
+                <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
+              )}
+              <div>
+                {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
+                {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
+                {plural(tooltip.session.toolCallCount, "tool")}
               </div>
-            )}
-          </div>
-        </div>
-      )}
+              {tooltip.session.gitBranch && (
+                <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>
+              )}
+              {(tooltip.session.costEstimate ?? 0) > 0 && (
+                <div className="text-terminal-orange">
+                  ${tooltip.session.costEstimate!.toFixed(3)}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

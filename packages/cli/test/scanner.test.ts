@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   aggregateProjectInsights,
   aggregateUserInsights,
+  buildTurnMetrics,
   countPendingCursorUsageIndexes,
   type SessionScanResult,
   isPartialScanResult,
@@ -184,6 +185,29 @@ describe("scanSession", () => {
     );
   });
 
+  it("counts fallback sub-agent scenes without expanding malformed turn indexes", () => {
+    const metrics = buildTurnMetrics(
+      [
+        { role: "user", blocks: [{ type: "text", text: "Delegate this" }] },
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              id: "agent-1",
+              name: "Agent",
+              input: {},
+              _subAgent: { scenes: [{ type: "tool-call" }] },
+            } as any,
+          ],
+        },
+      ],
+      [{ turnIndex: 1_000_000 }],
+    );
+
+    expect(metrics).toEqual([{ toolCalls: 2 }]);
+  });
+
   it.each(["no-prompts", "unreadable"] as const)(
     "does not use a metadata title as a prompt for %s sources",
     async (transcriptStatus) => {
@@ -219,6 +243,10 @@ describe("scanSession", () => {
     expect(result.title).toBe("Fix login bug in auth module");
     expect(result.startTime).toBe("2025-03-20T10:00:00Z");
     expect(result.model).toBe("claude-sonnet-4-20250514");
+    expect(result.turnMetrics).toMatchObject([
+      { durationMs: 9_000, toolCalls: 2, tokens: 10_700 },
+      { toolCalls: 0 },
+    ]);
   });
 
   it("persists structured Pi compaction diagnostics in scan results", async () => {
@@ -539,6 +567,75 @@ describe("scanSession", () => {
       attribution: "session-metadata",
     });
     expect(JSON.stringify(result.usageEvents)).not.toContain("/secret/path.ts");
+  });
+
+  it("counts concrete SKILL.md reads as skill activations", async () => {
+    const path = join(tmpDir, "usage-skill-reads.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: {
+          role: "assistant",
+          id: "skill-read-message",
+          content: [
+            {
+              type: "tool_use",
+              id: "skill-read-1",
+              name: "Read",
+              input: { file_path: "/Users/test/.claude/skills/ros-cli/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-2",
+              name: "Bash",
+              input: { command: "cat /Users/test/.pi/agent/skills/mcp-adaptor/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-3",
+              name: "Glob",
+              input: { glob_pattern: "**/replay/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-echo",
+              name: "Bash",
+              input: { command: "echo /Users/test/.pi/agent/skills/not-a-skill/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-4",
+              name: "Read",
+              input: {
+                file_path:
+                  "/Users/test/.local/share/rbx-skills/snapshots/Roblox/skills/gdrive/0123456789abcdef0123456789abcdef01234567/SKILL.md",
+              },
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-skill-reads",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-skill-reads",
+      filePaths: [path],
+    });
+
+    // Locating a skill with a glob is still an ordinary tool call; only a
+    // concrete SKILL.md path read is counted as activation evidence.
+    expect(result.usageSummary?.tools).toEqual({ Bash: 1, Glob: 1 });
+    expect(result.usageSummary?.skills).toEqual({
+      "mcp-adaptor": 1,
+      "ros-cli": 1,
+      gdrive: 1,
+    });
+    expect(result.usageEvents?.filter((event) => event.kind === "skill")).toHaveLength(3);
   });
 
   it("preserves repeated rich-provider skill activations and MCP attribution", async () => {

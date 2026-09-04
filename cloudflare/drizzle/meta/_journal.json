@@ -64,6 +64,13 @@
       "when": 1776000000000,
       "tag": "0008_add_insight_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788416961315,
+      "tag": "0009_add_account_issuer",
+      "breakpoints": true
     }
   ]
 }

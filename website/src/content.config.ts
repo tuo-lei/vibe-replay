@@ -11,6 +11,7 @@ const blogCollection = defineCollection({
     author: z.string().optional().default("Tuo Lei"),
     authorUrl: z.string().optional().default("https://tuo-lei.com"),
     date: z.date(),
+    updated: z.date().optional(),
     readTime: z.string(),
     draft: z.boolean().optional().default(false),
   }),

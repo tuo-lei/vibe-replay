@@ -104,6 +104,16 @@ export interface TurnStat {
   contextTokens?: number;
 }
 
+/** Privacy-safe numeric metrics for one user turn. */
+export interface TurnMetric {
+  /** Active/provider-recorded time for the turn, in milliseconds. */
+  durationMs?: number;
+  /** All recorded tool invocations attributed to the turn. */
+  toolCalls: number;
+  /** Input + output + cache read/write tokens attributed to the turn. */
+  tokens?: number;
+}
+
 /**
  * A privacy-preserving event used to explain provider/session failures.
  *
@@ -478,6 +488,7 @@ export interface SessionInsight {
   toolCallCount: number;
   editCount: number;
   filesModified?: Array<{ file: string; count: number }>;
+  turnMetrics?: TurnMetric[];
 
   // Cost
   tokenUsage?: TokenUsage;
@@ -567,6 +578,7 @@ export interface SessionScanWireData {
   dataQualityNotes?: string[];
   turnStatCount?: number;
   turnDurations?: number[];
+  turnMetrics?: TurnMetric[];
 }
 
 export interface ReplaySession {

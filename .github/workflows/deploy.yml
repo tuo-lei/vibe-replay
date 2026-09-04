@@ -24,6 +24,14 @@ jobs:
 
       - run: pnpm build:website
 
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply vibe-replay-db --remote
+          workingDirectory: cloudflare
+
       - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -31,3 +39,8 @@ jobs:
           command: deploy
           workingDirectory: cloudflare
 
+      - name: Smoke-test deployed API
+        working-directory: cloudflare
+        env:
+          VIBE_REPLAY_SMOKE_URL: https://vibe-replay.com
+        run: pnpm smoke

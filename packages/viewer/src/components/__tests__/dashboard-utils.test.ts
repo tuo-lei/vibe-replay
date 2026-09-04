@@ -594,6 +594,29 @@ describe("dashboard prompt and title helpers", () => {
 
     expect(sourceDisplayTitle(source, { title: "Old generated title" })).toBe("Renamed thread");
   });
+
+  it("falls back from Cursor placeholder titles to the first prompt", () => {
+    const source = makeSource({
+      title: "New Agent",
+      firstPrompt: "Inspect the Gateway Lens capture flow",
+      replay: {
+        slug: "source-slug",
+        title: "New Agent",
+        provider: "cursor",
+        project: "~/Code/app",
+        startTime: "2026-05-01T10:00:00.000Z",
+        stats: { sceneCount: 1, userPrompts: 1, toolCalls: 0 },
+        hasAnnotations: false,
+        annotationCount: 0,
+        messages: [],
+      },
+    });
+
+    expect(sourceSuggestedTitle(source)).toBe("Inspect the Gateway Lens capture flow");
+    expect(sourceDisplayTitle(source, { title: "New Agent" })).toBe(
+      "Inspect the Gateway Lens capture flow",
+    );
+  });
 });
 
 describe("formatDataSourceLabel", () => {
