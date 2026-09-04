@@ -130,8 +130,10 @@ async function parseCursorSessionWithDependencies(
         );
         mergeJsonlTimingIntoCursorResult(sqliteResult, jsonlThinking);
         if (isCursorPlaceholderTitle(sqliteResult.title)) {
-          const fallbackTitle = sessionInfo?.firstPrompt?.trim();
-          if (fallbackTitle && !isCursorPlaceholderTitle(fallbackTitle)) {
+          const fallbackTitle = [jsonlThinking.title, sessionInfo?.firstPrompt]
+            .map((value) => value?.trim())
+            .find((value) => value && !isCursorPlaceholderTitle(value));
+          if (fallbackTitle) {
             sqliteResult.title = fallbackTitle;
           }
         }
