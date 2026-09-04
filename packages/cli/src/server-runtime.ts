@@ -18,6 +18,7 @@ import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./pro
 import { getApiUrl } from "./publishers/cloud.js";
 import { mergeSameSessions } from "./session-merge.js";
 import { getRemoteHome } from "./remote.js";
+import { recordTelemetry } from "./telemetry.js";
 import {
   type EnrichmentHints,
   mergeEnrichmentHints,
@@ -121,6 +122,7 @@ export async function startServer(
   },
 ): Promise<void> {
   await mkdir(baseDir, { recursive: true });
+  recordTelemetry("dashboard.opened");
 
   const isDevMode = !!opts?.externalViewerUrl;
   // In dev mode, Vite serves the viewer with HMR — no need to load/cache viewer HTML

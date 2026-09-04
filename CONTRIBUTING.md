@@ -284,6 +284,7 @@ binding is present. Configure the production secret without committing the DSN:
 ```bash
 cd cloudflare
 pnpm exec wrangler secret put SENTRY_DSN
+pnpm exec wrangler secret put TELEMETRY_HASH_SECRET
 ```
 
 Cloudflare version metadata is used as the Sentry release ID, so each Worker
@@ -299,6 +300,24 @@ fixed, content-free log and counter for API requests, plus a fixed error log
 for unhandled requests. Product counters include `replay.views`,
 `replay.created`, `insights.sync`, and `auth.sign_in.success`; request bodies,
 URLs, IDs, and replay contents are not included.
+
+### CLI usage telemetry
+
+The CLI sends opt-out, anonymous usage events to the Cloudflare telemetry
+collector after a one-time notice. It reports only allowlisted feature names,
+CLI version, coarse platform, and bucketed counts/sizes/durations. It never
+sends prompts, replay/session contents, paths, project names, or user IDs.
+
+```bash
+vibe-replay telemetry status
+vibe-replay telemetry disable
+vibe-replay telemetry enable
+```
+
+Set `VIBE_REPLAY_TELEMETRY=0` or `DO_NOT_TRACK=1` to disable it for a process
+or environment. CI runs disable telemetry automatically. The collector keeps
+daily aggregates and month-rotated pseudonymous installation hashes, not raw
+installation IDs.
 
 ## Key conventions
 

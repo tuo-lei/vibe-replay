@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { saveAuthToken } from "../publishers/cloud.js";
 import type { AuthSession } from "../server-auth.js";
+import { recordTelemetry } from "../telemetry.js";
 
 interface AuthRouteDeps {
   cloudApiBaseUrl: string;
@@ -109,6 +110,7 @@ export function registerAuthRoutes(app: Hono, deps: AuthRouteDeps): void {
 
               // Save auth keyed by current API environment
               await saveAuthToken({ token: data.token, user: data.user }, cloudApiBaseUrl);
+              recordTelemetry("auth.login");
 
               // Auto-sync insights to cloud after login (fire-and-forget)
               autoSyncInsights().catch(() => {});

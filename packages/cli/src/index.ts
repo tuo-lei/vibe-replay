@@ -39,6 +39,16 @@ import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
 import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
 import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
+import {
+  bucketBytes,
+  bucketCount,
+  bucketDurationMs,
+  flushTelemetry,
+  getTelemetryNotice,
+  getTelemetryStatus,
+  recordTelemetry,
+  setTelemetryEnabled,
+} from "./telemetry.js";
 import { transformToReplay } from "./transform.js";
 import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
 import { expandUserPath, normalizeTitle, shortenPath } from "./utils.js";
@@ -251,6 +261,13 @@ program
     "--github",
     "Generate GitHub export (markdown + animated GIF + SVG) and exit (non-interactive)",
   )
+  .hook("preAction", async (thisCommand, actionCommand) => {
+    const commandName = actionCommand?.name() || thisCommand.name();
+    if (commandName === "telemetry" || process.argv[2] === "telemetry") return;
+    const notice = await getTelemetryNotice();
+    if (notice) process.stderr.write(`\n  ${notice}\n\n`);
+    recordTelemetry("cli.started");
+  })
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
@@ -389,8 +406,13 @@ program
       } else {
         const spinner = ora("Scanning sessions...").start();
         try {
+          const scanStartedAt = Date.now();
           displayedSessions = await discoverAllSessions();
           await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, displayedSessions);
+          recordTelemetry("scan.completed", {
+            sessions: bucketCount(displayedSessions.length),
+            duration: bucketDurationMs(Date.now() - scanStartedAt),
+          });
         } finally {
           spinner.stop();
         }
@@ -589,8 +611,14 @@ program
     const genSpinner = ora("Generating replay...").start();
     const outputPath = await generateOutput(replay, outputDir);
     const { stat: fsStat } = await import("node:fs/promises");
-    const size = await fsStat(outputPath).then((s) => (s.size / 1024 / 1024).toFixed(1));
+    const outputSizeBytes = await fsStat(outputPath).then((s) => s.size);
+    const size = (outputSizeBytes / 1024 / 1024).toFixed(1);
     genSpinner.succeed(`${outputPath} (${size} MB)`);
+    recordTelemetry("replay.generated", {
+      provider: providerName,
+      scenes: bucketCount(replay.scenes.length),
+      size: bucketBytes(outputSizeBytes),
+    });
 
     // Second-layer leak detection: scan the serialized replay for secrets
     const scanSpinner = ora("Scanning for secrets...").start();
@@ -717,6 +745,7 @@ program
           try {
             const result = await publishCloudWithOverlays(outputDir);
             cloudSpinner.succeed("Uploaded!");
+            recordTelemetry("cloud.publish", { storage: "r2" });
             console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
             console.log(
               chalk.dim("  Expires:   ") +
@@ -768,6 +797,7 @@ program
                 overwrite: overwriteGist,
               });
               gistSpinner.succeed(result.mode === "updated" ? "Gist updated!" : "Published!");
+              recordTelemetry("cloud.publish", { storage: "gist" });
               console.log(chalk.dim("  Gist:   ") + chalk.white(result.gistUrl));
               console.log(chalk.dim("  Viewer: ") + chalk.cyan(result.viewerUrl));
             } catch (err: unknown) {
@@ -848,6 +878,10 @@ program
         opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
       const matches = await queryLocalSessions(sessions, queryOptions);
       scanSpinner?.succeed(`Prepared ${matches.length} session result(s)`);
+      recordTelemetry("session.query", {
+        matches: bucketCount(matches.length),
+        scan: opts.scan ? "richer" : "basic",
+      });
 
       if (opts.json) {
         console.log(JSON.stringify({ sessions: matches }, null, 2));
@@ -1255,7 +1289,33 @@ program
       ?.parseAsync(["login", ...process.argv.slice(3)], { from: "user" });
   });
 
-program.parse();
+const telemetryCmd = program.command("telemetry").description("Manage anonymous usage telemetry");
+
+const showTelemetryStatus = async () => {
+  const status = await getTelemetryStatus();
+  console.log(`Telemetry: ${status.enabled ? "enabled" : "disabled"} (${status.source})`);
+  console.log("  No replay contents, prompts, paths, or user IDs are sent.");
+};
+
+telemetryCmd.action(showTelemetryStatus);
+telemetryCmd.command("status").description("Show telemetry status").action(showTelemetryStatus);
+telemetryCmd
+  .command("enable")
+  .description("Enable anonymous usage telemetry")
+  .action(async () => {
+    await setTelemetryEnabled(true);
+    console.log("Anonymous telemetry enabled.");
+  });
+telemetryCmd
+  .command("disable")
+  .description("Disable anonymous usage telemetry")
+  .action(async () => {
+    await setTelemetryEnabled(false);
+    console.log("Anonymous telemetry disabled.");
+  });
+
+await program.parseAsync();
+await flushTelemetry();
 
 function normalizeSessionsCommandOptions(
   opts: SessionsCommandOptions,

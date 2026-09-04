@@ -18,6 +18,7 @@ interface TestEnv {
   TEST_AUTH_USER_ID: string;
   TEST_AUTH_USER_EMAIL: string;
   TEST_AUTH_USER_NAME: string;
+  TELEMETRY_HASH_SECRET: string;
 }
 
 interface TestExecutionContext extends ExecutionContext {
@@ -67,6 +68,8 @@ async function resetDb() {
     "account",
     "session",
     "verification",
+    "telemetry_daily",
+    "telemetry_monthly_users",
     "replays",
     "user",
   ]) {
@@ -144,6 +147,7 @@ describe("Cloud API integration", () => {
         TEST_AUTH_USER_ID: TEST_USER_ID,
         TEST_AUTH_USER_EMAIL: "test@example.com",
         TEST_AUTH_USER_NAME: "Test User",
+        TELEMETRY_HASH_SECRET: "test-telemetry-secret",
       },
     });
     env = {
@@ -205,6 +209,57 @@ describe("Cloud API integration", () => {
     expect(event.request?.query_string).toBeUndefined();
     expect(event.request?.data).toBeUndefined();
     expect(JSON.stringify(event)).not.toContain("sentinel");
+  });
+
+  it("aggregates anonymous telemetry without storing installation IDs", async () => {
+    const payload = {
+      installationId: "123e4567-e89b-12d3-a456-426614174000",
+      event: "scan.completed",
+      version: "0.2.9",
+      platform: "darwin",
+      properties: { sessions: "10-99", duration: "1-9s" },
+    };
+
+    for (let i = 0; i < 2; i++) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        createCtx(),
+      );
+      expect(response.status).toBe(204);
+    }
+
+    const daily = await env.DB.prepare(
+      "SELECT event, version, platform, dimensions, count FROM telemetry_daily",
+    ).first<{
+      event: string;
+      version: string;
+      platform: string;
+      dimensions: string;
+      count: number;
+    }>();
+    expect(daily).toEqual({
+      event: "scan.completed",
+      version: "0.2.9",
+      platform: "darwin",
+      dimensions: "duration=1-9s;sessions=10-99",
+      count: 2,
+    });
+
+    const uniqueUsers = await env.DB.prepare(
+      "SELECT count(*) AS count FROM telemetry_monthly_users",
+    ).first<{ count: number }>();
+    expect(uniqueUsers?.count).toBe(1);
+    const rawId = await env.DB.prepare(
+      "SELECT * FROM telemetry_monthly_users WHERE installation_hash = ?",
+    )
+      .bind(payload.installationId)
+      .first();
+    expect(rawId).toBeNull();
   });
 
   it("keeps Better Auth account writes compatible with the issuer migration", async () => {

@@ -34,10 +34,34 @@ const MAX_JSON_BODY_BYTES = 24 * 1024 * 1024;
 const MAX_INSIGHTS_SYNC_BODY_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_UPLOAD_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_LEGACY_REPLAY_BODY_BYTES = 64 * 1024;
+const MAX_TELEMETRY_BODY_BYTES = 8 * 1024;
 // D1 starts failing once the user+machine+dates lookup goes past ~100 bound params.
 // Reuse the same conservative chunk size for both query and write paths so older clients
 // that still send large sync payloads stay under the database ceiling server-side too.
 const SAFE_DAILY_SYNC_DB_CHUNK = 90;
+const TELEMETRY_EVENTS = new Set([
+  "cli.started",
+  "scan.completed",
+  "session.query",
+  "replay.generated",
+  "dashboard.opened",
+  "cloud.publish",
+  "insights.sync",
+  "auth.login",
+]);
+const TELEMETRY_PLATFORMS = new Set(["darwin", "win32", "linux", "other"]);
+const TELEMETRY_PROPERTY_KEYS = new Set([
+  "duration",
+  "matches",
+  "mode",
+  "platform",
+  "provider",
+  "scan",
+  "scenes",
+  "sessions",
+  "size",
+  "storage",
+]);
 
 // GitHub API constants — shared across user gist routes and worker-side fetches.
 const GITHUB_API_ACCEPT = "application/vnd.github+json";
@@ -77,6 +101,8 @@ type Env = AuthEnv & {
   TEST_AUTH_USER_NAME?: string;
   /** Sentry project DSN; absent in local/test environments disables reporting. */
   SENTRY_DSN?: string;
+  /** Secret used to pseudonymize local telemetry installation IDs. */
+  TELEMETRY_HASH_SECRET?: string;
   /** Cloudflare deployment version metadata used as the Sentry release ID. */
   CF_VERSION_METADATA?: { id: string };
 };
@@ -86,6 +112,43 @@ type HonoEnv = { Bindings: Env };
 function recordProductMetric(env: Env, name: string, attributes?: Record<string, string>): void {
   if (!env.SENTRY_DSN) return;
   Sentry.metrics.count(name, 1, attributes ? { attributes } : undefined);
+}
+
+function telemetryDimensions(value: unknown): string | null {
+  if (value === undefined) return "";
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value)
+    .filter(
+      ([key, item]) =>
+        TELEMETRY_PROPERTY_KEYS.has(key) &&
+        typeof item === "string" &&
+        /^[a-z0-9_.+-]{1,32}$/i.test(item),
+    )
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length > 8) return null;
+  return entries.map(([key, item]) => `${key}=${item}`).join(";");
+}
+
+async function hashTelemetryInstallation(
+  secret: string,
+  month: string,
+  installationId: string,
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${month}:${installationId}`),
+  );
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
@@ -181,6 +244,62 @@ app.use("/api/*", async (c, next) => {
   if (!c.env.SENTRY_DSN) return;
   Sentry.logger.info("Worker API request");
   Sentry.metrics.count("worker.api_requests", 1);
+});
+
+app.post("/api/telemetry", async (c) => {
+  if (!c.env.TELEMETRY_HASH_SECRET) return c.body(null, 204);
+
+  const parsedBody = await readJsonBody(c, MAX_TELEMETRY_BODY_BYTES);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "Invalid telemetry payload" }, 400);
+  }
+
+  const installationId = body.installationId;
+  const event = body.event;
+  const version = body.version;
+  const platform = body.platform;
+  if (
+    typeof installationId !== "string" ||
+    !/^[0-9a-f-]{16,64}$/i.test(installationId) ||
+    typeof event !== "string" ||
+    !TELEMETRY_EVENTS.has(event) ||
+    typeof version !== "string" ||
+    !/^[a-z0-9+._-]{1,64}$/i.test(version) ||
+    typeof platform !== "string" ||
+    !TELEMETRY_PLATFORMS.has(platform)
+  ) {
+    return c.json({ error: "Invalid telemetry payload" }, 400);
+  }
+
+  const dimensions = telemetryDimensions(body.properties);
+  if (dimensions === null) return c.json({ error: "Invalid telemetry properties" }, 400);
+
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const installationHash = await hashTelemetryInstallation(
+    c.env.TELEMETRY_HASH_SECRET,
+    month,
+    installationId,
+  );
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO telemetry_daily (day, event, version, platform, dimensions, count)
+       VALUES (?, ?, ?, ?, ?, 1)
+       ON CONFLICT(day, event, version, platform, dimensions)
+       DO UPDATE SET count = telemetry_daily.count + 1`,
+    ).bind(day, event, version, platform, dimensions),
+    c.env.DB.prepare(
+      `INSERT OR IGNORE INTO telemetry_monthly_users
+       (month, event, installation_hash)
+       VALUES (?, ?, ?)`,
+    ).bind(month, event, installationHash),
+  ]);
+
+  return c.body(null, 204);
 });
 
 // ---------------------------------------------------------------------------
@@ -2344,6 +2463,16 @@ const worker = {
   fetch: app.fetch,
 
   async scheduled(_controller: ScheduledController, env: Env) {
+    const telemetryRetentionDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const telemetryDayCutoff = telemetryRetentionDate.toISOString().slice(0, 10);
+    const telemetryMonthCutoff = telemetryDayCutoff.slice(0, 7);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM telemetry_daily WHERE day < ?").bind(telemetryDayCutoff),
+      env.DB.prepare("DELETE FROM telemetry_monthly_users WHERE month < ?").bind(
+        telemetryMonthCutoff,
+      ),
+    ]).catch(() => {});
+
     const db = drizzle(env.DB);
     const BATCH = 50;
     // R2 grace period: keep data 7 days after expiry for potential recovery.
