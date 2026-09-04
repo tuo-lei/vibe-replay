@@ -20,7 +20,7 @@ export type TelemetryEventName = (typeof TELEMETRY_EVENTS)[number];
 export interface TelemetryStatus {
   enabled: boolean;
   configured: boolean;
-  source: "default" | "config" | "environment" | "ci";
+  source: "default" | "config" | "environment" | "ci" | "development";
 }
 
 interface TelemetryState {
@@ -47,6 +47,8 @@ function telemetryDisabledByEnvironment(): boolean {
   return (
     process.env.VIBE_REPLAY_TELEMETRY === "0" ||
     process.env.DO_NOT_TRACK === "1" ||
+    process.env.VIBE_REPLAY_DEV === "1" ||
+    process.env.VIBE_REPLAY_DEV_MENU === "1" ||
     process.env.CI === "true" ||
     process.env.CI === "1"
   );
@@ -128,7 +130,11 @@ function effectiveTelemetryStatus(state: TelemetryState | null): TelemetryStatus
     return {
       enabled: false,
       configured: state !== null,
-      source: process.env.CI ? "ci" : "environment",
+      source: process.env.CI
+        ? "ci"
+        : process.env.VIBE_REPLAY_DEV || process.env.VIBE_REPLAY_DEV_MENU
+          ? "development"
+          : "environment",
     };
   }
   if (telemetryForcedOnByEnvironment()) {
