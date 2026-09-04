@@ -536,10 +536,13 @@ describe("Cloud API integration", () => {
       .bind(file.id)
       .run();
 
+    const ctx = createCtx();
     await worker.scheduled(
-      { scheduledTime: Date.now(), cron: "0 */6 * * *", noRetry() {} } as ScheduledEvent,
+      { scheduledTime: Date.now(), cron: "0 */6 * * *", noRetry() {} },
       env,
+      ctx,
     );
+    await waitOnCtx(ctx);
 
     expect(await env.REPLAY_BUCKET.get(`replays/${replay.id}.json`)).toBeNull();
     expect(await env.REPLAY_BUCKET.get(`files/${file.id}.gif`)).toBeNull();

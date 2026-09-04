@@ -276,6 +276,20 @@ pnpm build
 
 The viewer is built once, then the CLI embeds it. The final HTML output is the viewer with session JSON injected into a `<script>` tag in `<head>`.
 
+### Cloudflare Worker error monitoring
+
+The Cloudflare Worker integrates with Sentry when the optional `SENTRY_DSN`
+binding is present. Configure the production secret without committing the DSN:
+
+```bash
+cd cloudflare
+pnpm exec wrangler secret put SENTRY_DSN
+```
+
+The Worker disables Sentry user information and HTTP request bodies so prompts,
+replay contents, and credentials are not sent as event data. Local and test
+environments remain reporting-disabled when `SENTRY_DSN` is absent.
+
 ## Key conventions
 
 - **pnpm** only — no npm/yarn
