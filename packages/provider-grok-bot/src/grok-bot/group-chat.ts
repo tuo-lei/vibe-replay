@@ -33,9 +33,10 @@ const MENTION_TOKEN_RE = /@([A-Za-z][\w.-]*)/g;
 const TURN_RECIPIENT_RE = /^It's your turn,\s*(.+?)(?:\.|$)/i;
 const NEW_MESSAGES_RE = /^New messages in the room\b/i;
 const NO_NEW_MESSAGES_RE = /^No new messages in the room\b/i;
-const WRAPPING_UP_RE = /^The room is wrapping up\b/i;
+const WRAPPING_UP_RE = /^(?:The room is wrapping up|The conversation is wrapping up)\b/i;
 const YOUR_TURN_RE = /^It's your turn\b/i;
 const REPLY_IN_ROOM_RE = /^Reply in the room\b/i;
+const WAITING_RE = /^Waiting for (?:other )?participants\b/i;
 const PARTICIPANTS_RE = /^Participants:\s*/i;
 
 const RESERVED_SPEAKERS = new Set([
@@ -124,7 +125,8 @@ export function parseGrokBotGroupWake(text: string): GrokBotGroupWake | null {
     if (
       YOUR_TURN_RE.test(trimmedLine) ||
       WRAPPING_UP_RE.test(trimmedLine) ||
-      REPLY_IN_ROOM_RE.test(trimmedLine)
+      REPLY_IN_ROOM_RE.test(trimmedLine) ||
+      WAITING_RE.test(trimmedLine)
     ) {
       flush();
       inMessages = false;
@@ -189,6 +191,17 @@ export function formatGroupHeader(wake: GrokBotGroupWake): string {
   if (wake.mentions.length > 0) lines.push(`Mentions: ${wake.mentions.join(", ")}`);
   if (wake.noNewMessages) lines.push("No new messages since last turn.");
   return lines.join("\n");
+}
+
+/** Stable room identity for de-duplicating repeated wake headers. */
+export function groupHeaderSignature(wake: GrokBotGroupWake): string {
+  const participants = (
+    wake.participants.length > 0 ? wake.participants.map((p) => p.name) : wake.withParticipants
+  )
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  return [wake.groupTitle.trim().toLowerCase(), ...participants].join("\0");
 }
 
 export function formatGroupSpeakerMessage(speaker: string, text: string): string {

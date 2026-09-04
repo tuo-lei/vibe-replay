@@ -356,4 +356,74 @@ It's your turn, Vibe Replay GTM.`,
       firstPrompt: "",
     });
   });
+
+  it("does not count routine/agent meta wakes as prompts; inbound remaining text is a prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-grok-bot-meta-"));
+    tempDirs.push(root);
+    await writeSession(root, "44444444-4444-4444-8444-444444444444", [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "[routine]\nCheck unread inbox." }] },
+      },
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "[agent]\nContinue onboarding." }] },
+      },
+      {
+        role: "user",
+        message: {
+          content: [{ type: "text", text: "[inbound]\nCan you book a flight to Taipei?" }],
+        },
+      },
+    ]);
+
+    const sessions = await discoverGrokBotSessions([root], false);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      promptCount: 1,
+      firstPrompt: "Can you book a flight to Taipei?",
+    });
+    expect(sessions[0].firstPrompt).not.toContain("[inbound]");
+    expect(sessions[0].firstPrompt).not.toContain("[routine]");
+  });
+
+  it("prefers profile.json name for a non-group DM and labels subagents without a profile", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-dm-title-"));
+    tempDirs.push(dataRoot);
+    const transcripts = join(dataRoot, "agent-transcripts");
+    const dmId = "55555555-5555-4555-8555-555555555555";
+    const subId = "sand-subagent-66666666-6666-4666-8666-666666666666";
+    await writeSession(transcripts, dmId, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "[t0u]\nplain English prompt" }] },
+      },
+    ]);
+    await writeSession(transcripts, subId, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "explore the UI spec" }] },
+      },
+    ]);
+    await mkdir(join(dataRoot, "agents", dmId), { recursive: true });
+    await writeFile(
+      join(dataRoot, "agents", dmId, "profile.json"),
+      JSON.stringify({ name: "Travel Assistant" }),
+      "utf-8",
+    );
+    process.env.GROK_BOT_TRANSCRIPTS_DIR = transcripts;
+
+    const sessions = await discoverGrokBotSessions();
+    const dm = sessions.find((session) => session.sessionId === dmId);
+    const sub = sessions.find((session) => session.sessionId === subId);
+    expect(dm).toMatchObject({
+      title: "Travel Assistant",
+      project: "Travel Assistant",
+      firstPrompt: "plain English prompt",
+    });
+    expect(sub).toMatchObject({
+      title: "Grok Bot subagent",
+      firstPrompt: "explore the UI spec",
+    });
+  });
 });

@@ -7,6 +7,7 @@ import {
   formatGroupSpeakerMessage,
   isGrokBotGroupChatPayload,
   parseGrokBotGroupWake,
+  parseGrokBotLines,
   parseGrokBotSession,
 } from "../src/grok-bot/parser.js";
 import { transformToReplay } from "./helpers/transform.js";
@@ -113,6 +114,17 @@ The room is wrapping up.`);
     expect(wake?.messages[1].mentions).toEqual(["@Vibe Replay Eng"]);
   });
 
+  it("drops waiting-for-participants cues and peels a routine tag before the group header", () => {
+    const wake = parseGrokBotGroupWake(`[Group chat: "Launch room" - with Vibe Replay GTM]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: ping
+Waiting for other participants.
+It's your turn, Vibe Replay Eng.`);
+    expect(wake?.messages).toEqual([{ speaker: "User", text: "ping", mentions: [] }]);
+    expect(wake?.messages.some((msg) => /waiting for/i.test(msg.text))).toBe(false);
+  });
+
   it("formats a room header and speaker prefixes for replay text", () => {
     const wake = parseGrokBotGroupWake(ENG_WAKE);
     expect(wake).toBeTruthy();
@@ -134,6 +146,32 @@ The room is wrapping up.`);
 });
 
 describe("Grok Bot group-chat session parse", () => {
+  it("peels a [routine] tag so a wrapped group wake still splits by speaker", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `[routine]
+[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: Let's ship it.
+It's your turn, Vibe Replay Eng.`,
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(parsed.title).toBe("Group: Vibe Replay launch");
+    const users = parsed.turns.filter((turn) => turn.role === "user");
+    expect(users[0]).toMatchObject({ subtype: "context-injection" });
+    expect(users[1].blocks[0]).toEqual({ type: "text", text: "**User:** Let's ship it." });
+    expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("[routine]"))).toBe(false);
+  });
+
   it("splits the Engineer fixture into room context plus per-speaker user turns", async () => {
     const parsed = await parseGrokBotSession(join(fixtures, "group-eng.jsonl"));
     expect(parsed.title).toBe("Group: Vibe Replay launch");
@@ -188,10 +226,12 @@ describe("Grok Bot group-chat session parse", () => {
     expect(parsed.title).toBe("Group: Vibe Replay launch");
 
     const injections = parsed.turns.filter((turn) => turn.subtype === "context-injection");
-    expect(injections).toHaveLength(2);
-    expect(injections[1].blocks[0]).toMatchObject({
+    // Repeat wakes for the same room used to re-emit the header (including the
+    // empty "no new messages" wake). That duplicated the System Context card.
+    expect(injections).toHaveLength(1);
+    expect(injections[0].blocks[0]).toMatchObject({
       type: "text",
-      text: expect.stringContaining("No new messages since last turn."),
+      text: expect.stringContaining("Group chat: Vibe Replay launch"),
     });
 
     const speakerTurns = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
@@ -201,5 +241,8 @@ describe("Grok Bot group-chat session parse", () => {
       text: "**User:** Let's ship the Grok Bot replay provider this week.",
     });
     expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("wrapping up"))).toBe(false);
+    expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("No new messages"))).toBe(
+      false,
+    );
   });
 });
