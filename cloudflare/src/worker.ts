@@ -70,6 +70,8 @@ type Env = AuthEnv & {
   TEST_AUTH_USER_NAME?: string;
   /** Sentry project DSN; absent in local/test environments disables reporting. */
   SENTRY_DSN?: string;
+  /** Cloudflare deployment version metadata used as the Sentry release ID. */
+  CF_VERSION_METADATA?: { id: string };
 };
 
 type HonoEnv = { Bindings: Env };
@@ -2300,6 +2302,7 @@ export function scrubSentryRequest(event: Sentry.ErrorEvent): Sentry.ErrorEvent 
 export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
   return {
     dsn: env.SENTRY_DSN,
+    release: env.CF_VERSION_METADATA?.id,
     sendDefaultPii: false,
     // Keep tracing useful without sending every static asset request.
     tracesSampleRate: 0.1,

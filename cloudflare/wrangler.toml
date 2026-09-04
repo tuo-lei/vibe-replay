@@ -5,6 +5,9 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 routes = [{ pattern = "vibe-replay.com", custom_domain = true }]
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [assets]
 directory = "../website/dist"
 binding = "ASSETS"
