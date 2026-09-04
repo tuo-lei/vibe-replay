@@ -13,6 +13,7 @@ import {
   hermesDataDir,
   hermesDbPath,
   hermesDbPaths,
+  hermesProfileDir,
   openAllHermesDbs,
   openHermesDb,
 } from "./sqlite.js";
@@ -49,6 +50,7 @@ interface HermesSessionRow {
   end_reason: string | null;
   estimated_cost_usd: number | null;
   actual_cost_usd: number | null;
+  profile_name: string | null;
 }
 
 interface HermesModelUsageRow {
@@ -222,7 +224,8 @@ export function parseSessionFromDb(
   let totalTokens: TokenUsage | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
-  const cwd = session?.cwd || sessionInfo?.cwd || "";
+  const sessionCwd = typeof session?.cwd === "string" ? session.cwd.trim() : "";
+  const cwd = sessionCwd || sessionInfo?.cwd || hermesProfileDir(session?.profile_name) || "";
   const model = sessionInfo?.model || session?.model || undefined;
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   let truncatedResponses = 0;
@@ -350,18 +353,9 @@ export function parseSessionFromDb(
       else block._result = "";
       const startMs = pendingStartMs.get(block.id);
       const endMs = toMillisValue(message.timestamp);
-      if (
-        startMs !== undefined &&
-        endMs !== undefined &&
-        Number.isFinite(startMs) &&
-        Number.isFinite(endMs) &&
-        endMs >= startMs
-      ) {
-        const durationMs = endMs - startMs;
-        // Guard ultra-long gaps that belong to user-idle/compaction, not tool
-        // execution: Hermes still records the call after a multi-hour pause, but
-        // treating that gap as tool time would distort the activity chart.
-        if (durationMs > 0 && durationMs < 30 * 60 * 1000) {
+      if (startMs !== undefined && endMs !== undefined) {
+        const durationMs = inferredToolDurationMs(startMs, endMs);
+        if (durationMs !== undefined) {
           block._durationMs = durationMs;
           block._durationSource = "timestamp";
           block._durationAnchor = "start";
@@ -528,16 +522,26 @@ function usageByModelFromDb(
 }
 
 function toIsoMs(value?: number): string | undefined {
-  if (!value || value <= 0) return undefined;
-  const millis = value < 1_577_836_800_000 ? value * 1000 : value;
+  const millis = toMillisValue(value);
+  if (millis === undefined) return undefined;
   const d = new Date(millis);
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 function toMillisValue(value?: number): number | undefined {
   if (!value || value <= 0) return undefined;
-  const millis = value < 1_577_836_800_000 ? value * 1000 : value;
-  return Number.isNaN(millis) ? undefined : millis;
+  return value < 1_577_836_800_000 ? value * 1000 : value;
+}
+
+/**
+ * Hermes stores the tool call and result as separate rows. Infer duration from
+ * those timestamps, but ignore ultra-long gaps that belong to user-idle or
+ * compaction rather than tool execution.
+ */
+function inferredToolDurationMs(startMs: number, endMs: number): number | undefined {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return undefined;
+  const durationMs = endMs - startMs;
+  return durationMs > 0 && durationMs < 30 * 60 * 1000 ? durationMs : undefined;
 }
 
 export { hermesDataDir };

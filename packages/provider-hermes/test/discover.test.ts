@@ -2,8 +2,10 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { discoverHermesSessions, listSessionsFromDb } from "../src/hermes/discover.js";
 import { resolveSessionId } from "../src/hermes/parser.js";
+import { hermesProfileDir } from "../src/hermes/sqlite.js";
 import { buildHermesDb, toolCallsFor } from "./helpers/db.js";
 
 describe("hermes discover", () => {
@@ -386,7 +388,8 @@ describe("hermes multi-profile discovery", () => {
         {
           id: "20260901_222657_bot123",
           title: "Bot Chat",
-          cwd: "/Users/test/project",
+          cwd: "",
+          profileName: "ru",
           startedAt: 1_800_000_000,
           lastActivityAt: 1_800_000_010,
         },
@@ -401,16 +404,94 @@ describe("hermes multi-profile discovery", () => {
         },
       ],
     });
-    // Simulate a Bot Chat that lives under profiles/ru/state.db with no workspace cwd
-    db.run("UPDATE sessions SET cwd = NULL, profile_name = 'ru' WHERE id = ?", [
-      "20260901_222657_bot123",
-    ]);
 
     try {
       const sessions = listSessionsFromDb(db, "/tmp/.hermes/profiles/ru/state.db");
       expect(sessions).toHaveLength(1);
-      expect(sessions[0].project).toBe("~/.hermes/profiles/ru");
+      expect(sessions[0].project).toBe(shortenPath(hermesProfileDir("ru")!));
       expect(sessions[0].cwd).toBe("");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("maps cwd-less Bot Chat sessions under a custom HERMES_HOME", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "vibe-replay-hermes-")));
+    const prevHermesHome = process.env.HERMES_HOME;
+    process.env.HERMES_HOME = home;
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260901_222657_custom",
+          title: "Bot Chat",
+          cwd: null,
+          profileName: "ru",
+          startedAt: 1_800_000_000,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260901_222657_custom",
+          role: "user",
+          content: "hello bot",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].project).toBe(shortenPath(hermesProfileDir("ru")!));
+    } finally {
+      db.close();
+      if (prevHermesHome === undefined) delete process.env.HERMES_HOME;
+      else process.env.HERMES_HOME = prevHermesHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("treats whitespace-only cwd as missing and ignores path-like profile names", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260901_222657_blankcwd",
+          cwd: "   ",
+          profileName: "codex",
+          startedAt: 1_800_000_000,
+        },
+        {
+          id: "20260901_222657_badprof",
+          cwd: "",
+          profileName: "../etc",
+          startedAt: 1_800_000_000,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260901_222657_blankcwd",
+          role: "user",
+          content: "whitespace cwd bot",
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: "20260901_222657_badprof",
+          role: "user",
+          content: "unsafe profile name",
+          timestamp: 1_800_000_002,
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+      expect(byId.get("20260901_222657_blankcwd")?.project).toBe(
+        shortenPath(hermesProfileDir("codex")!),
+      );
+      expect(byId.get("20260901_222657_badprof")?.project).toBe("Hermes");
     } finally {
       db.close();
     }
@@ -421,7 +502,8 @@ describe("hermes multi-profile discovery", () => {
       sessions: [
         {
           id: "20260901_222657_noprof",
-          cwd: "/Users/test/project",
+          cwd: null,
+          profileName: null,
           startedAt: 1_800_000_000,
         },
       ],
@@ -435,9 +517,6 @@ describe("hermes multi-profile discovery", () => {
         },
       ],
     });
-    db.run("UPDATE sessions SET cwd = NULL, profile_name = NULL WHERE id = ?", [
-      "20260901_222657_noprof",
-    ]);
 
     try {
       const sessions = listSessionsFromDb(db);
