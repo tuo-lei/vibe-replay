@@ -5,7 +5,7 @@ import type { Database } from "sql.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
-import { hermesDataDir, hermesDbPath, openAllHermesDbs } from "./sqlite.js";
+import { hermesDataDir, hermesDbPath, hermesProfileDir, openAllHermesDbs } from "./sqlite.js";
 
 export const HERMES_PROVIDER = "hermes";
 
@@ -277,13 +277,21 @@ function sessionInfoFromRow(
   const markerPath = `${resolvedDbPath}#session:${row.id}`;
   const lastActivity = row.last_activity_at ?? row.ended_at ?? row.started_at;
 
+  // Bot Mode: each bot is a Hermes profile under `~/.hermes/profiles/<name>/`.
+  // When a session has no workspace cwd (Bot Chat, cron runs), fall back to
+  // the profile path so bots appear as distinct projects instead of a generic
+  // "Hermes" bucket.
+  const cwd = row.cwd?.trim() || "";
+  const profileDir = hermesProfileDir(row.profile_name);
+  const project = cwd ? shortenPath(cwd) : profileDir ? shortenPath(profileDir) : "Hermes";
+
   return {
     provider: HERMES_PROVIDER,
     sessionId: row.id,
     slug: row.id,
     title: row.title || undefined,
-    project: row.cwd ? shortenPath(row.cwd) : "Hermes",
-    cwd: row.cwd || "",
+    project,
+    cwd,
     version,
     gitBranch: row.git_branch || undefined,
     gitRepo: undefined,
