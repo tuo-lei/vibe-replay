@@ -92,6 +92,36 @@ describe("hermes parser", () => {
     }
   });
 
+  it("parses older databases without optional compaction and model-usage schema", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "Parse this legacy database",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    db.run("ALTER TABLE messages DROP COLUMN compacted");
+    db.run("DROP TABLE session_model_usage");
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.turns).toHaveLength(1);
+      expect(result.turns[0]?.blocks[0]).toMatchObject({
+        type: "text",
+        text: "Parse this legacy database",
+      });
+      expect(result.compactions).toBeUndefined();
+      expect(result.tokenUsageByModel).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("aggregates token usage from session and per-model rows", async () => {
     const db = await buildHermesDb({
       sessions: [
