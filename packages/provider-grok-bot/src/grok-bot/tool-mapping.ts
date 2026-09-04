@@ -3,8 +3,9 @@
  * (`read`, `write`, `shell`). The viewer's transform layer keys off canonical
  * names like `Read`, `Write`, `Bash` to build diffs and shell scenes.
  *
- * `send_message` / `communicate_update` are promoted to assistant text in the
- * parser and never reach this map. `mcp` keeps its raw name so the scanner's
+ * `send_message` and successful `communicate_update` are promoted to assistant
+ * text in the parser. Failed `communicate_update` reaches this map as
+ * `CommunicateUpdate`. `mcp` keeps its raw name so the scanner's
  * Pi-style `parseMcpUsage` branch can attribute server/tool from args.
  * Unrecognized tools (GitHub MCP names, future builtins) pass through unchanged.
  */
@@ -37,6 +38,7 @@ export function mapGrokBotToolName(name: string): string {
     await: "Await",
     computer_use: "ComputerUse",
     get_mcp_tools: "GetMcpTools",
+    communicate_update: "CommunicateUpdate",
   };
   return mapping[name.toLowerCase()] || name;
 }

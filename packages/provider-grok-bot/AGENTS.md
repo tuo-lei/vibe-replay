@@ -38,17 +38,20 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
     the wrapper is a follow-up prompt when present
   - A meta tag wrapping `[Group chat:` is peeled so the group splitter still runs
 - Assistant `text` is private scratch — keep it
-- `send_message` and `communicate_update` are user-visible replies / status
-  pings (`input.text.content`, widgets, occasional `to: "dm"` / attachments).
-  Promote visible text to an assistant `text` block; do **not** emit those as
-  tool-call scenes. Ignore `to` / `attachments` when extracting text
+- `send_message` and successful `communicate_update` are user-visible replies /
+  status pings (`input.text.content`, widgets, occasional `to: "dm"` /
+  attachments). Promote visible text to an assistant `text` block; do **not**
+  emit those as tool-call scenes. Ignore `to` / `attachments` when extracting
+  text. A `failure` / `rejected` / `error` `communicate_update` stays a
+  `CommunicateUpdate` tool scene with `_isError` so a failed ping is visible
 - `role: "tool"` lines carry `tool_result` (not Claude's user-nested pattern).
   Pair to the preceding `tool_use` by `toolCallId` when present, else by order
   (prefer matching tool name; leave unenriched rather than attaching another
   tool's result)
 - Few/no top-level timestamps; synthesize ISO times from `result.success.timestamp`
-  when it is epoch ms. Tool durations are inferred from the previous known
-  timestamp → this result (assistant records rarely have their own clock)
+  when it is epoch ms. Tool durations use the assistant record timestamp (when
+  present) as the initial baseline, then advance to each result so later tools
+  in the same turn are not cumulative from the start of the record
 - No thinking blobs in v1
 
 ## Tools

@@ -227,6 +227,7 @@ export function parseGrokBotLines(
 
     const blocks: ContentBlock[] = [];
     let turnTimestamp = recordTs;
+    let durationCursor = recordTs || lastKnownTimestamp;
     for (const block of asBlocks(content)) {
       const type = typeof block.type === "string" ? block.type : "";
       if (type === "text") {
@@ -239,18 +240,30 @@ export function parseGrokBotLines(
       const toolCallId = firstString(block.toolCallId, block.tool_call_id, block.tool_use_id);
       const id = toolCallId || `grok-${rawName}-${toolUseIndex++}`;
       const result = takeResult(rawName, toolCallId);
-      const durationStart = recordTs || lastKnownTimestamp;
+      const durationStart = durationCursor;
       if (result?.timestamp) {
         allTimestamps.push(result.timestamp);
         lastKnownTimestamp = result.timestamp;
+        durationCursor = result.timestamp;
         if (!turnTimestamp) turnTimestamp = result.timestamp;
       }
 
       if (PROMOTED_TEXT_TOOLS.has(rawName.toLowerCase())) {
-        const visible =
-          rawName.toLowerCase() === COMMUNICATE_UPDATE_TOOL
-            ? extractStatusUpdateText(block.input)
-            : extractSendMessageText(block.input);
+        const isStatusUpdate = rawName.toLowerCase() === COMMUNICATE_UPDATE_TOOL;
+        if (isStatusUpdate && result?.isError) {
+          const call: ToolCallSite = {
+            name: mapGrokBotToolName(rawName),
+            rawName,
+            id,
+            input: mapGrokBotToolArgs(rawName, block.input),
+            result,
+          };
+          blocks.push(buildToolUseBlock(call, durationStart));
+          continue;
+        }
+        const visible = isStatusUpdate
+          ? extractStatusUpdateText(block.input)
+          : extractSendMessageText(block.input);
         if (visible.trim()) blocks.push({ type: "text", text: visible });
         continue;
       }
@@ -289,7 +302,7 @@ export function parseGrokBotLines(
   const roots = getGrokBotTranscriptRoots();
   const notes = [
     "Grok Bot JSONL does not record token usage, thinking blobs, or model IDs in v1.",
-    "send_message and communicate_update calls are promoted to assistant text rather than tool-call scenes.",
+    "send_message and successful communicate_update calls are promoted to assistant text; failed communicate_update stays a tool-call scene.",
     "sand-subagent transcripts are indexed as separate sessions.",
     "Group-chat user payloads are split into a room context-injection and per-speaker turns; duplicate room headers and your-turn/wrapping-up cues are dropped.",
     "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection.",

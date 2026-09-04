@@ -503,6 +503,125 @@ describe("Grok Bot parser", () => {
     });
     expect(tools[2].type === "tool_use" && tools[2]._durationMs).toBe(5000);
   });
+
+  it("advances duration from each result when the assistant record itself is timestamped", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "run two tools" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        timestamp: 1788485460000,
+        message: {
+          content: [
+            { type: "tool_use", name: "read", toolCallId: "r-1", input: { path: "/a.md" } },
+            { type: "tool_use", name: "shell", toolCallId: "s-1", input: { command: "rg badge" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "read",
+              toolCallId: "r-1",
+              result: { success: { timestamp: 1788485462000, content: "ok" } },
+            },
+            {
+              type: "tool_result",
+              name: "shell",
+              toolCallId: "s-1",
+              result: { success: { timestamp: 1788485467000, stdout: "hit" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools[0]).toMatchObject({ name: "Read", _durationMs: 2000 });
+    expect(tools[1]).toMatchObject({ name: "Bash", _durationMs: 5000 });
+  });
+
+  it("keeps a failed communicate_update as an error tool and still promotes successes", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "status please" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "communicate_update",
+              toolCallId: "cu-fail",
+              input: { text: { content: "This ping never landed." } },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "communicate_update",
+              toolCallId: "cu-fail",
+              result: { failure: { message: "delivery failed" } },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "communicate_update",
+              toolCallId: "cu-ok",
+              input: { update: "Still working." },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "communicate_update",
+              toolCallId: "cu-ok",
+              result: { success: { timestamp: 1788485490000 } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      name: "CommunicateUpdate",
+      _isError: true,
+      _result: "delivery failed",
+    });
+    const texts = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "text")
+      .map((block) => (block.type === "text" ? block.text : ""));
+    expect(texts).toContain("Still working.");
+    expect(texts).not.toContain("This ping never landed.");
+  });
 });
 
 describe("Grok Bot tool mapping", () => {
@@ -513,6 +632,7 @@ describe("Grok Bot tool mapping", () => {
     expect(mapGrokBotToolName("await")).toBe("Await");
     expect(mapGrokBotToolName("computer_use")).toBe("ComputerUse");
     expect(mapGrokBotToolName("get_mcp_tools")).toBe("GetMcpTools");
+    expect(mapGrokBotToolName("communicate_update")).toBe("CommunicateUpdate");
     expect(mapGrokBotToolName("mcp")).toBe("mcp");
     expect(mapGrokBotToolName("pull_request_read")).toBe("pull_request_read");
     expect(mapGrokBotToolArgs("read", { path: "/tmp/a.ts" })).toMatchObject({
