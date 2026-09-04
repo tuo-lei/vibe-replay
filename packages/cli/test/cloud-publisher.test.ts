@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,8 +10,13 @@ vi.mock("node:os", async () => {
   return { ...actual, homedir: () => mockAuthDir };
 });
 
-const { loadAuthToken, loadSavedCloudInfo, publishCloudWithOverlays } =
-  await import("../src/publishers/cloud.js");
+const {
+  isAllowedApiUrl,
+  loadAuthToken,
+  loadSavedCloudInfo,
+  publishCloudWithOverlays,
+  saveAuthTokenSync,
+} = await import("../src/publishers/cloud.js");
 
 describe("cloud publisher", () => {
   beforeEach(() => {
@@ -129,6 +134,32 @@ describe("cloud publisher", () => {
       expect(auth).toBeNull();
     });
   });
+
+  it("requires HTTPS for production auth while allowing loopback development", () => {
+    expect(isAllowedApiUrl("https://vibe-replay.com")).toBe(true);
+    expect(isAllowedApiUrl("http://vibe-replay.com")).toBe(false);
+    expect(isAllowedApiUrl("http://localhost:8787")).toBe(true);
+    expect(isAllowedApiUrl("http://127.0.0.1:8787")).toBe(true);
+    expect(isAllowedApiUrl("https://vibe-replay.com.evil.example")).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "tightens permissions on an existing auth file and directory",
+    () => {
+      const authDir = join(mockAuthDir, ".config", "vibe-replay");
+      const authPath = join(authDir, "auth.json");
+      chmodSync(authDir, 0o755);
+      writeFileSync(authPath, "{}", { mode: 0o644 });
+
+      saveAuthTokenSync({
+        token: "session-token",
+        user: { id: "u1", name: "Test User" },
+      });
+
+      expect(statSync(authDir).mode & 0o777).toBe(0o700);
+      expect(statSync(authPath).mode & 0o777).toBe(0o600);
+    },
+  );
 
   describe("loadSavedCloudInfo", () => {
     it("returns undefined when no cloud meta file exists", async () => {

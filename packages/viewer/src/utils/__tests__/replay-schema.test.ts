@@ -32,4 +32,18 @@ describe("parseReplaySession", () => {
       "unsupported scene at index 0",
     );
   });
+
+  it("rejects scenes missing renderer-required fields", () => {
+    expect(() => parseReplaySession(replay({ scenes: [{ type: "user-prompt" }] }))).toThrow(
+      "missing string content",
+    );
+    expect(() =>
+      parseReplaySession(replay({ scenes: [{ type: "tool-call", toolName: "Read" }] })),
+    ).toThrow("missing tool input");
+    expect(() =>
+      parseReplaySession(
+        replay({ scenes: [{ type: "tool-call", toolName: "Read", input: {}, result: 42 }] }),
+      ),
+    ).toThrow("missing tool result");
+  });
 });

@@ -142,4 +142,17 @@ describe("same-origin API protection", () => {
     expect(write.status).toBe(403);
     await expect(write.json()).resolves.toEqual({ error: "API requests must be same-origin" });
   });
+
+  it("rejects API reads addressed through a DNS-rebinding host", async () => {
+    const app = new Hono();
+    __testables.registerSameOriginMutationGuard(app);
+    app.get("/api/replay", (c) => c.json({ ok: true }));
+
+    const response = await app.request("http://rebound.example:13456/api/replay");
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "API requests must target loopback",
+    });
+  });
 });

@@ -7,6 +7,7 @@ import { streamSSE } from "hono/streaming";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { parseClaudeCodeLines } from "../providers/claude-code/parser.js";
 import { parseCodexLines } from "../providers/codex/parser.js";
+import { parseGrokBotLines } from "../providers/grok-bot/parser.js";
 import { parsePiLines } from "../providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
@@ -20,6 +21,24 @@ import type { SessionInfo } from "../types.js";
 import { CLI_VERSION } from "../version.js";
 
 type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
+
+export async function parseJsonlLiveSession(
+  providerName: string,
+  lines: string[],
+  sessionInfo: SessionInfo,
+  paths: string[],
+) {
+  if (providerName === "claude-code") {
+    return parseClaudeCodeLines(lines, { subagentsSourcePath: paths[0] });
+  }
+  if (providerName === "codex") {
+    return parseCodexLines(lines, sessionInfo, paths);
+  }
+  if (providerName === "grok-bot") {
+    return parseGrokBotLines(lines, { sourcePath: paths[0], sessionInfo });
+  }
+  return parsePiLines(lines, { sourcePath: paths[0], sessionInfo });
+}
 
 async function readClaudeSessionState(sessionId: string): Promise<LiveSessionState> {
   const sessionsDir = join(homedir(), ".claude", "sessions");
@@ -250,11 +269,7 @@ export function registerLiveRoutes(app: Hono): void {
               const lines = await tailReadJsonl(fp);
               allLines.push(...lines);
             }
-            parsed = isClaudeProvider
-              ? await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] })
-              : isCodexProvider
-                ? parseCodexLines(allLines, info, paths)
-                : parsePiLines(allLines, { sourcePath: paths[0], sessionInfo: info });
+            parsed = await parseJsonlLiveSession(providerName, allLines, info, paths);
           } else {
             parsed = await provider.parse(paths, info);
           }

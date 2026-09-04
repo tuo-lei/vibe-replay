@@ -422,6 +422,42 @@ describe("Cloud API integration", () => {
     expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
   });
 
+  it("does not register secret gists in the public legacy replay index", async () => {
+    const gistId = "a".repeat(20);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          public: false,
+          owner: { login: "demo-user" },
+          files: {
+            "replay.json": {
+              filename: "replay.json",
+              content: JSON.stringify(sampleReplay()),
+            },
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    try {
+      const response = await dispatch("/api/replays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gist_id: gistId }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "not a valid vibe-replay gist" });
+      const row = await env.DB.prepare("SELECT gist_id FROM replays WHERE gist_id = ?")
+        .bind(gistId)
+        .first();
+      expect(row).toBeNull();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("rejects malformed JSON bodies with 400 responses", async () => {
     const uploaded = await uploadReplay();
     const invalidJson = {

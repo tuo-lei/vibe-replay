@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -13,6 +13,18 @@ const CLOUD_META_FILE = ".vibe-replay-cloud.json";
 export const DEFAULT_API_URL = "https://vibe-replay.com";
 const AUTH_DIR = join(homedir(), ".config", "vibe-replay");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
+
+/** Allow production HTTPS and local development HTTP API origins only. */
+export function isAllowedApiUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+    const loopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    return loopback || (hostname === "vibe-replay.com" && url.protocol === "https:");
+  } catch {
+    return false;
+  }
+}
 
 export interface CloudResult {
   id: string;
@@ -67,11 +79,15 @@ function readAuthStore(): AuthStore {
 function writeAuthStoreSync(store: AuthStore): void {
   mkdirSync(AUTH_DIR, { recursive: true, mode: 0o700 });
   writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2), { mode: 0o600 });
+  chmodSync(AUTH_DIR, 0o700);
+  chmodSync(AUTH_FILE, 0o600);
 }
 
 async function writeAuthStoreAsync(store: AuthStore): Promise<void> {
   await mkdir(AUTH_DIR, { recursive: true, mode: 0o700 });
   await writeFile(AUTH_FILE, JSON.stringify(store, null, 2), { mode: 0o600 });
+  await chmod(AUTH_DIR, 0o700);
+  await chmod(AUTH_FILE, 0o600);
 }
 
 /** Load auth token for the given API URL (defaults to current VIBE_REPLAY_API_URL) */
