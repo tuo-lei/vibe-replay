@@ -64,7 +64,9 @@ export function parseGrokBotGroupWake(text: string): GrokBotGroupWake | null {
   const header = HEADER_RE.exec(trimmed);
   const groupTitle = (header?.[1] || header?.[2] || header?.[3] || "").trim();
   const withParticipants = splitNameList(header?.[4] || "");
-  const afterHeader = header ? trimmed.slice(header[0].length) : trimmed.replace(GROUP_PREFIX_RE, "");
+  const afterHeader = header
+    ? trimmed.slice(header[0].length)
+    : trimmed.replace(GROUP_PREFIX_RE, "");
   const lines = afterHeader.replace(/\r\n/g, "\n").split("\n");
 
   const participants: GrokBotGroupParticipant[] = [];
@@ -119,7 +121,11 @@ export function parseGrokBotGroupWake(text: string): GrokBotGroupWake | null {
       continue;
     }
 
-    if (YOUR_TURN_RE.test(trimmedLine) || WRAPPING_UP_RE.test(trimmedLine) || REPLY_IN_ROOM_RE.test(trimmedLine)) {
+    if (
+      YOUR_TURN_RE.test(trimmedLine) ||
+      WRAPPING_UP_RE.test(trimmedLine) ||
+      REPLY_IN_ROOM_RE.test(trimmedLine)
+    ) {
       flush();
       inMessages = false;
       const recipient = TURN_RECIPIENT_RE.exec(trimmedLine)?.[1]?.trim();
@@ -255,7 +261,10 @@ function parseParticipantList(rest: string): GrokBotGroupParticipant[] {
     }
     cursor = (match.index ?? 0) + match[0].length;
   }
-  const leftover = rest.slice(cursor).replace(/^[,;\s]+/, "").trim();
+  const leftover = rest
+    .slice(cursor)
+    .replace(/^[,;\s]+/, "")
+    .trim();
   if (leftover) participants.push(...splitNameList(leftover).map((name) => ({ name })));
   return participants;
 }

@@ -124,7 +124,9 @@ The room is wrapping up.`);
         "Mentions: @Vibe Replay Eng",
       ].join("\n"),
     );
-    expect(formatGroupSpeakerMessage("Vibe Replay GTM", "hello")).toBe("**Vibe Replay GTM:** hello");
+    expect(formatGroupSpeakerMessage("Vibe Replay GTM", "hello")).toBe(
+      "**Vibe Replay GTM:** hello",
+    );
     expect(extractGroupMentions("@Vibe Replay Eng please look", ["Vibe Replay Eng"])).toEqual([
       "@Vibe Replay Eng",
     ]);
