@@ -379,4 +379,72 @@ describe("hermes multi-profile discovery", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("maps Bot Chat sessions without cwd to their profile path so bots are distinct", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260901_222657_bot123",
+          title: "Bot Chat",
+          cwd: "/Users/test/project",
+          startedAt: 1_800_000_000,
+          lastActivityAt: 1_800_000_010,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260901_222657_bot123",
+          role: "user",
+          content: "hello bot",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    // Simulate a Bot Chat that lives under profiles/ru/state.db with no workspace cwd
+    db.run("UPDATE sessions SET cwd = NULL, profile_name = 'ru' WHERE id = ?", [
+      "20260901_222657_bot123",
+    ]);
+
+    try {
+      const sessions = listSessionsFromDb(db, "/tmp/.hermes/profiles/ru/state.db");
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].project).toBe("~/.hermes/profiles/ru");
+      expect(sessions[0].cwd).toBe("");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to generic Hermes project when neither cwd nor profile is set", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260901_222657_noprof",
+          cwd: "/Users/test/project",
+          startedAt: 1_800_000_000,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260901_222657_noprof",
+          role: "user",
+          content: "hello",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    db.run("UPDATE sessions SET cwd = NULL, profile_name = NULL WHERE id = ?", [
+      "20260901_222657_noprof",
+    ]);
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].project).toBe("Hermes");
+    } finally {
+      db.close();
+    }
+  });
 });

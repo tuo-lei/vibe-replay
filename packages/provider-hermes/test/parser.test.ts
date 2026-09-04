@@ -601,4 +601,94 @@ describe("hermes parser", () => {
       db.close();
     }
   });
+
+  it("infers tool duration from assistant and tool timestamps for activity insights", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([
+            { id: "call_dur1", name: "terminal", args: { command: "sleep 1" } },
+          ]),
+          timestamp: 1_800_000_002,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_dur1",
+          content: "done",
+          timestamp: 1_800_000_003,
+        },
+        {
+          id: 3,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_dur2", name: "read_file", args: { path: "a.ts" } }]),
+          timestamp: 1_800_000_004,
+        },
+        {
+          id: 4,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "read_file",
+          toolCallId: "call_dur2",
+          content: "file content",
+          timestamp: 1_800_000_004.5,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      const tools = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      ) as Array<Extract<(typeof result.turns)[number]["blocks"][number], { type: "tool_use" }>>;
+      expect(tools).toHaveLength(2);
+      expect(tools[0]._durationMs).toBe(1000);
+      expect(tools[0]._durationSource).toBe("timestamp");
+      expect(tools[0]._durationAnchor).toBe("start");
+      expect(tools[1]._durationMs).toBe(500);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not assign tool duration when timestamps would imply an unrealistic gap", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "assistant",
+          toolCalls: toolCallsFor([{ id: "call_long", name: "terminal", args: { command: "x" } }]),
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_long",
+          content: "done",
+          timestamp: 1_800_000_001 + 60 * 60, // 1 hour later — should be treated as idle, not tool time
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      const tool = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      )[0] as Extract<(typeof result.turns)[number]["blocks"][number], { type: "tool_use" }>;
+      expect(tool._durationMs).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
 });

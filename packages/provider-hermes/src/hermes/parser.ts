@@ -230,6 +230,10 @@ export function parseSessionFromDb(
   // Track assistant tool_use blocks awaiting their role='tool' result, keyed
   // by call id so parallel tool calls each resolve to the right block.
   const pendingResults = new Map<string, Extract<ContentBlock, { type: "tool_use" }>>();
+  // Hermes persists a separate assistant row for the call and a tool row for
+  // the result, each with its own timestamp. Track the call timestamp so we
+  // can infer a provider-style duration for activity timelines and insights.
+  const pendingStartMs = new Map<string, number>();
 
   for (const message of messages) {
     const timestamp = toIsoMs(message.timestamp);
@@ -269,6 +273,7 @@ export function parseSessionFromDb(
       if (text) blocks.push({ type: "text", text });
 
       const toolCalls = parseToolCalls(message.tool_calls, message.id, parseWarnings);
+      const callStartMs = toMillisValue(message.timestamp);
       for (const call of toolCalls) {
         const rawName = call.function?.name || "";
         const input = parseArguments(call.function?.arguments, message.id, parseWarnings);
@@ -288,6 +293,9 @@ export function parseSessionFromDb(
         };
         blocks.push(block);
         pendingResults.set(block.id, block);
+        if (callStartMs !== undefined && Number.isFinite(callStartMs) && callStartMs > 0) {
+          pendingStartMs.set(block.id, callStartMs);
+        }
 
         if (rawName === "skill_view") {
           const skillName = typeof mappedInput.name === "string" ? mappedInput.name.trim() : "";
@@ -340,7 +348,27 @@ export function parseSessionFromDb(
       block._hasResult = true;
       if (result) block._result = result;
       else block._result = "";
+      const startMs = pendingStartMs.get(block.id);
+      const endMs = toMillisValue(message.timestamp);
+      if (
+        startMs !== undefined &&
+        endMs !== undefined &&
+        Number.isFinite(startMs) &&
+        Number.isFinite(endMs) &&
+        endMs >= startMs
+      ) {
+        const durationMs = endMs - startMs;
+        // Guard ultra-long gaps that belong to user-idle/compaction, not tool
+        // execution: Hermes still records the call after a multi-hour pause, but
+        // treating that gap as tool time would distort the activity chart.
+        if (durationMs > 0 && durationMs < 30 * 60 * 1000) {
+          block._durationMs = durationMs;
+          block._durationSource = "timestamp";
+          block._durationAnchor = "start";
+        }
+      }
       pendingResults.delete(block.id);
+      pendingStartMs.delete(block.id);
       continue;
     }
 
@@ -504,6 +532,12 @@ function toIsoMs(value?: number): string | undefined {
   const millis = value < 1_577_836_800_000 ? value * 1000 : value;
   const d = new Date(millis);
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+function toMillisValue(value?: number): number | undefined {
+  if (!value || value <= 0) return undefined;
+  const millis = value < 1_577_836_800_000 ? value * 1000 : value;
+  return Number.isNaN(millis) ? undefined : millis;
 }
 
 export { hermesDataDir };
