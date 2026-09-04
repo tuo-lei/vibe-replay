@@ -42,6 +42,24 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
   when it is epoch ms, otherwise omit / use file mtime for discovery
 - No thinking blobs in v1
 
+## Group chat
+
+Group turns arrive as ordinary `role:"user"` text starting with `[Group chat:`.
+Do **not** treat the blob as one human prompt.
+
+- Split into: one `subtype: "context-injection"` room header (title, participants,
+  `@mentions`), then one user turn per `Speaker: message` in order (`**Speaker:**`
+  prefix — the viewer has no multi-speaker scene type)
+- Drop procedural cues: `It's your turn…`, `The room is wrapping up…`,
+  `No new messages in the room…` (empty wakes are not prompts)
+- Title becomes `Group: <room title>` when any group payload is seen
+- Discovery: project = group title from recent wakes, else sibling
+  `agents/<id>/group.json` / profile `groupTitle`. Eng and GTM stay separate
+  transcripts in v1 — no cross-agent timeline merge
+- `@Vibe Replay Eng` stays in speaker text and is listed on the room header
+
+Fixtures: `test/fixtures/group-eng.jsonl`, `test/fixtures/group-gtm.jsonl`.
+
 Try with:
 
 ```bash
