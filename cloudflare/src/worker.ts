@@ -2301,6 +2301,9 @@ export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
   return {
     dsn: env.SENTRY_DSN,
     sendDefaultPii: false,
+    // Keep tracing useful without sending every static asset request.
+    tracesSampleRate: 0.1,
+    traceLifecycle: "stream",
     dataCollection: {
       userInfo: false,
       cookies: false,
