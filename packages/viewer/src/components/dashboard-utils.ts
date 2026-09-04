@@ -415,7 +415,7 @@ function sourcePromptTitle(
 export function sourceSuggestedTitle(s: SourceSession): string {
   const promptTitle = sourcePromptTitle(s);
   if (s.replay?.title) {
-    const replayTitle = normalizeTitleText(s.replay.title);
+    const replayTitle = sessionTitleValue(s.provider, s.replay.title);
     if (replayTitle) return replayTitle;
   }
   return promptTitle;

@@ -142,7 +142,7 @@ function closeCachedSqlJsDb(): void {
 
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v7";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v8";
 
 interface CursorComposerHeader {
   composerId: string;
