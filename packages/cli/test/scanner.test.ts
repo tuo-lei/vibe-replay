@@ -249,6 +249,83 @@ describe("scanSession", () => {
     ]);
   });
 
+  it("indexes Grok Bot JSONL via the native parser", async () => {
+    const grokPath = join(tmpDir, "grok-bot-session.jsonl");
+    await writeFile(
+      grokPath,
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT] hidden" }] },
+        },
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "[t0u]\nexplain the UI" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "scratch" },
+              {
+                type: "tool_use",
+                name: "send_message",
+                input: { text: { content: "Here is the UI." } },
+              },
+            ],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "send_message",
+                result: { success: { messageId: "t0s0" } },
+              },
+            ],
+          },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "read", input: { path: "/home/box/app.md" } }],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "read",
+                result: { success: { content: "# UI" } },
+              },
+            ],
+          },
+        },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(""),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "grok-bot-scan",
+      provider: "grok-bot",
+      project: "/home/box",
+      slug: "grok-bot-scan",
+      filePaths: [grokPath],
+    });
+
+    expect(result.promptCount).toBe(1);
+    expect(result.toolCallCount).toBe(1);
+    expect(result.firstPrompt).toBe("explain the UI");
+    expect(result.usageIndexed).toBe(true);
+    expect(result.usageSummary?.tools).toMatchObject({ Read: 1 });
+  });
+
   it("persists structured Pi compaction diagnostics in scan results", async () => {
     const piPath = join(tmpDir, "pi-diagnostics.jsonl");
     await writeFile(

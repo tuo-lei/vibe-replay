@@ -209,7 +209,9 @@ function formatProviderBadge(provider: string): string {
                 ? chalk.hex("#F85149")("hermes")
                 : provider === "pi"
                   ? chalk.hex("#14B8A6")("pi")
-                  : chalk.yellow(provider);
+                  : provider === "grok-bot"
+                    ? chalk.hex("#EAB308")("grok-bot")
+                    : chalk.yellow(provider);
 }
 
 function printParseWarnings(warnings?: ParseWarning[]): void {
@@ -826,7 +828,7 @@ program
   .option("--project <text>", "Filter by project path substring")
   .option(
     "-P, --provider-filter <name>",
-    "Filter by provider (claude-code, cursor, codex, pi, ...)",
+    "Filter by provider (claude-code, cursor, codex, grok-bot, pi, ...)",
   )
   .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
   .option("--scan", "Run richer per-session scan for efficiency metrics")

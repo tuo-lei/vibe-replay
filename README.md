@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](./LICENSE)
 
-Turn Claude, Cursor, Codex, OpenCode, Hermes, and Pi sessions into shareable, interactive replays — then analyze them with local insights, AI Studio, and Ask Replay.
+Turn Claude, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot sessions into shareable, interactive replays — then analyze them with local insights, AI Studio, and Ask Replay.
 
 ### The problem
 
@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand any session to see its own tool/MCP breakdown, and generate any replay in one click.
+Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand any session to see its own tool/MCP breakdown, and generate any replay in one click.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
@@ -170,7 +170,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Local-first** — one command and no account required for local replays; sign in only when you want cloud publishing or synced insights
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
-- **Claude, Cursor, Codex, OpenCode, Hermes, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
+- **Claude, Cursor, Codex, OpenCode, Hermes, Pi, and Grok Bot** — all providers auto-discovered, including multi-file and resumed sessions
 - **Remote SSH sources** — optionally combine remote Codex, Claude Code, and Pi JSONL sessions with local sessions using standard OpenSSH configuration
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
 - **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including OpenAI-compatible local or remote endpoints
@@ -192,7 +192,16 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Pi | Supported (JSONL tree sessions, branching, compaction summaries) |
+| Grok Bot | Supported (cloud-box JSONL; `send_message` promoted to visible replies) |
 | More coming soon | — |
+
+Grok Bot sessions live on the cloud box (`/home/box/agent-data/agent-transcripts`, often a symlink to `sand-data`). Point discovery at a copy with `GROK_BOT_TRANSCRIPTS_DIR` (or `VIBE_REPLAY_GROK_BOT_DIR`), or drop files under `~/.grok-bot/agent-transcripts`:
+
+```bash
+GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay -p grok-bot
+```
+
+SSH remote indexing of Grok Bot transcripts is not included yet.
 
 ## How It Works
 
@@ -200,7 +209,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 AI session files  →  vibe-replay  →  self-contained HTML
 (Claude/Cursor,      (discover,       (animated viewer,
  Codex/OpenCode,      parse,           insights panel,
- Hermes/Pi)           redact,          offline-ready,
+ Hermes/Pi/Grok Bot)  redact,          offline-ready,
                       transform)       shareable)
 ```
 
