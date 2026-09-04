@@ -15,6 +15,7 @@ import { buildUsageCoverageReport } from "../usage-coverage.js";
 import { enrichmentHintsFromBody } from "../server-enrichment.js";
 import { safeTargetId } from "../server-core.js";
 import type { ReplaySummary } from "../server-types.js";
+import { recordTelemetry } from "../telemetry.js";
 
 interface InsightsCache {
   userInsights: ReturnType<typeof aggregateUserInsights> | null;
@@ -229,8 +230,10 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
       });
     }
     if (result.total === 0) {
+      recordTelemetry("insights.sync");
       return c.json({ synced: 0, message: "All insights already synced" });
     }
+    recordTelemetry("insights.sync");
     return c.json({
       synced: result.synced,
       total: result.total,

@@ -120,6 +120,13 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
 
+### Pseudonymous CLI telemetry
+
+The CLI sends opt-out, pseudonymous feature counts and coarse scan-size buckets
+to improve the product. It never sends prompts, replay/session contents, paths,
+project names, or user IDs. Disable it with `vibe-replay telemetry disable`,
+`VIBE_REPLAY_TELEMETRY=0`, or `DO_NOT_TRACK=1`; CI runs disable it automatically.
+
 ### Install (recommended)
 
 Open Claude Code, run `/plugin`, then search **vibe-replay** in the **Discover** tab and install.

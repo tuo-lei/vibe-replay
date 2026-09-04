@@ -271,3 +271,40 @@ export const dailyInsights = sqliteTable(
     index("idx_daily_machine").on(table.userId, table.machineId),
   ],
 );
+
+// Pseudonymous CLI telemetry aggregates. Raw installation IDs are never stored.
+export const telemetryDaily = sqliteTable(
+  "telemetry_daily",
+  {
+    day: text("day").notNull(),
+    event: text("event").notNull(),
+    version: text("version").notNull(),
+    platform: text("platform").notNull(),
+    dimensions: text("dimensions").notNull().default(""),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [
+    unique("uq_telemetry_daily").on(
+      table.day,
+      table.event,
+      table.version,
+      table.platform,
+      table.dimensions,
+    ),
+    index("idx_telemetry_daily_day").on(table.day),
+    index("idx_telemetry_daily_event").on(table.event, table.day),
+  ],
+);
+
+export const telemetryMonthlyUsers = sqliteTable(
+  "telemetry_monthly_users",
+  {
+    month: text("month").notNull(),
+    event: text("event").notNull(),
+    installationHash: text("installation_hash").notNull(),
+  },
+  (table) => [
+    unique("uq_telemetry_monthly_user").on(table.month, table.event, table.installationHash),
+    index("idx_telemetry_monthly_event").on(table.event, table.month),
+  ],
+);

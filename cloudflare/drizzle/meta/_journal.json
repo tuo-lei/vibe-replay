@@ -71,6 +71,13 @@
       "when": 1788416961315,
       "tag": "0009_add_account_issuer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788541251491,
+      "tag": "0010_ambitious_iron_monger",
+      "breakpoints": true
     }
   ]
 }
