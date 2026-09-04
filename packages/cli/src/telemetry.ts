@@ -132,7 +132,7 @@ function effectiveTelemetryStatus(state: TelemetryState | null): TelemetryStatus
       configured: state !== null,
       source: process.env.CI
         ? "ci"
-        : process.env.VIBE_REPLAY_DEV || process.env.VIBE_REPLAY_DEV_MENU
+        : process.env.VIBE_REPLAY_DEV === "1" || process.env.VIBE_REPLAY_DEV_MENU === "1"
           ? "development"
           : "environment",
     };
