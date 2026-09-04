@@ -167,7 +167,9 @@ describe("Cloud API integration", () => {
   it("disables sensitive request data in Sentry events", () => {
     const options = createSentryOptions({
       SENTRY_DSN: "https://example.invalid/1",
+      CF_VERSION_METADATA: { id: "version-test" },
     } as Parameters<typeof createSentryOptions>[0]);
+    expect(options.release).toBe("version-test");
     expect(options.sendDefaultPii).toBe(false);
     expect(options.tracesSampleRate).toBe(0.1);
     expect(options.traceLifecycle).toBe("stream");

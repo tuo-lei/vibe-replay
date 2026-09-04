@@ -286,6 +286,9 @@ cd cloudflare
 pnpm exec wrangler secret put SENTRY_DSN
 ```
 
+Cloudflare version metadata is used as the Sentry release ID, so each Worker
+deployment is automatically associated with its own release.
+
 The Worker disables Sentry user information and HTTP request bodies so prompts,
 replay contents, and credentials are not sent as event data. It samples 10% of
 traces and streams sampled spans from the Worker. Local and test environments
