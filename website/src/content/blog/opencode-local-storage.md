@@ -33,11 +33,13 @@ On macOS and Linux, OpenCode normally uses:
 
 On Windows, the default follows `%LOCALAPPDATA%\opencode\opencode.db`. `OPENCODE_DATA` overrides the data directory on every platform. On macOS and Linux, `XDG_DATA_HOME` can move the whole XDG data root, so the default is `${XDG_DATA_HOME:-$HOME/.local/share}/opencode`.
 
-The portable way to locate the database is:
+The portable way to locate the database on macOS and Linux is:
 
 ```bash
 echo "${OPENCODE_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/opencode}/opencode.db"
 ```
+
+On Windows, use `%OPENCODE_DATA%\opencode.db` when that variable is set, otherwise `%LOCALAPPDATA%\opencode\opencode.db`. The Bash snippets below are for Unix shells.
 
 The variable names and schema are implementation details of the local OpenCode build. A future release may add columns or reshape JSON payloads without changing the fact that the database is the source of truth.
 

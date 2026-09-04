@@ -196,7 +196,7 @@ The viewer can therefore show a full Hermes session without flattening away prof
 
 ## A safe way to inspect Hermes history
 
-Start with schema and catalog metadata:
+Start with schema and catalog metadata. This inspects **one** database — the default home, or whatever `HERMES_HOME` points at. Use the `find` command above to list every `state.db` first, then repeat the query per file:
 
 ```bash
 DB="${HERMES_HOME:-$HOME/.hermes}/state.db"
