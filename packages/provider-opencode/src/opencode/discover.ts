@@ -128,6 +128,9 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       JOIN message m ON m.id = p.message_id
       WHERE CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END = 'user'
         AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END = 'text'
+        AND COALESCE(
+          CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.synthetic') END, 0
+        ) != 1
         AND NOT EXISTS (
           SELECT 1
           FROM part compact
@@ -154,7 +157,7 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       SELECT session_id, count(*) AS c
       FROM part
       WHERE CASE WHEN json_valid(data) THEN json_extract(data, '$.type') END = 'tool'
-        AND CASE WHEN json_valid(data) THEN json_extract(data, '$.tool') END IN ('edit', 'write', 'patch')
+        AND CASE WHEN json_valid(data) THEN json_extract(data, '$.tool') END IN ('edit', 'write', 'patch', 'apply_patch')
       GROUP BY session_id
     `,
   );
@@ -241,6 +244,9 @@ function firstUserPrompts(db: Database): Map<string, string> {
       JOIN message m ON m.id = p.message_id
       WHERE CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END = 'user'
         AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END = 'text'
+        AND COALESCE(
+          CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.synthetic') END, 0
+        ) != 1
         AND NOT EXISTS (
           SELECT 1
           FROM part compact

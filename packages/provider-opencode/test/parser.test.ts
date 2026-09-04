@@ -436,4 +436,464 @@ describe("opencode parser", () => {
       db.close();
     }
   });
+
+  it("marks AI-SDK 'length' finishes as truncated turns", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_len",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_010_000,
+          finish: "length",
+          parts: [{ type: "text", text: "Partial answer cut off mid-way" }],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.truncatedResponses).toBe(1);
+      expect(result.turns[0]).toMatchObject({
+        role: "assistant",
+        stopReason: "max_tokens",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records failed assistant finishes as privacy-safe apiErrors", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_err1",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_011_000,
+          finish: "error",
+          error: { name: "APIError" },
+          parts: [{ type: "text", text: "" }],
+        },
+        {
+          id: "msg_err2",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_012_000,
+          finish: "error",
+          // Prose stored where a name belongs is a message, not a type: never stored.
+          error: { name: "429 too many requests: rate limit for prompt abc" },
+          parts: [{ type: "text", text: "" }],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.apiErrors).toHaveLength(2);
+      expect(result.apiErrors?.[0]).toMatchObject({ errorType: "APIError" });
+      expect(result.apiErrors?.[1]).toEqual({
+        timestamp: new Date(1_800_000_012_000).toISOString(),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("builds per-turn stats from assistant message usage", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_u1",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_020_000,
+          parts: [{ type: "text", text: "first prompt" }],
+        },
+        {
+          id: "msg_a1",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "model-a",
+          timeCreated: 1_800_000_021_000,
+          tokens: { input: 100, output: 20, cache: { read: 40, write: 10 } },
+          parts: [{ type: "text", text: "step one" }],
+        },
+        {
+          id: "msg_a2",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "model-a",
+          timeCreated: 1_800_000_023_000,
+          tokens: { input: 200, output: 30 },
+          parts: [{ type: "text", text: "step two" }],
+        },
+        {
+          id: "msg_u2",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_026_000,
+          parts: [{ type: "text", text: "second prompt" }],
+        },
+        {
+          id: "msg_a3",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "model-b",
+          timeCreated: 1_800_000_027_000,
+          tokens: { input: 55, output: 5 },
+          parts: [{ type: "text", text: "answer two" }],
+        },
+      ],
+    });
+    // Give two assistant messages a measurable active window.
+    db.run("UPDATE message SET data = json_set(data, '$.time.completed', ?) WHERE id = ?", [
+      1_800_000_022_000,
+      "msg_a1",
+    ]);
+    db.run("UPDATE message SET data = json_set(data, '$.time.completed', ?) WHERE id = ?", [
+      1_800_000_025_000,
+      "msg_a2",
+    ]);
+    db.run("UPDATE message SET data = json_set(data, '$.time.completed', ?) WHERE id = ?", [
+      1_800_000_028_000,
+      "msg_a3",
+    ]);
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.turnStats).toHaveLength(2);
+      expect(result.turnStats?.[0]).toMatchObject({
+        turnIndex: 0,
+        model: "model-a",
+        tokenUsage: {
+          inputTokens: 300,
+          outputTokens: 50,
+          cacheReadTokens: 40,
+          cacheCreationTokens: 10,
+        },
+        contextTokens: 200,
+        durationMs: 3_000,
+      });
+      expect(result.turnStats?.[1]).toMatchObject({
+        turnIndex: 1,
+        model: "model-b",
+        tokenUsage: { inputTokens: 55, outputTokens: 5 },
+        durationMs: 1_000,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to summed per-message cost when the session cost is missing", async () => {
+    const db = await buildOpencodeDb({
+      session: [{ ...baseSession, cost: 0 }],
+      messages: [
+        {
+          id: "msg_c1",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_030_000,
+          parts: [{ type: "text", text: "cost me" }],
+        },
+        {
+          id: "msg_c2",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_031_000,
+          cost: 0.05,
+          parts: [{ type: "text", text: "billed" }],
+        },
+        {
+          id: "msg_c3",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_032_000,
+          cost: 0.01,
+          parts: [{ type: "text", text: "billed again" }],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.reportedCostUsd).toBeCloseTo(0.06, 6);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("attaches the spawned child session to its task tool call", async () => {
+    const db = await buildOpencodeDb({
+      session: [
+        baseSession,
+        {
+          id: "ses_probe",
+          slug: "probe",
+          directory: "/Users/test/project",
+          parentId: "ses_111",
+        },
+      ],
+      messages: [
+        {
+          id: "msg_u1",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_040_000,
+          parts: [{ type: "text", text: "Delegate a probe" }],
+        },
+        {
+          id: "msg_a1",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_041_000,
+          finish: "tool-calls",
+          parts: [
+            {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_1",
+              state: {
+                status: "completed",
+                input: {
+                  description: "Probe answer",
+                  prompt: "Find the answer file",
+                  subagent_type: "explore",
+                },
+                output: "answer: 42",
+                metadata: {
+                  parentSessionId: "ses_111",
+                  sessionId: "ses_probe",
+                  model: { modelID: "sub-model", providerID: "p" },
+                },
+                time: { start: 1_800_000_041_100, end: 1_800_000_043_000 },
+              },
+            },
+          ],
+        },
+        {
+          id: "msg_cu1",
+          sessionId: "ses_probe",
+          role: "user",
+          timeCreated: 1_800_000_041_500,
+          parts: [{ type: "text", text: "Find the answer file" }],
+        },
+        {
+          id: "msg_ca1",
+          sessionId: "ses_probe",
+          role: "assistant",
+          modelID: "sub-model",
+          timeCreated: 1_800_000_042_000,
+          tokens: { input: 10, output: 5 },
+          finish: "tool-calls",
+          parts: [
+            { type: "reasoning", text: "Checking the project layout." },
+            {
+              type: "tool",
+              tool: "read",
+              callID: "call_sub_read",
+              state: {
+                status: "completed",
+                input: { filePath: "answer.txt" },
+                output: "file body",
+                time: { start: 1_800_000_042_100, end: 1_800_000_042_400 },
+              },
+            },
+            { type: "text", text: "answer: 42" },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.subAgentSummary).toEqual([
+        {
+          agentId: "ses_probe",
+          agentType: "Explore",
+          description: "Probe answer",
+          toolCalls: 1,
+          model: "sub-model",
+        },
+      ]);
+
+      const agentBlock = result.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.type === "tool_use" && block.name === "Agent");
+      expect(agentBlock).toBeDefined();
+      const sub = (agentBlock as any)?._subAgent;
+      expect(sub).toMatchObject({
+        agentId: "ses_probe",
+        agentType: "Explore",
+        description: "Probe answer",
+        prompt: "Find the answer file",
+        toolCalls: 1,
+        thinkingBlocks: 1,
+        textResponses: 1,
+        model: "sub-model",
+        tokenUsage: { inputTokens: 10, outputTokens: 5 },
+      });
+      const toolScene = sub.scenes.find((scene: any) => scene.type === "tool-call");
+      expect(toolScene).toMatchObject({
+        toolName: "Read",
+        input: { file_path: "answer.txt" },
+        result: "file body",
+        hasResult: true,
+        isError: false,
+        durationMs: 300,
+      });
+      expect(sub.usageEvents).toHaveLength(1);
+      expect(sub.usageEvents[0]).toMatchObject({
+        kind: "tool",
+        name: "Read",
+        status: "success",
+        durationMs: 300,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves task calls without a child-session link as a bare Agent block", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_a_orphan",
+          sessionId: "ses_111",
+          role: "assistant",
+          timeCreated: 1_800_000_045_000,
+          finish: "tool-calls",
+          parts: [
+            {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_orphan",
+              state: {
+                status: "completed",
+                input: { description: "Legacy", prompt: "older format", subagent_type: "general" },
+                output: "done",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.subAgentSummary).toBeUndefined();
+      const agentBlock = result.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.type === "tool_use" && block.name === "Agent");
+      expect(agentBlock).toBeDefined();
+      expect((agentBlock as any)?._subAgent).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("drops synthetic text parts from user turns", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_syn",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_050_000,
+          parts: [{ type: "text", text: "INTERNAL reminder text", synthetic: true }],
+        },
+        {
+          id: "msg_mix",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_051_000,
+          parts: [
+            { type: "text", text: "note to the model", synthetic: true },
+            { type: "text", text: "the real prompt" },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.turns).toHaveLength(1);
+      expect(result.turns[0].blocks).toEqual([{ type: "text", text: "the real prompt" }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("attributes MCP tool calls via configured server names and reports the opened db", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "opencode-mcp-"));
+    writeFileSync(
+      join(dir, "opencode.json"),
+      JSON.stringify({ mcp: { "zzz-mcp-test": { type: "remote", url: "https://x.test" } } }),
+    );
+    const db = await buildOpencodeDb({
+      session: [{ ...baseSession, directory: dir }],
+      messages: [
+        {
+          id: "msg_mcp",
+          sessionId: "ses_111",
+          role: "assistant",
+          timeCreated: 1_800_000_060_000,
+          finish: "tool-calls",
+          parts: [
+            {
+              type: "tool",
+              tool: "zzz-mcp-test_search_docs",
+              callID: "call_mcp_1",
+              state: {
+                status: "completed",
+                input: { query: "parity" },
+                output: "doc hits",
+              },
+            },
+            {
+              type: "tool",
+              tool: "unconfigured_unknown_call",
+              callID: "call_mcp_2",
+              state: { status: "completed", input: {}, output: "ok" },
+            },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111", undefined, "/data/custom/opencode.db");
+      const tools = result.turns.flatMap((turn) =>
+        turn.blocks.filter((block) => block.type === "tool_use"),
+      );
+      expect(tools[0]).toMatchObject({
+        name: "zzz-mcp-test_search_docs",
+        _mcpServer: "zzz-mcp-test",
+        _mcpTool: "search_docs",
+      });
+      expect(result.mcpServersUsed).toEqual(["zzz-mcp-test"]);
+      // Unknown tools stay plain tool calls.
+      expect(tools[1]).toMatchObject({ name: "unconfigured_unknown_call" });
+      expect((tools[1] as any)._mcpServer).toBeUndefined();
+      expect(result.dataSourceInfo?.sources).toEqual(["/data/custom/opencode.db"]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
