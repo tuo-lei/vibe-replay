@@ -5,10 +5,10 @@ import { __testables } from "../src/server.js";
 
 const API_URL = "http://127.0.0.1:13456/api/assistant/chat";
 
-function context(headers: Record<string, string>): Context {
+function context(headers: Record<string, string>, url = API_URL): Context {
   return {
     req: {
-      url: API_URL,
+      url,
       header(name: string) {
         return headers[name.toLowerCase()];
       },
@@ -76,6 +76,22 @@ describe("same-origin API protection", () => {
           origin: "https://attacker.example",
           "sec-fetch-site": "cross-site",
         }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a matching origin on a non-loopback rebinding host", () => {
+    delete process.env.VIBE_REPLAY_DEV_MENU;
+
+    expect(
+      __testables.isSameOriginSettingsRequest(
+        context(
+          {
+            origin: "http://rebound.example:13456",
+            "sec-fetch-site": "same-origin",
+          },
+          "http://rebound.example:13456/api/assistant/chat",
+        ),
       ),
     ).toBe(false);
   });

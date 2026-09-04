@@ -22,6 +22,16 @@ export function isSameOriginSettingsRequest(c: Context): boolean {
     !fetchSite || fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none";
   if (!fetchSiteAllowed) return false;
 
+  let apiOrigin: URL;
+  try {
+    apiOrigin = new URL(c.req.url);
+  } catch {
+    return false;
+  }
+  // A DNS-rebinding host can match its own Origin while still reaching the
+  // loopback listener. Only loopback request URLs are valid local API origins.
+  if (!isLoopbackHostname(apiOrigin.hostname)) return false;
+
   const trustedDevProxy =
     process.env.VIBE_REPLAY_DEV_MENU === "1" &&
     c.req.header("x-vibe-replay-dev-proxy") === "1" &&
@@ -29,7 +39,6 @@ export function isSameOriginSettingsRequest(c: Context): boolean {
   if (origin) {
     try {
       const requestOrigin = new URL(origin);
-      const apiOrigin = new URL(c.req.url);
       if (!equivalentLocalOrigin(requestOrigin, apiOrigin) && !trustedDevProxy) return false;
     } catch {
       return false;

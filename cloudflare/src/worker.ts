@@ -2836,7 +2836,10 @@ function isValidCalendarDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
   if (year < 1 || month < 1 || month > 12 || day < 1) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
+  // Date.UTC remaps years 0000–0099 to 1900–1999. Set the full year after
+  // constructing the date so historical calendar dates round-trip correctly.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
   return (
     date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
   );

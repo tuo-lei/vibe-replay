@@ -576,6 +576,17 @@ describe("Cloud API integration", () => {
     });
   });
 
+  it("accepts calendar years below 100 without Date.UTC remapping", async () => {
+    const response = await dispatch("/api/insights/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machineId: "machine-early", days: [{ date: "0001-01-01" }] }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ synced: 1 });
+  });
+
   it("preserves insight profile privacy config when updating metadata only", async () => {
     const create = await dispatch("/api/insights/profile", {
       method: "POST",
