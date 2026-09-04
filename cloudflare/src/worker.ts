@@ -83,6 +83,11 @@ type Env = AuthEnv & {
 
 type HonoEnv = { Bindings: Env };
 
+function recordProductMetric(env: Env, name: string, attributes?: Record<string, string>): void {
+  if (!env.SENTRY_DSN) return;
+  Sentry.metrics.count(name, 1, attributes ? { attributes } : undefined);
+}
+
 type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
 
 async function readJsonBody(
@@ -290,6 +295,9 @@ app.get("/auth/success", async (c) => {
   // Fetch session info (same-origin, cookies work here)
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (session) {
+    recordProductMetric(c.env, "auth.sign_in.success");
+  }
   const userJson = session?.user
     ? JSON.stringify({ name: session.user.name, image: session.user.image })
     : "null";
@@ -404,6 +412,7 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 <p class="msg">Please close this window and try again.</p>
 </div></body></html>`);
   }
+  recordProductMetric(c.env, "auth.sign_in.success");
   // Read the signed session cookie — Better Auth cookies are in `token.signature`
   // format. The session API returns only the raw token, but the BFF must send the
   // full signed cookie for auth to work.
@@ -619,6 +628,7 @@ app.post("/api/cloud-replays", async (c) => {
   }
 
   const baseUrl = getBaseUrl(c);
+  recordProductMetric(c.env, "replay.created", { storage: "r2" });
   return c.json({ id, url: `${baseUrl}/r/${id}`, expiresAt });
 });
 
@@ -657,6 +667,7 @@ app.get("/api/cloud-replays/:id", async (c) => {
       .update(cloudReplays)
       .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
       .where(eq(cloudReplays.id, id));
+    recordProductMetric(c.env, "replay.views", { storage: "gist" });
     return c.json({
       redirect: true,
       gistId: record.gistId,
@@ -671,6 +682,7 @@ app.get("/api/cloud-replays/:id", async (c) => {
     .update(cloudReplays)
     .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
     .where(eq(cloudReplays.id, id));
+  recordProductMetric(c.env, "replay.views", { storage: "r2" });
 
   return new Response(obj.body, {
     headers: {
@@ -914,6 +926,7 @@ app.post("/api/gists", async (c) => {
     viewCount: legacyRow?.viewCount || 0,
   });
 
+  recordProductMetric(c.env, "replay.created", { storage: "gist" });
   return c.json({ gistId, gistUrl, viewerUrl });
 });
 
@@ -1198,6 +1211,7 @@ app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
   if (!result.meta.changes) {
     return c.json({ ok: false }, 404);
   }
+  recordProductMetric(c.env, "replay.views", { storage: "gist" });
   return c.json({ ok: true });
 });
 
@@ -1350,6 +1364,7 @@ app.post("/api/insights/sync", async (c) => {
     }
   }
 
+  recordProductMetric(c.env, "insights.sync");
   return c.json({ synced });
 });
 
@@ -2491,6 +2506,7 @@ async function handlePostReplay(c: Context<HonoEnv>) {
           })
           .where(eq(replays.gistId, gistId));
 
+        recordProductMetric(c.env, "replay.views", { storage: "legacy-gist" });
         return Response.json({ ok: true, cached: true });
       }
 
@@ -2505,6 +2521,7 @@ async function handlePostReplay(c: Context<HonoEnv>) {
           })
           .where(eq(replays.gistId, gistId));
 
+        recordProductMetric(c.env, "replay.views", { storage: "legacy-gist" });
         return Response.json({ ok: true, cached: true });
       }
 
@@ -2517,6 +2534,7 @@ async function handlePostReplay(c: Context<HonoEnv>) {
         })
         .where(eq(replays.gistId, gistId));
 
+      recordProductMetric(c.env, "replay.views", { storage: "legacy-gist" });
       return Response.json({ ok: true, updated: true });
     }
 
@@ -2528,6 +2546,8 @@ async function handlePostReplay(c: Context<HonoEnv>) {
 
     await db.insert(replays).values({ gistId, ...meta });
 
+    recordProductMetric(c.env, "replay.created", { storage: "legacy-gist" });
+    recordProductMetric(c.env, "replay.views", { storage: "legacy-gist" });
     return Response.json({ ok: true, created: true });
   } catch (e) {
     console.error("ensureGistInDb failed:", e);

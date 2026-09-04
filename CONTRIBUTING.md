@@ -296,8 +296,9 @@ remain reporting-disabled when `SENTRY_DSN` is absent.
 
 Sentry Logs and Application Metrics are enabled explicitly. The Worker emits a
 fixed, content-free log and counter for API requests, plus a fixed error log
-for unhandled requests; request bodies, URLs, IDs, and replay contents are not
-included.
+for unhandled requests. Product counters include `replay.views`,
+`replay.created`, `insights.sync`, and `auth.sign_in.success`; request bodies,
+URLs, IDs, and replay contents are not included.
 
 ## Key conventions
 
