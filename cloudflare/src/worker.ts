@@ -113,6 +113,16 @@ function isSafeCallbackPath(value: string): boolean {
   return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\");
 }
 
+/** Escape JSON values before embedding them in an inline script expression. */
+function jsonForInlineScript(value: unknown): string {
+  return (JSON.stringify(value) ?? "null")
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 type Env = AuthEnv & {
   ASSETS: Fetcher;
   REPLAY_BUCKET: R2Bucket;
@@ -462,9 +472,9 @@ app.get("/auth/success", async (c) => {
   if (session) {
     recordProductMetric(c.env, "auth.sign_in.success");
   }
-  const userJson = session?.user
-    ? JSON.stringify({ name: session.user.name, image: session.user.image })
-    : "null";
+  const userJson = jsonForInlineScript(
+    session?.user ? { name: session.user.name, image: session.user.image } : null,
+  );
   // Get session token from cookie to pass back to opener
   const cookies = c.req.raw.headers.get("cookie") || "";
   const tokenMatch = cookies.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
@@ -474,8 +484,9 @@ app.get("/auth/success", async (c) => {
   const dev = isDev(c.env);
   const trustedOpenerOrigins = [...PROD_ORIGINS];
   if (dev) trustedOpenerOrigins.push(...DEV_ORIGINS);
-  const originsJson = JSON.stringify(trustedOpenerOrigins);
+  const originsJson = jsonForInlineScript(trustedOpenerOrigins);
 
+  c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay - Logged in</title>
 <style>
@@ -497,7 +508,7 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 </div>
 <script>
 // Post auth result to opener — try each trusted origin (mismatches are silently ignored)
-if(window.opener){var msg={type:'vibe-replay-auth',user:${userJson},token:${JSON.stringify(token)}};${originsJson}.forEach(function(o){try{window.opener.postMessage(msg,o);}catch(e){}});}
+if(window.opener){var msg={type:'vibe-replay-auth',user:${userJson},token:${jsonForInlineScript(token)}};${originsJson}.forEach(function(o){try{window.opener.postMessage(msg,o);}catch(e){}});}
 var s=3;
 var cd=document.getElementById('cd');
 cd.textContent='Auto-closing in '+s+'s...';

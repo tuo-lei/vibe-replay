@@ -86,6 +86,7 @@ interface LoadResult {
 export function useSessionLoader(): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const liveSourceRef = useRef<EventSource | null>(null);
+  const loadGenerationRef = useRef(0);
 
   const closeLive = useCallback(() => {
     if (liveSourceRef.current) {
@@ -95,6 +96,7 @@ export function useSessionLoader(): LoadState {
   }, []);
 
   const load = useCallback(() => {
+    const generation = ++loadGenerationRef.current;
     closeLive();
     setState({ status: "loading" });
 
@@ -107,6 +109,7 @@ export function useSessionLoader(): LoadState {
 
     loadSession().then(
       (result) => {
+        if (loadGenerationRef.current !== generation) return;
         if (result === "dashboard") {
           setState({ status: "dashboard" });
         } else {
@@ -118,7 +121,10 @@ export function useSessionLoader(): LoadState {
           });
         }
       },
-      (err) => setState({ status: "error", message: String(err.message || err) }),
+      (err) => {
+        if (loadGenerationRef.current !== generation) return;
+        setState({ status: "error", message: String(err.message || err) });
+      },
     );
   }, [closeLive]);
 

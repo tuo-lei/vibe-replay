@@ -149,6 +149,31 @@ describe("useSessionLoader", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/session?slug=my-slug"));
   });
 
+  it("does not let a stale session response overwrite a newer navigation", async () => {
+    win.__VIBE_REPLAY_EDITOR__ = true;
+    setSearch("?session=slow-session");
+    let resolveSlow!: (session: ReplaySession) => void;
+    const slowJson = new Promise<ReplaySession>((resolve) => {
+      resolveSlow = resolve;
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => slowJson,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useSessionLoader());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    setSearch("?view=dashboard");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(result.current.status).toBe("dashboard"));
+
+    resolveSlow(fakeSession);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current.status).toBe("dashboard");
+  });
+
   it("ignores ?live when an explicit ?session is present in editor mode (stale URL guard)", async () => {
     win.__VIBE_REPLAY_EDITOR__ = true;
     // ?live=1&provider=claude-code&sessionId=abc would normally start SSE,

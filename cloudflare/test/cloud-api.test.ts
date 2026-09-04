@@ -311,7 +311,7 @@ describe("Cloud API integration", () => {
           JSON.stringify({
             id: 424242,
             login: "demo-user",
-            name: "Demo User",
+            name: '</script><script>alert("profile-name")</script>',
             email: "github-test-user",
             avatar_url: "https://avatars.example/demo",
           }),
@@ -346,6 +346,19 @@ describe("Cloud API integration", () => {
         .map((cookie) => cookie.split(";", 1)[0])
         .find((cookie) => cookie.startsWith("better-auth.session_token="));
       expect(sessionCookie).toMatch(/^better-auth\.session_token=/);
+
+      const success = await worker.fetch(
+        new Request("http://localhost/auth/success", {
+          headers: { Cookie: sessionCookie! },
+        }),
+        env,
+        createCtx(),
+      );
+      expect(success.status).toBe(200);
+      expect(success.headers.get("cache-control")).toBe("no-store");
+      const successHtml = await success.text();
+      expect(successHtml).toContain("\\u003c/script\\u003e\\u003cscript");
+      expect(successHtml).not.toContain('</script><script>alert("profile-name")');
 
       const authenticatedApi = await worker.fetch(
         new Request("http://localhost/api/cloud-replays", {

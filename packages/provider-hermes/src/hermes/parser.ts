@@ -89,6 +89,14 @@ function firstValue(db: Database, sql: string, params: Record<string, any> = {})
   return rows[0] ?? null;
 }
 
+function hasColumn(db: Database, table: string, column: string): boolean {
+  try {
+    return rowValues(db, `PRAGMA table_info(${table})`).some((row) => row.name === column);
+  } catch {
+    return false;
+  }
+}
+
 export async function parseHermesSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -203,11 +211,12 @@ export function parseSessionFromDb(
     sid: sessionId,
   }) as HermesSessionRow | null;
 
+  const compactedColumn = hasColumn(db, "messages", "compacted") ? "compacted" : "0 AS compacted";
   const messages = rowValues(
     db,
     `
       SELECT id, role, content, tool_call_id, tool_calls, tool_name, timestamp,
-             finish_reason, reasoning_content, compacted
+             finish_reason, reasoning_content, ${compactedColumn}
       FROM messages
       WHERE session_id = ?
       ORDER BY timestamp ASC, id ASC
@@ -496,16 +505,23 @@ function usageByModelFromDb(
   db: Database,
   sessionId: string,
 ): Record<string, TokenUsage> | undefined {
-  const rows = rowValues(
-    db,
-    `
-      SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-             reasoning_tokens
-      FROM session_model_usage
-      WHERE session_id = ?
-    `,
-    { sid: sessionId },
-  ) as HermesModelUsageRow[];
+  let rows: HermesModelUsageRow[];
+  try {
+    rows = rowValues(
+      db,
+      `
+        SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+               reasoning_tokens
+        FROM session_model_usage
+        WHERE session_id = ?
+      `,
+      { sid: sessionId },
+    ) as HermesModelUsageRow[];
+  } catch {
+    // Per-model billing was added after the original Hermes schema. The
+    // session-level counters remain authoritative when this table is absent.
+    return undefined;
+  }
   if (rows.length === 0) return undefined;
 
   const byModel: Record<string, TokenUsage> = {};
