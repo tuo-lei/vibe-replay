@@ -547,6 +547,45 @@ describe("Grok Bot parser", () => {
     expect(tools[1]).toMatchObject({ name: "Bash", _durationMs: 5000 });
   });
 
+  it("carries a timestamped assistant clock into the next untimestamped assistant turn", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "go" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        timestamp: 1788485460000,
+        message: { content: [{ type: "text", text: "scratch" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "read", toolCallId: "r-1", input: { path: "/a.md" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "read",
+              toolCallId: "r-1",
+              result: { success: { timestamp: 1788485464000, content: "ok" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools[0]).toMatchObject({ name: "Read", _durationMs: 4000 });
+  });
+
   it("keeps a failed communicate_update as an error tool and still promotes successes", () => {
     const parsed = parseGrokBotLines([
       JSON.stringify({
@@ -653,6 +692,19 @@ describe("Grok Bot tool mapping", () => {
     });
     expect(mapGrokBotToolArgs("web_search", { search_term: "grok" })).toMatchObject({
       query: "grok",
+    });
+    expect(mapGrokBotToolArgs("web_search", { query: "", search_term: "badge" })).toMatchObject({
+      query: "badge",
+    });
+    expect(mapGrokBotToolArgs("shell", { command: "", cmd: "rg badge" })).toMatchObject({
+      command: "rg badge",
+    });
+    expect(
+      mapGrokBotToolArgs("edit", { path: "/tmp/a.ts", old_string: "", oldText: "a", newText: "b" }),
+    ).toMatchObject({
+      file_path: "/tmp/a.ts",
+      old_string: "a",
+      new_string: "b",
     });
   });
 });
