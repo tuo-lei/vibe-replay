@@ -94,6 +94,9 @@ const app = new Hono<HonoEnv>();
 // otherwise never observe them. Preserve Hono's default 500 response while
 // reporting the exception in the active request scope.
 app.onError((error, c) => {
+  if (!c.env.SENTRY_DSN) {
+    console.error(error);
+  }
   Sentry.captureException(error);
   return c.text("Internal Server Error", 500);
 });
