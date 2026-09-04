@@ -1,13 +1,14 @@
+import { Hono } from "hono";
 import type { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __testables } from "../src/server.js";
 
 const API_URL = "http://127.0.0.1:13456/api/assistant/chat";
 
-function context(headers: Record<string, string>): Context {
+function context(headers: Record<string, string>, url = API_URL): Context {
   return {
     req: {
-      url: API_URL,
+      url,
       header(name: string) {
         return headers[name.toLowerCase()];
       },
@@ -79,6 +80,22 @@ describe("same-origin API protection", () => {
     ).toBe(false);
   });
 
+  it("rejects a matching origin on a non-loopback rebinding host", () => {
+    delete process.env.VIBE_REPLAY_DEV_MENU;
+
+    expect(
+      __testables.isSameOriginSettingsRequest(
+        context(
+          {
+            origin: "http://rebound.example:13456",
+            "sec-fetch-site": "same-origin",
+          },
+          "http://rebound.example:13456/api/assistant/chat",
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it("accepts the marked Vite dev proxy hop only in same-origin fetch mode", () => {
     process.env.VIBE_REPLAY_DEV_MENU = "1";
 
@@ -101,5 +118,28 @@ describe("same-origin API protection", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("blocks cross-origin mutations while allowing read-only requests", async () => {
+    const app = new Hono();
+    __testables.registerSameOriginMutationGuard(app);
+    app.get("/api/replay", (c) => c.json({ ok: true }));
+    app.post("/api/replay", (c) => c.json({ ok: true }));
+
+    const crossOrigin = {
+      Origin: "https://attacker.example",
+      "Sec-Fetch-Site": "cross-site",
+    };
+    const read = await app.request("http://127.0.0.1:13456/api/replay", {
+      headers: crossOrigin,
+    });
+    const write = await app.request("http://127.0.0.1:13456/api/replay", {
+      method: "POST",
+      headers: crossOrigin,
+    });
+
+    expect(read.status).toBe(200);
+    expect(write.status).toBe(403);
+    await expect(write.json()).resolves.toEqual({ error: "API requests must be same-origin" });
   });
 });

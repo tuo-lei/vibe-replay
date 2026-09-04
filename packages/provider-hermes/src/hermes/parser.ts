@@ -510,13 +510,22 @@ function usageByModelFromDb(
 
   const byModel: Record<string, TokenUsage> = {};
   for (const row of rows) {
+    const model = row.model || "unknown";
     const usage: TokenUsage = {
       inputTokens: Number(row.input_tokens ?? 0),
       outputTokens: Number(row.output_tokens ?? 0),
       cacheCreationTokens: Number(row.cache_write_tokens ?? 0),
       cacheReadTokens: Number(row.cache_read_tokens ?? 0),
     };
-    byModel[row.model || "unknown"] = usage;
+    const existing = byModel[model];
+    if (!existing) {
+      byModel[model] = usage;
+      continue;
+    }
+    existing.inputTokens += usage.inputTokens;
+    existing.outputTokens += usage.outputTokens;
+    existing.cacheCreationTokens += usage.cacheCreationTokens;
+    existing.cacheReadTokens += usage.cacheReadTokens;
   }
   return byModel;
 }

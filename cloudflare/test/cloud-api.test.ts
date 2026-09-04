@@ -382,6 +382,61 @@ describe("Cloud API integration", () => {
     await expect(fileUpload.json()).resolves.toEqual({ error: "Invalid JSON body" });
   });
 
+  it("rejects JSON primitives where an object body is required", async () => {
+    const cloudReplay = await dispatch("/api/cloud-replays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+    const fileUpload = await dispatch("/api/files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+
+    expect(cloudReplay.status).toBe(400);
+    await expect(cloudReplay.json()).resolves.toEqual({
+      error: "Request body must be an object",
+    });
+    expect(fileUpload.status).toBe(400);
+    await expect(fileUpload.json()).resolves.toEqual({
+      error: "Request body must be an object",
+    });
+  });
+
+  it("rejects oversized JSON bodies before parsing them", async () => {
+    const response = await dispatch("/api/cloud-replays", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: " ".repeat(24 * 1024 * 1024 + 1),
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Request body too large" });
+  });
+
+  it("rejects malformed scenes anywhere in an uploaded replay", async () => {
+    const replay = sampleReplay();
+    replay.scenes = [
+      ...replay.scenes,
+      { type: "text-response", content: "still valid" },
+      null as never,
+    ];
+    const response = await dispatch("/api/cloud-replays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replay }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Invalid scene at index 3: missing type",
+    });
+    expect((await env.REPLAY_BUCKET.list()).objects).toHaveLength(0);
+  });
+
   it("rejects unsafe browser login callbacks before starting OAuth", async () => {
     for (const callback of [
       "javascript:alert(1)",
@@ -499,6 +554,37 @@ describe("Cloud API integration", () => {
       sessionsPerDay: { "2026-05-01": 2 },
       topProjects: [{ project: "/repo", sessions: 2 }],
     });
+  });
+
+  it("rejects malformed insight sync input instead of throwing", async () => {
+    const invalidMachine = await dispatch("/api/insights/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machineId: 42, days: [{ date: "2026-05-01" }] }),
+    });
+    expect(invalidMachine.status).toBe(400);
+    await expect(invalidMachine.json()).resolves.toEqual({ error: "machineId required" });
+
+    const invalidDate = await dispatch("/api/insights/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machineId: "machine-a", days: [{ date: "2026-02-30" }] }),
+    });
+    expect(invalidDate.status).toBe(400);
+    await expect(invalidDate.json()).resolves.toEqual({
+      error: "Each day must have a valid YYYY-MM-DD date",
+    });
+  });
+
+  it("accepts calendar years below 100 without Date.UTC remapping", async () => {
+    const response = await dispatch("/api/insights/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machineId: "machine-early", days: [{ date: "0001-01-01" }] }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ synced: 1 });
   });
 
   it("preserves insight profile privacy config when updating metadata only", async () => {

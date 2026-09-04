@@ -141,6 +141,45 @@ describe("hermes parser", () => {
     }
   });
 
+  it("sums duplicate per-model rows from separate billing dimensions", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "hello",
+          timestamp: 1_800_000_001,
+        },
+      ],
+      modelUsage: [
+        {
+          sessionId: baseSession.id,
+          model: baseSession.model,
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+    });
+    db.run(
+      `INSERT INTO session_model_usage (
+        session_id, model, billing_provider, input_tokens, output_tokens
+      ) VALUES (?, ?, ?, ?, ?)`,
+      [baseSession.id, baseSession.model, "fallback-provider", 40, 8],
+    );
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.tokenUsageByModel?.[baseSession.model]).toMatchObject({
+        inputTokens: 140,
+        outputTokens: 28,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("prefers actual_cost_usd over estimated_cost_usd for reportedCostUsd", async () => {
     const db = await buildHermesDb({
       sessions: [baseSession],

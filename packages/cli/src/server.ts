@@ -1,4 +1,4 @@
-import { isSameOriginSettingsRequest } from "./server-origin.js";
+import { isSameOriginSettingsRequest, registerSameOriginMutationGuard } from "./server-origin.js";
 import { resolveDefaultAiSelection } from "./server-ai-selection.js";
 import { buildInsightsSyncBatches } from "./server-core.js";
 import {
@@ -40,6 +40,7 @@ export const __testables = {
   getStaleSourceProviders,
   findReplayForSource,
   isSameOriginSettingsRequest,
+  registerSameOriginMutationGuard,
   isFilesystemProjectKey,
   mergeSourceCatalogSessionUpdates,
   normalizeSessionProjectsForHome,
