@@ -224,4 +224,44 @@ describe("opencode discover", () => {
       db.close();
     }
   });
+
+  it("excludes synthetic text parts from prompt counts and firstPrompt", async () => {
+    const db = await buildOpencodeDb({
+      session: [
+        { id: "ses_syn_only", slug: "syn-only", directory: "/Users/test/project" },
+        { id: "ses_syn_mix", slug: "syn-mix", directory: "/Users/test/project" },
+      ],
+      messages: [
+        {
+          id: "ms1",
+          sessionId: "ses_syn_only",
+          role: "user",
+          timeCreated: 1_800_000_010_000,
+          parts: [{ type: "text", text: "Internal system reminder", synthetic: true }],
+        },
+        {
+          id: "ms2",
+          sessionId: "ses_syn_mix",
+          role: "user",
+          timeCreated: 1_800_000_011_000,
+          parts: [
+            { type: "text", text: "note for the model", synthetic: true },
+            { type: "text", text: "Actual user question" },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      // The synthetic-only session has no real prompt and drops out entirely.
+      expect(sessions.map((s) => s.sessionId)).toEqual(["ses_syn_mix"]);
+      expect(sessions[0]).toMatchObject({
+        firstPrompt: "Actual user question",
+        promptCount: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

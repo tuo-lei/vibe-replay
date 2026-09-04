@@ -8,8 +8,11 @@ import type {
   ProviderParseResult,
   TokenUsage,
 } from "@vibe-replay/provider-contract";
+import type { SubAgent, UsageEvent } from "@vibe-replay/types";
+import { normalizeSubAgentType } from "@vibe-replay/provider-contract";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
-import { mapOpencodeToolArgs, mapOpencodeToolName } from "./tool-mapping.js";
+import { attributeOpencodeMcpTool, loadOpencodeMcpServerNames } from "./mcp-servers.js";
+import { isOpencodeBuiltinTool, mapOpencodeToolArgs, mapOpencodeToolName } from "./tool-mapping.js";
 import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 
 interface OpencodeMessageRow {
@@ -29,11 +32,18 @@ interface OpencodePart {
   callID?: string;
   text?: string;
   auto?: boolean;
+  /** opencode marks model-feeding text parts synthetic; they are not prompts. */
+  synthetic?: boolean;
   state?: {
     status?: string;
     input?: unknown;
     output?: string;
-    metadata?: { diff?: string };
+    metadata?: {
+      diff?: string;
+      /** `task` parts record the spawned child session here. */
+      sessionId?: string;
+      model?: { modelID?: string; providerID?: string };
+    };
     time?: { start?: number; end?: number };
   };
   url?: string;
@@ -84,6 +94,10 @@ interface MessageMeta {
     cache?: { read?: number; write?: number };
   };
   finish?: string;
+  /** opencode persists the message's own cost estimate on assistant messages. */
+  cost?: number;
+  /** Structured failure record present when `finish === "error"`. */
+  error?: { name?: string } | string;
 }
 
 function parseMeta<T>(raw: string | undefined | null): T | undefined {
@@ -124,7 +138,7 @@ export async function parseOpencodeSession(
   }
   const { db } = opened;
   try {
-    return parseSessionFromDb(db, sessionId, sessionInfo);
+    return parseSessionFromDb(db, sessionId, sessionInfo, opened.dbPath);
   } finally {
     db.close();
   }
@@ -169,6 +183,7 @@ export function parseSessionFromDb(
   db: Database,
   sessionId: string,
   sessionInfo?: SessionInfo,
+  dbPath?: string,
 ): ProviderParseResult {
   const session = firstValue(db, `SELECT * FROM session WHERE id = ?`, {
     sid: sessionId,
@@ -194,13 +209,34 @@ export function parseSessionFromDb(
   const tokenByModel = new Map<string, TokenUsage>();
   const skillsUsed = new Set<string>();
   const skillActivations: string[] = [];
+  const mcpServersUsed = new Set<string>();
+  const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
+  /** Per-message usage keyed by message id, consumed by turnStats below. */
+  const usageByMessageId = new Map<
+    string,
+    { usage: TokenUsage; model?: string; contextTokens: number; durationMs?: number }
+  >();
+  /** `task` call metadata keyed by callID, used to link child sessions. */
+  const taskCalls = new Map<string, { sessionId: string; model?: string }>();
   let totalTokens: TokenUsage | undefined;
+  let messageCostSum = 0;
   let startTime: string | undefined;
   let endTime: string | undefined;
   const cwd = session?.directory || sessionInfo?.cwd || "";
   let model = sessionInfo?.model;
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   let truncatedResponses = 0;
+  // MCP server names come from opencode config files; load at most once per
+  // parse and only when an unrecognized tool name shows up.
+  let mcpServerNames: string[] | undefined;
+  const attributeMcp = (rawToolName: string): { server: string; tool: string } | undefined => {
+    if (!rawToolName.includes("_") || isOpencodeBuiltinTool(rawToolName)) return undefined;
+    if (mapOpencodeToolName(rawToolName) !== rawToolName) return undefined;
+    mcpServerNames ??= loadOpencodeMcpServerNames(cwd);
+    const attributed = attributeOpencodeMcpTool(rawToolName, mcpServerNames);
+    if (attributed) mcpServersUsed.add(attributed.server);
+    return attributed;
+  };
 
   const modelMeta = parseMeta<{ id?: string }>(session?.model);
   if (modelMeta?.id && !model) model = modelMeta.id;
@@ -234,11 +270,29 @@ export function parseSessionFromDb(
     }
 
     // Per-model token aggregation (opencode records usage on assistant messages).
-    if (meta.tokens && meta.modelID) {
+    if (meta.role === "assistant") {
       const usage = usageFromMeta(meta.tokens);
       if (usage) {
-        mergeUsage(tokenByModel, meta.modelID, usage);
+        if (meta.modelID) {
+          mergeUsage(tokenByModel, meta.modelID, usage);
+        }
         totalTokens = mergeUsageTotal(totalTokens, usage);
+        const created = meta.time?.created;
+        const completed = meta.time?.completed;
+        const durationMs =
+          created && completed && completed > created ? completed - created : undefined;
+        usageByMessageId.set(message.id, {
+          usage,
+          ...(meta.modelID ? { model: meta.modelID } : {}),
+          contextTokens:
+            (meta.tokens?.input || 0) +
+            (meta.tokens?.cache?.read || 0) +
+            (meta.tokens?.cache?.write || 0),
+          ...(durationMs ? { durationMs } : {}),
+        });
+      }
+      if (typeof meta.cost === "number" && Number.isFinite(meta.cost)) {
+        messageCostSum += meta.cost;
       }
     }
 
@@ -258,7 +312,13 @@ export function parseSessionFromDb(
     }
 
     if (meta.role === "assistant") {
-      const blocks = assistantBlocksFromParts(db, message.id, parseWarnings);
+      const blocks = assistantBlocksFromParts(
+        db,
+        message.id,
+        parseWarnings,
+        taskCalls,
+        attributeMcp,
+      );
       if (meta.finish === "error" || meta.finish === "unknown") {
         // Keep concrete tool parts even when the assistant message failed.
         // Previously this branch rendered text only and silently erased failed
@@ -269,22 +329,54 @@ export function parseSessionFromDb(
           }
         }
       }
+      // opencode (AI SDK) reports truncated generations as finish "length";
+      // "max_tokens" is the Anthropic-style spelling kept for safety. Count
+      // truncation and API failures even when no renderable block survived.
+      const isTruncated = meta.finish === "length" || meta.finish === "max_tokens";
+      if (isTruncated) truncatedResponses++;
+      if (meta.finish === "error" && timestamp) {
+        // Privacy: keep only the structured error name (e.g. "APIError"),
+        // never the error message text, which may echo prompt content.
+        apiErrors.push({ timestamp, ...errorTypeFromMeta(meta.error) });
+      }
       if (blocks.length === 0) continue;
       for (const block of blocks) {
         if (block.type !== "tool_use" || !block._skillName) continue;
         skillsUsed.add(block._skillName);
         skillActivations.push(block._skillName);
       }
-      if (meta.finish === "max_tokens") truncatedResponses++;
 
       const modelForTurn = meta.modelID || model;
       turns.push({
         role: "assistant",
+        messageId: message.id,
         timestamp,
         blocks,
         ...(modelForTurn ? { model: modelForTurn } : {}),
+        ...(isTruncated ? { stopReason: "max_tokens" as const } : {}),
       });
       continue;
+    }
+  }
+
+  const subAgentSummary: NonNullable<ProviderParseResult["subAgentSummary"]> = [];
+  if (taskCalls.size > 0) {
+    for (const turn of turns) {
+      for (const block of turn.blocks) {
+        if (block.type !== "tool_use" || block.name !== "Agent") continue;
+        const call = taskCalls.get(block.id);
+        if (!call) continue;
+        const subAgent = buildSubAgentFromChildSession(db, call, block, parseWarnings);
+        if (!subAgent) continue;
+        block._subAgent = subAgent;
+        subAgentSummary.push({
+          agentId: subAgent.agentId,
+          agentType: subAgent.agentType,
+          ...(subAgent.description ? { description: subAgent.description } : {}),
+          toolCalls: subAgent.toolCalls,
+          ...(subAgent.model ? { model: subAgent.model } : {}),
+        });
+      }
     }
   }
 
@@ -293,12 +385,18 @@ export function parseSessionFromDb(
     tokenByModel.size > 0 ? Object.fromEntries(tokenByModel.entries()) : undefined;
 
   // opencode persists its own cumulative cost estimate on the session row;
-  // surface it so it wins over local pricing-table estimates.
-  const reportedCostUsd = Number(session?.cost ?? 0);
+  // surface it so it wins over local pricing-table estimates. Versions that
+  // leave the session column at 0 still price each assistant message, so fall
+  // back to summing those per-message costs.
+  const sessionCost = Number(session?.cost ?? 0);
+  const reportedCostUsd =
+    sessionCost > 0 ? sessionCost : messageCostSum > 0 ? messageCostSum : undefined;
+
+  const turnStats = buildOpencodeTurnStats(turns, usageByMessageId);
 
   const defaultSource: DataSourceInfo = {
     primary: "sqlite",
-    sources: [opencodeDbPath()],
+    sources: [dbPath ?? opencodeDbPath()],
     notes: ["Discovered from opencode SQLite database."],
   };
 
@@ -316,10 +414,14 @@ export function parseSessionFromDb(
     dataSourceInfo: defaultSource,
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(tokenUsageByModel ? { tokenUsageByModel } : {}),
-    ...(Number.isFinite(reportedCostUsd) && reportedCostUsd > 0 ? { reportedCostUsd } : {}),
+    ...(reportedCostUsd !== undefined ? { reportedCostUsd } : {}),
     compactions: compactions.length > 0 ? compactions : undefined,
+    ...(turnStats.length > 0 ? { turnStats } : {}),
     ...(skillsUsed.size > 0 ? { skillsUsed: [...skillsUsed] } : {}),
     ...(skillActivations.length > 0 ? { skillActivations } : {}),
+    ...(mcpServersUsed.size > 0 ? { mcpServersUsed: [...mcpServersUsed].sort() } : {}),
+    ...(subAgentSummary.length > 0 ? { subAgentSummary } : {}),
+    ...(apiErrors.length > 0 ? { apiErrors } : {}),
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),
   };
@@ -327,7 +429,7 @@ export function parseSessionFromDb(
 
 function userTurnsFromPartsList(parts: OpencodePart[], timestamp?: string): ParsedTurn[] {
   const text = parts
-    .filter((p) => p.type === "text" && p.text)
+    .filter((p) => p.type === "text" && p.text && p.synthetic !== true)
     .map((p) => p.text)
     .join("\n");
   const images = parts
@@ -342,10 +444,23 @@ function userTurnsFromPartsList(parts: OpencodePart[], timestamp?: string): Pars
   return [{ role: "user", timestamp, blocks }];
 }
 
+/** opencode error records keep a structured `name`; everything else is text we never store. */
+function errorTypeFromMeta(error: MessageMeta["error"]): { errorType?: string } {
+  const name = typeof error === "object" && error ? error.name : undefined;
+  if (typeof name !== "string") return {};
+  const trimmed = name.trim();
+  // Error names are short identifiers ("APIError", "ProviderAuthError"); a
+  // value with whitespace or prose-like length is a message, not a type.
+  if (!trimmed || trimmed.length > 64 || /\s/.test(trimmed)) return {};
+  return { errorType: trimmed };
+}
+
 function assistantBlocksFromParts(
   db: Database,
   messageId: string,
   warnings?: NonNullable<ProviderParseResult["parseWarnings"]>,
+  taskCalls?: Map<string, { sessionId: string; model?: string }>,
+  attributeMcp?: (rawToolName: string) => { server: string; tool: string } | undefined,
 ): ContentBlock[] {
   const parts = partsForMessage(db, messageId, warnings);
   const blocks: ContentBlock[] = [];
@@ -405,6 +520,7 @@ function assistantBlocksFromParts(
           pendingByCallId.delete(callID);
         }
 
+        const mcp = attributeMcp?.(toolName);
         const block: Extract<ContentBlock, { type: "tool_use" }> = {
           type: "tool_use",
           id: callID,
@@ -419,11 +535,25 @@ function assistantBlocksFromParts(
           input.name.trim()
             ? { _skillName: input.name.trim() }
             : {}),
+          ...(mcp ? { _mcpServer: mcp.server, _mcpTool: mcp.tool } : {}),
         };
         blocks.push(block);
         blockByCallId.set(callID, block);
         if (isPending) {
           pendingByCallId.set(callID, block);
+        }
+        // Task tool results carry the spawned child session id in metadata;
+        // record it so the caller can attach the subagent trajectory after the
+        // main message loop.
+        if (toolName === "task" && taskCalls && !isPending) {
+          const childId = state.metadata?.sessionId;
+          if (typeof childId === "string" && childId) {
+            const childModel = state.metadata?.model?.modelID;
+            taskCalls.set(callID, {
+              sessionId: childId,
+              ...(typeof childModel === "string" && childModel ? { model: childModel } : {}),
+            });
+          }
         }
         break;
       }
@@ -450,6 +580,205 @@ function recordCompaction(
     timestamp,
     trigger: auto ? "opencode-context" : "opencode-user",
   });
+}
+
+/** Scene capping mirrors the Claude provider so large child traces stay bounded. */
+const SUBAGENT_MAX_SCENES = 60;
+const SUBAGENT_PROMPT_CHARS = 500;
+const SUBAGENT_TEXT_CHARS = 1000;
+const SUBAGENT_THINKING_CHARS = 500;
+
+/**
+ * opencode spawns subagents as separate session rows linked by `parent_id`;
+ * the parent's `task` part records the child id in `state.metadata.sessionId`.
+ * Parse the child session into the shared SubAgent shape so replays render the
+ * delegated trajectory like other providers. Child `task` calls are parsed as
+ * ordinary tool blocks; nesting is not expanded so one bad link can never
+ * recurse through the whole database.
+ */
+function buildSubAgentFromChildSession(
+  db: Database,
+  call: { sessionId: string; model?: string },
+  block: Extract<ContentBlock, { type: "tool_use" }>,
+  warnings: NonNullable<ProviderParseResult["parseWarnings"]>,
+): SubAgent | undefined {
+  const childMessages = rowValues(
+    db,
+    `
+      SELECT id, session_id, data
+      FROM message
+      WHERE session_id = ?
+      ORDER BY time_created ASC
+    `,
+    { sid: call.sessionId },
+  ) as OpencodeMessageRow[];
+  if (childMessages.length === 0) return undefined;
+
+  const agentType = normalizeSubAgentType(
+    typeof block.input?.subagent_type === "string" && block.input.subagent_type.trim()
+      ? block.input.subagent_type
+      : "unknown",
+  );
+  const description =
+    typeof block.input?.description === "string" && block.input.description.trim()
+      ? block.input.description
+      : undefined;
+  const prompt =
+    typeof block.input?.prompt === "string"
+      ? block.input.prompt.slice(0, SUBAGENT_PROMPT_CHARS)
+      : "";
+
+  let toolCalls = 0;
+  let thinkingBlocks = 0;
+  let textResponses = 0;
+  let model = call.model;
+  let tokenUsage: TokenUsage | undefined;
+  const usageEvents: UsageEvent[] = [];
+  const scenes: SubAgent["scenes"] = [];
+
+  for (const message of childMessages) {
+    if (isUnparseable(message.data)) {
+      addParseWarning(warnings, {
+        kind: "malformed-json",
+        source: "opencode message",
+        message: `message ${message.id}: unparseable data, skipped`,
+        sample: compactWarningSample(message.data),
+      });
+      continue;
+    }
+    const meta = parseMeta<MessageMeta>(message.data);
+    if (!meta || meta.role !== "assistant") continue;
+    const ts = toIsoMs(meta.time?.completed || meta.time?.created);
+    if (!model && meta.modelID) model = meta.modelID;
+    const usage = usageFromMeta(meta.tokens);
+    if (usage) tokenUsage = tokenUsage ? mergeUsageTotal(tokenUsage, usage) : { ...usage };
+
+    // Deliberately no taskCalls collection: nested subagent calls remain
+    // ordinary tool blocks instead of recursing into deeper sessions.
+    for (const childBlock of assistantBlocksFromParts(db, message.id, warnings)) {
+      if (childBlock.type === "thinking") {
+        thinkingBlocks++;
+        scenes.push({
+          type: "thinking",
+          content: childBlock.thinking.slice(0, SUBAGENT_THINKING_CHARS),
+          ...(ts ? { timestamp: ts } : {}),
+        });
+      } else if (childBlock.type === "text") {
+        textResponses++;
+        scenes.push({
+          type: "text-response",
+          content: childBlock.text.slice(0, SUBAGENT_TEXT_CHARS),
+          timestamp: ts,
+        });
+      } else if (childBlock.type === "tool_use") {
+        if (childBlock._isPendingMarker) continue;
+        toolCalls++;
+        const status = childBlock._isError
+          ? ("error" as const)
+          : childBlock._hasResult
+            ? ("success" as const)
+            : ("unknown" as const);
+        usageEvents.push({
+          kind: "tool",
+          name: childBlock.name,
+          ...(ts ? { timestamp: ts } : {}),
+          ...(childBlock._durationMs ? { durationMs: childBlock._durationMs } : {}),
+          status,
+          ...(childBlock._mcpServer ? { mcpServer: childBlock._mcpServer } : {}),
+          ...(childBlock._mcpTool ? { mcpTool: childBlock._mcpTool } : {}),
+          attribution: "explicit",
+        });
+        scenes.push({
+          type: "tool-call",
+          toolName: childBlock.name,
+          input: childBlock.input,
+          result: (childBlock._result || "").slice(0, SUBAGENT_TEXT_CHARS),
+          ...(childBlock._hasResult !== undefined ? { hasResult: childBlock._hasResult } : {}),
+          isError: childBlock._isError || false,
+          ...(ts ? { timestamp: ts } : {}),
+          ...(childBlock._durationMs ? { durationMs: childBlock._durationMs } : {}),
+        });
+      }
+    }
+  }
+
+  return {
+    agentId: call.sessionId,
+    agentType,
+    ...(description ? { description } : {}),
+    prompt,
+    toolCalls,
+    thinkingBlocks,
+    textResponses,
+    ...(tokenUsage ? { tokenUsage } : {}),
+    ...(model ? { model } : {}),
+    scenes: scenes.length > SUBAGENT_MAX_SCENES ? scenes.slice(0, SUBAGENT_MAX_SCENES) : scenes,
+    usageEvents,
+  };
+}
+
+/**
+ * Per-turn metrics joined in the viewer by 0-based user-prompt turnIndex.
+ * opencode records token usage and wall-clock timestamps on each assistant
+ * message, so one user prompt's stat aggregates every assistant message up to
+ * the next prompt. `contextTokens` keeps the largest prompt footprint seen in
+ * the turn (provider-reported accounting, not the actual context window).
+ */
+function buildOpencodeTurnStats(
+  turns: ParsedTurn[],
+  usageByMessageId: Map<
+    string,
+    { usage: TokenUsage; model?: string; contextTokens: number; durationMs?: number }
+  >,
+): NonNullable<ProviderParseResult["turnStats"]> {
+  const stats: NonNullable<ProviderParseResult["turnStats"]> = [];
+  let current: { turnIndex: number; messageIds: string[] } | undefined;
+  let turnIndex = -1;
+
+  const flushCurrent = (): void => {
+    if (!current || current.messageIds.length === 0) {
+      current = undefined;
+      return;
+    }
+    const usages: TokenUsage[] = [];
+    let statModel: string | undefined;
+    let contextTokens = 0;
+    let durationMs = 0;
+    for (const messageId of current.messageIds) {
+      const item = usageByMessageId.get(messageId);
+      if (!item) continue;
+      usages.push(item.usage);
+      statModel = statModel || item.model;
+      contextTokens = Math.max(contextTokens, item.contextTokens);
+      if (item.durationMs) durationMs += item.durationMs;
+    }
+    const tokenUsage = usages.reduce<TokenUsage | undefined>(
+      (total, usage) => (total ? mergeUsageTotal(total, usage) : { ...usage }),
+      undefined,
+    );
+    stats.push({
+      turnIndex: current.turnIndex,
+      ...(statModel ? { model: statModel } : {}),
+      ...(durationMs > 0 ? { durationMs } : {}),
+      ...(tokenUsage ? { tokenUsage } : {}),
+      ...(contextTokens > 0 ? { contextTokens } : {}),
+    });
+    current = undefined;
+  };
+
+  for (const turn of turns) {
+    if (turn.role === "user") {
+      flushCurrent();
+      if (!turn.subtype) turnIndex++;
+      continue;
+    }
+    if (turn.role === "assistant" && turn.messageId && turnIndex >= 0) {
+      current ??= { turnIndex, messageIds: [] };
+      current.messageIds.push(turn.messageId);
+    }
+  }
+  flushCurrent();
+  return stats;
 }
 
 function partsForMessage(

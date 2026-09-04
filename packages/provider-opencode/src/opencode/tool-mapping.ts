@@ -11,7 +11,9 @@ export function mapOpencodeToolName(name: string): string {
     edit: "Edit",
     write: "Write",
     patch: "Patch",
+    apply_patch: "Patch",
     read: "Read",
+    list: "List",
     glob: "Glob",
     grep: "Grep",
     webfetch: "WebFetch",
@@ -20,8 +22,40 @@ export function mapOpencodeToolName(name: string): string {
     task: "Agent",
     question: "AskQuestion",
     todowrite: "TodoWrite",
+    todoread: "TodoRead",
   };
   return mapping[name] || name;
+}
+
+/**
+ * Known opencode builtin tool ids, including names that pass the mapping
+ * above unchanged. Used to keep MCP attribution away from builtins: a name
+ * found here can never be an MCP call even if a configured server shares it.
+ */
+const OPENCODE_BUILTIN_TOOLS = new Set([
+  "bash",
+  "edit",
+  "write",
+  "patch",
+  "apply_patch",
+  "read",
+  "list",
+  "glob",
+  "grep",
+  "webfetch",
+  "websearch",
+  "skill",
+  "task",
+  "question",
+  "todowrite",
+  "todoread",
+  "invalid",
+  "plan_exit",
+  "codesearch",
+]);
+
+export function isOpencodeBuiltinTool(name: string): boolean {
+  return OPENCODE_BUILTIN_TOOLS.has(name);
 }
 
 /**
