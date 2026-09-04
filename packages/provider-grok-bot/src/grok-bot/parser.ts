@@ -6,7 +6,25 @@ import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provide
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import { getGrokBotTranscriptRoots } from "./config.js";
+import {
+  formatGroupHeader,
+  formatGroupSpeakerMessage,
+  parseGrokBotGroupWake,
+} from "./group-chat.js";
 import { isGrokBotEditTool, mapGrokBotToolArgs, mapGrokBotToolName } from "./tool-mapping.js";
+
+export {
+  extractGroupMentions,
+  formatGroupHeader,
+  formatGroupSpeakerMessage,
+  isGrokBotGroupChatPayload,
+  parseGrokBotGroupWake,
+} from "./group-chat.js";
+export type {
+  GrokBotGroupMessage,
+  GrokBotGroupParticipant,
+  GrokBotGroupWake,
+} from "./group-chat.js";
 
 export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 const USER_TURN_PREFIX_RE = /^\s*\[t\d+u\]\s*/i;
@@ -100,6 +118,8 @@ export function parseGrokBotLines(
   const allTimestamps: string[] = [];
   let resultCursor = 0;
   let toolUseIndex = 0;
+  let groupTitle: string | undefined;
+  let sawGroupChat = false;
 
   const takeResult = (rawName: string, toolCallId?: string): CollectedResult | undefined => {
     if (toolCallId) {
@@ -138,6 +158,13 @@ export function parseGrokBotLines(
       if (!text || isHiddenPrompt(text)) continue;
       const timestamp = recordTs;
       if (timestamp) allTimestamps.push(timestamp);
+      const groupTurns = turnsFromGroupWake(text, timestamp);
+      if (groupTurns) {
+        sawGroupChat = true;
+        if (groupTurns.groupTitle) groupTitle = groupTurns.groupTitle;
+        turns.push(...groupTurns.turns);
+        continue;
+      }
       turns.push({
         role: "user",
         ...(timestamp ? { timestamp } : {}),
@@ -196,11 +223,17 @@ export function parseGrokBotLines(
     (sourcePath ? basename(sourcePath, ".jsonl") : "grok-bot-session");
   const slug = options.sessionInfo?.slug || sessionId;
   const cwd = options.sessionInfo?.cwd || options.sessionInfo?.project || "";
-  const title = options.sessionInfo?.title;
+  const title = groupTitle ? `Group: ${groupTitle}` : options.sessionInfo?.title;
   const sorted = [...allTimestamps].sort();
   const startTime = sorted[0] || options.sessionInfo?.timestamp;
   const endTime = sorted[sorted.length - 1] || startTime;
   const roots = getGrokBotTranscriptRoots();
+  const notes = [
+    "Grok Bot JSONL does not record token usage, thinking blobs, or model IDs in v1.",
+    "send_message calls are promoted to assistant text rather than tool-call scenes.",
+    "sand-subagent transcripts are indexed as separate sessions.",
+    "Group-chat user payloads are split into a room context-injection and per-speaker turns; your-turn/wrapping-up cues are dropped.",
+  ];
 
   return {
     sessionId,
@@ -215,13 +248,14 @@ export function parseGrokBotLines(
     dataSourceInfo: {
       primary: "jsonl",
       sources: roots.map((root) => shortenPath(root)),
-      notes: [
-        "Grok Bot JSONL does not record token usage, thinking blobs, or model IDs in v1.",
-        "send_message calls are promoted to assistant text rather than tool-call scenes.",
-        "sand-subagent transcripts are indexed as separate sessions.",
-      ],
+      notes,
     },
-    diagnosticNotes: ["Grok Bot transcripts do not include thinking blobs or token usage in v1."],
+    diagnosticNotes: [
+      "Grok Bot transcripts do not include thinking blobs or token usage in v1.",
+      ...(sawGroupChat
+        ? ["Group-chat sessions stay per-agent; v1 does not merge Eng/GTM timelines into one HTML."]
+        : []),
+    ],
     ...(parseWarnings.length > 0 ? { parseWarnings } : {}),
   };
 }
@@ -432,12 +466,16 @@ export function countGrokBotDiscoveryStats(content: string): {
   firstPrompt: string;
   prompts: string[];
   timestamp?: string;
+  groupTitle?: string;
+  isGroupChat?: boolean;
 } {
   const prompts: string[] = [];
   let promptCount = 0;
   let toolCallCount = 0;
   let editCountEst = 0;
   let timestamp: string | undefined;
+  let groupTitle: string | undefined;
+  let isGroupChat = false;
 
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
@@ -464,6 +502,19 @@ export function countGrokBotDiscoveryStats(content: string): {
     if (record.role === "user") {
       const text = stripUserDecorators(extractText(record.message?.content));
       if (!text || isHiddenPrompt(text)) continue;
+      const group = parseGrokBotGroupWake(text);
+      if (group) {
+        isGroupChat = true;
+        if (group.groupTitle) groupTitle = group.groupTitle;
+        for (const message of group.messages) {
+          if (!message.text.trim()) continue;
+          promptCount++;
+          if (prompts.length < 2) {
+            prompts.push(formatGroupSpeakerMessage(message.speaker, message.text).slice(0, 200));
+          }
+        }
+        continue;
+      }
       promptCount++;
       if (prompts.length < 2) prompts.push(text.slice(0, 200));
       continue;
@@ -486,5 +537,34 @@ export function countGrokBotDiscoveryStats(content: string): {
     firstPrompt: prompts[0] || "",
     prompts,
     timestamp,
+    ...(groupTitle ? { groupTitle } : {}),
+    ...(isGroupChat ? { isGroupChat: true } : {}),
   };
+}
+
+function turnsFromGroupWake(
+  text: string,
+  timestamp?: string,
+): { turns: ParsedTurn[]; groupTitle?: string } | undefined {
+  const wake = parseGrokBotGroupWake(text);
+  if (!wake) return undefined;
+  const turns: ParsedTurn[] = [];
+  const header = formatGroupHeader(wake);
+  if (header.trim()) {
+    turns.push({
+      role: "user",
+      subtype: "context-injection",
+      ...(timestamp ? { timestamp } : {}),
+      blocks: [{ type: "text", text: header }],
+    });
+  }
+  for (const message of wake.messages) {
+    if (!message.text.trim()) continue;
+    turns.push({
+      role: "user",
+      ...(timestamp ? { timestamp } : {}),
+      blocks: [{ type: "text", text: formatGroupSpeakerMessage(message.speaker, message.text) }],
+    });
+  }
+  return { turns, ...(wake.groupTitle ? { groupTitle: wake.groupTitle } : {}) };
 }

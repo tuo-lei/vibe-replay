@@ -192,10 +192,10 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Pi | Supported (JSONL tree sessions, branching, compaction summaries) |
-| Grok Bot | Supported (cloud-box JSONL; `send_message` promoted to visible replies) |
+| Grok Bot | Supported (cloud-box JSONL; `send_message` promoted to visible replies; group-chat wakes split per speaker) |
 | More coming soon | — |
 
-Grok Bot sessions live on the cloud box (`/home/box/agent-data/agent-transcripts`, often a symlink to `sand-data`). Point discovery at a copy with `GROK_BOT_TRANSCRIPTS_DIR` (or `VIBE_REPLAY_GROK_BOT_DIR`), or drop files under `~/.grok-bot/agent-transcripts`:
+Grok Bot sessions live on the cloud box (`/home/box/agent-data/agent-transcripts`, often a symlink to `sand-data`). Point discovery at a copy with `GROK_BOT_TRANSCRIPTS_DIR` (or `VIBE_REPLAY_GROK_BOT_DIR`), or drop files under `~/.grok-bot/agent-transcripts`. Group-chat user lines starting with `[Group chat:` become a room context-injection plus one user turn per `Speaker: message`; Eng and GTM keep separate transcripts:
 
 ```bash
 GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay -p grok-bot

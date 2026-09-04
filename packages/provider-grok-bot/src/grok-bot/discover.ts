@@ -12,6 +12,14 @@ interface AgentProfile {
   gitBranch?: string;
   gitRepo?: string;
   model?: string;
+  groupTitle?: string;
+  groupId?: string;
+}
+
+interface AgentGroup {
+  title?: string;
+  id?: string;
+  participants?: string[];
 }
 
 export async function discoverGrokBotSessions(
@@ -103,17 +111,21 @@ async function extractGrokBotSessionInfo(
   if (!includeUnreplayable && (unreadable || prompts.length === 0)) return null;
 
   const profile = await readAgentProfile(transcriptsRoot, sessionId);
-  const cwd = profile?.cwd || profile?.name || sessionId;
+  const group = await readAgentGroup(transcriptsRoot, sessionId, profile);
+  const groupTitle = stats.groupTitle || group?.title || profile?.groupTitle;
+  const cwd = profile?.cwd || profile?.name || groupTitle || sessionId;
   const gitRepo = resolveGitRepo && looksLikePath(cwd) ? await readGitRepo(cwd) : profile?.gitRepo;
-  const title =
-    profile?.name || (sessionId.startsWith("sand-subagent-") ? "Grok Bot subagent" : undefined);
+  const title = groupTitle
+    ? `Group: ${groupTitle}`
+    : profile?.name || (sessionId.startsWith("sand-subagent-") ? "Grok Bot subagent" : undefined);
+  const project = groupTitle || cwd;
 
   return {
     provider: "grok-bot",
     sessionId,
     slug: sessionId,
     title,
-    project: cwd,
+    project,
     cwd,
     version: "1",
     ...(profile?.gitBranch ? { gitBranch: profile.gitBranch } : {}),
@@ -181,13 +193,23 @@ export async function readAgentProfile(
       const gitBranch = firstString(obj.gitBranch, obj.git_branch, obj.branch);
       const gitRepo = firstString(obj.gitRepo, obj.git_repo, obj.repo);
       const model = firstString(obj.model, obj.modelId, obj.model_id);
-      if (name || cwd || gitBranch || gitRepo || model) {
+      const groupTitle = firstString(
+        obj.groupTitle,
+        obj.group_title,
+        obj.roomTitle,
+        obj.room_title,
+        nestedTitle(obj.group),
+      );
+      const groupId = firstString(obj.groupId, obj.group_id, nestedId(obj.group));
+      if (name || cwd || gitBranch || gitRepo || model || groupTitle || groupId) {
         return {
           ...(name ? { name } : {}),
           ...(cwd ? { cwd } : {}),
           ...(gitBranch ? { gitBranch } : {}),
           ...(gitRepo ? { gitRepo } : {}),
           ...(model ? { model } : {}),
+          ...(groupTitle ? { groupTitle } : {}),
+          ...(groupId ? { groupId } : {}),
         };
       }
     } catch {
@@ -195,6 +217,88 @@ export async function readAgentProfile(
     }
   }
   return undefined;
+}
+
+export async function readAgentGroup(
+  transcriptsRoot: string,
+  agentId: string,
+  profile?: AgentProfile,
+): Promise<AgentGroup | undefined> {
+  const candidates = [
+    join(dirname(transcriptsRoot), "agents", agentId, "group.json"),
+    join(transcriptsRoot, "agents", agentId, "group.json"),
+  ];
+  if (profile?.groupId) {
+    candidates.push(
+      join(dirname(transcriptsRoot), "agents", profile.groupId, "group.json"),
+      join(dirname(transcriptsRoot), "groups", profile.groupId, "group.json"),
+    );
+  }
+  for (const candidate of candidates) {
+    const parsed = await readGroupFile(candidate);
+    if (parsed) return parsed;
+  }
+  if (profile?.groupTitle) {
+    return { title: profile.groupTitle, ...(profile.groupId ? { id: profile.groupId } : {}) };
+  }
+  return undefined;
+}
+
+async function readGroupFile(path: string): Promise<AgentGroup | undefined> {
+  const raw = await readFile(path, "utf-8").catch(() => null);
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const obj = parsed as Record<string, unknown>;
+    const title = firstString(
+      obj.title,
+      obj.name,
+      obj.groupTitle,
+      obj.group_title,
+      obj.roomTitle,
+      obj.room_title,
+      nestedTitle(obj.group),
+    );
+    const id = firstString(obj.id, obj.groupId, obj.group_id, nestedId(obj.group));
+    const participants = collectParticipantNames(obj.participants ?? obj.members);
+    if (title || id || participants.length > 0) {
+      return {
+        ...(title ? { title } : {}),
+        ...(id ? { id } : {}),
+        ...(participants.length > 0 ? { participants } : {}),
+      };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function collectParticipantNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) names.push(item.trim());
+    else if (item && typeof item === "object" && !Array.isArray(item)) {
+      const record = item as Record<string, unknown>;
+      const name = firstString(record.name, record.title);
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+function nestedTitle(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  return firstString(obj.title, obj.name, obj.groupTitle, obj.roomTitle);
+}
+
+function nestedId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  return firstString(obj.id, obj.groupId, obj.group_id);
 }
 
 async function uniqueExistingDirs(roots: string[]): Promise<string[]> {
