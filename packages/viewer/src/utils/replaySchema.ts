@@ -34,6 +34,9 @@ function validateScene(scene: unknown, index: number): void {
       throw new Error(`Invalid replay: scene ${index} has invalid images`);
     }
   }
+  if (scene.speaker !== undefined && typeof scene.speaker !== "string") {
+    throw new Error(`Invalid replay: scene ${index} has invalid speaker`);
+  }
   if (scene.type === "context-injection" && scene.injectionType !== undefined) {
     if (typeof scene.injectionType !== "string") {
       throw new Error(`Invalid replay: scene ${index} has invalid injectionType`);

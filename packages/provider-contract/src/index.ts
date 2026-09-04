@@ -104,6 +104,11 @@ export interface ParsedTurn {
   blocks: ContentBlock[];
   /** Present when the assistant response was truncated (stop_reason: "max_tokens") */
   stopReason?: "max_tokens";
+  /**
+   * Named speaker for multi-party sessions (Grok Bot group rooms, etc.).
+   * Role stays `user` (human) or `assistant` (bot); this is only the label.
+   */
+  speaker?: string;
 }
 
 export interface RawMessage {

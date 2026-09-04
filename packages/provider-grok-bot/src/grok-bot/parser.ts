@@ -8,10 +8,16 @@ import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import { getGrokBotTranscriptRoots } from "./config.js";
 import {
   formatGroupHeader,
-  formatGroupSpeakerMessage,
   groupHeaderSignature,
+  groupWakeBotNames,
+  isHumanGroupSpeaker,
   parseGrokBotGroupWake,
 } from "./group-chat.js";
+import {
+  mergeGrokBotGroupParses,
+  resolveGrokBotParsePaths,
+  resolveOwnerName,
+} from "./group-merge.js";
 import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
 import {
   grokBotMcpAttribution,
@@ -25,14 +31,25 @@ export {
   formatGroupHeader,
   formatGroupSpeakerMessage,
   groupHeaderSignature,
+  groupWakeBotNames,
+  humanMessageKey,
   isGrokBotGroupChatPayload,
+  isHumanGroupSpeaker,
+  normalizeGroupKey,
   parseGrokBotGroupWake,
+  sameSpeakerName,
 } from "./group-chat.js";
 export type {
   GrokBotGroupMessage,
   GrokBotGroupParticipant,
   GrokBotGroupWake,
 } from "./group-chat.js";
+export {
+  assignTurnClocks,
+  expandGroupTranscriptPaths,
+  mergeDiscoveredGroupSessions,
+  mergeGrokBotGroupParses,
+} from "./group-merge.js";
 export { classifyGrokBotUserWake, parseGrokBotMetaWake, peelGrokBotMetaTag } from "./meta-wake.js";
 export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
 
@@ -81,21 +98,41 @@ export async function parseGrokBotSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
 ): Promise<ProviderParseResult> {
-  const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
-  const allLines: string[] = [];
-  for (const fp of paths) {
-    const content = await readFile(fp, "utf-8");
-    allLines.push(...content.split("\n"));
+  const paths = await resolveGrokBotParsePaths(filePaths, sessionInfo);
+  if (paths.length <= 1) {
+    const sourcePath = paths[0] || (Array.isArray(filePaths) ? filePaths[0] : filePaths);
+    const content = sourcePath ? await readFile(sourcePath, "utf-8") : "";
+    const ownerName = sourcePath ? await resolveOwnerName(sourcePath, sessionInfo) : undefined;
+    return parseGrokBotLines(content.split("\n"), {
+      sourcePath,
+      sessionInfo,
+      ownerName,
+    });
   }
-  return parseGrokBotLines(allLines, {
-    sourcePath: paths[0],
-    sessionInfo,
-  });
+
+  const members = await Promise.all(
+    paths.map(async (path) => {
+      const content = await readFile(path, "utf-8");
+      const ownerName = await resolveOwnerName(path, sessionInfo);
+      const parsed = parseGrokBotLines(content.split("\n"), {
+        sourcePath: path,
+        ownerName,
+      });
+      return {
+        path,
+        ownerName: ownerName || parsed.agentName,
+        parsed,
+      };
+    }),
+  );
+  return mergeGrokBotGroupParses(members, sessionInfo);
 }
 
 interface ParseGrokBotLinesOptions {
   sourcePath?: string;
   sessionInfo?: SessionInfo;
+  /** Display name of the agent that owns this JSONL (profile or inferred). */
+  ownerName?: string;
 }
 
 export function parseGrokBotLines(
@@ -134,6 +171,7 @@ export function parseGrokBotLines(
   let sawGroupChat = false;
   let lastGroupHeaderKey: string | undefined;
   let lastKnownTimestamp: string | undefined;
+  let ownerName = options.ownerName;
 
   const takeResult = (rawName: string, toolCallId?: string): CollectedResult | undefined => {
     if (toolCallId) {
@@ -182,6 +220,7 @@ export function parseGrokBotLines(
         sawGroupChat = true;
         if (groupTurns.groupTitle) groupTitle = groupTurns.groupTitle;
         if (groupTurns.headerKey) lastGroupHeaderKey = groupTurns.headerKey;
+        if (!ownerName && groupTurns.ownerName) ownerName = groupTurns.ownerName;
         turns.push(...groupTurns.turns);
         continue;
       }
@@ -232,7 +271,7 @@ export function parseGrokBotLines(
       const type = typeof block.type === "string" ? block.type : "";
       if (type === "text") {
         const text = typeof block.text === "string" ? block.text : "";
-        if (text.trim()) blocks.push({ type: "text", text });
+        if (text.trim()) blocks.push({ type: "thinking", thinking: text });
         continue;
       }
       if (type !== "tool_use") continue;
@@ -285,6 +324,7 @@ export function parseGrokBotLines(
     turns.push({
       role: "assistant",
       ...(turnTimestamp ? { timestamp: turnTimestamp } : {}),
+      ...(ownerName ? { speaker: ownerName } : {}),
       blocks,
     });
   }
@@ -301,10 +341,11 @@ export function parseGrokBotLines(
   const endTime = sorted[sorted.length - 1] || startTime;
   const roots = getGrokBotTranscriptRoots();
   const notes = [
-    "Grok Bot JSONL does not record token usage, thinking blobs, or model IDs in v1.",
+    "Grok Bot JSONL does not record token usage or model IDs in v1.",
     "send_message and successful communicate_update calls are promoted to assistant text; failed communicate_update stays a tool-call scene.",
+    "Assistant text blocks are private scratch and map to thinking scenes; they are not the visible reply.",
     "sand-subagent transcripts are indexed as separate sessions.",
-    "Group-chat user payloads are split into a room context-injection and per-speaker turns; duplicate room headers and your-turn/wrapping-up cues are dropped.",
+    "Group-chat wakes split into a room context-injection, human user turns, and assistant-side turns for other bots. Sibling transcripts that share the room title merge into one timeline.",
     "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection.",
   ];
 
@@ -313,6 +354,7 @@ export function parseGrokBotLines(
     slug,
     title,
     cwd,
+    ...(ownerName ? { agentName: ownerName } : {}),
     startTime,
     endTime,
     totalDurationMs: estimateActiveDuration(allTimestamps),
@@ -324,9 +366,11 @@ export function parseGrokBotLines(
       notes,
     },
     diagnosticNotes: [
-      "Grok Bot transcripts do not include thinking blobs or token usage in v1.",
+      "Grok Bot transcripts do not include token usage in v1; private scratch is shown as thinking.",
       ...(sawGroupChat
-        ? ["Group-chat sessions stay per-agent; v1 does not merge Eng/GTM timelines into one HTML."]
+        ? [
+            "Group rooms merge sibling agent JSONLs that share the same title; injected peer wake text is dropped when that peer's transcript is present.",
+          ]
         : []),
     ],
     ...(parseWarnings.length > 0 ? { parseWarnings } : {}),
@@ -596,12 +640,12 @@ export function countGrokBotDiscoveryStats(content: string): {
       if (group) {
         isGroupChat = true;
         if (group.groupTitle) groupTitle = group.groupTitle;
+        const botNames = groupWakeBotNames(group);
         for (const message of group.messages) {
           if (!message.text.trim()) continue;
+          if (!isHumanGroupSpeaker(message.speaker, botNames)) continue;
           promptCount++;
-          if (prompts.length < 2) {
-            prompts.push(formatGroupSpeakerMessage(message.speaker, message.text).slice(0, 200));
-          }
+          if (prompts.length < 2) prompts.push(message.text.slice(0, 200));
         }
         continue;
       }
@@ -643,7 +687,9 @@ function turnsFromGroupWake(
   text: string,
   timestamp?: string,
   lastHeaderKey?: string,
-): { turns: ParsedTurn[]; groupTitle?: string; headerKey?: string } | undefined {
+):
+  | { turns: ParsedTurn[]; groupTitle?: string; headerKey?: string; ownerName?: string }
+  | undefined {
   const wake = parseGrokBotGroupWake(text);
   if (!wake) return undefined;
   const turns: ParsedTurn[] = [];
@@ -658,17 +704,29 @@ function turnsFromGroupWake(
       blocks: [{ type: "text", text: header }],
     });
   }
+  const botNames = groupWakeBotNames(wake);
   for (const message of wake.messages) {
     if (!message.text.trim()) continue;
+    if (isHumanGroupSpeaker(message.speaker, botNames)) {
+      turns.push({
+        role: "user",
+        speaker: message.speaker,
+        ...(timestamp ? { timestamp } : {}),
+        blocks: [{ type: "text", text: message.text }],
+      });
+      continue;
+    }
     turns.push({
-      role: "user",
+      role: "assistant",
+      speaker: message.speaker,
       ...(timestamp ? { timestamp } : {}),
-      blocks: [{ type: "text", text: formatGroupSpeakerMessage(message.speaker, message.text) }],
+      blocks: [{ type: "text", text: message.text }],
     });
   }
   return {
     turns,
     ...(wake.groupTitle ? { groupTitle: wake.groupTitle } : {}),
     ...(headerKey ? { headerKey } : {}),
+    ...(wake.turnRecipient ? { ownerName: wake.turnRecipient } : {}),
   };
 }

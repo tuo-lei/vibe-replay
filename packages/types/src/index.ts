@@ -228,7 +228,14 @@ export interface FileDiff {
 }
 
 export type Scene =
-  | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
+  | {
+      type: "user-prompt";
+      content: string;
+      timestamp?: string;
+      images?: string[];
+      /** Named human speaker when the session has more than a single "You". */
+      speaker?: string;
+    }
   | { type: "compaction-summary"; content: string; timestamp?: string }
   | {
       type: "context-injection";
@@ -243,8 +250,17 @@ export type Scene =
       timestamp?: string;
       /** Estimated tokens consumed by this thinking block (chars/4 heuristic) */
       tokens?: number;
+      /** Named assistant-side speaker in multi-party sessions. */
+      speaker?: string;
     }
-  | { type: "text-response"; content: string; timestamp?: string; isTruncated?: boolean }
+  | {
+      type: "text-response";
+      content: string;
+      timestamp?: string;
+      isTruncated?: boolean;
+      /** Named assistant-side speaker in multi-party sessions. */
+      speaker?: string;
+    }
   | {
       type: "tool-call";
       toolName: string;
@@ -276,6 +292,8 @@ export type Scene =
        * Useful for "what is eating my context window?" diagnostics.
        */
       resultTokens?: number;
+      /** Named assistant-side speaker in multi-party sessions. */
+      speaker?: string;
     };
 
 export interface Annotation {

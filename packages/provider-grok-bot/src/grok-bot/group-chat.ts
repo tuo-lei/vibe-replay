@@ -204,6 +204,41 @@ export function groupHeaderSignature(wake: GrokBotGroupWake): string {
   return [wake.groupTitle.trim().toLowerCase(), ...participants].join("\0");
 }
 
+export function sameSpeakerName(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+/** True when the wake speaker is a human, not a listed bot participant. */
+export function isHumanGroupSpeaker(name: string, botNames: string[] = []): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  return !botNames.some((bot) => sameSpeakerName(bot, trimmed));
+}
+
+/** Stable merge key for a group room title. */
+export function normalizeGroupKey(title: string): string {
+  return (
+    title
+      .trim()
+      .toLowerCase()
+      .replace(/['"]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "group"
+  );
+}
+
+export function humanMessageKey(speaker: string, text: string): string {
+  return `${speaker.trim().toLowerCase()}\0${text.replace(/\s+/g, " ").trim().toLowerCase()}`;
+}
+
+export function groupWakeBotNames(wake: GrokBotGroupWake): string[] {
+  return uniqueNames([
+    ...wake.withParticipants,
+    ...wake.participants.map((participant) => participant.name),
+    ...(wake.turnRecipient ? [wake.turnRecipient] : []),
+  ]);
+}
+
 export function formatGroupSpeakerMessage(speaker: string, text: string): string {
   const body = text.replace(/\s+$/, "");
   if (!body) return `**${speaker}:**`;
