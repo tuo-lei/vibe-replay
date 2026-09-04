@@ -706,5 +706,15 @@ describe("Grok Bot tool mapping", () => {
       old_string: "a",
       new_string: "b",
     });
+    expect(
+      mapGrokBotToolArgs("edit", {
+        path: "/tmp/a.ts",
+        oldText: "  indented\n",
+        newText: "  indented\n  more\n",
+      }),
+    ).toMatchObject({
+      old_string: "  indented\n",
+      new_string: "  indented\n  more\n",
+    });
   });
 });

@@ -145,7 +145,7 @@ export function grokBotMcpAttribution(
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim()) return value;
   }
   return undefined;
 }
