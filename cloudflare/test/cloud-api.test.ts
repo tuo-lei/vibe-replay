@@ -171,6 +171,8 @@ describe("Cloud API integration", () => {
     } as Parameters<typeof createSentryOptions>[0]);
     expect(options.release).toBe("version-test");
     expect(options.sendDefaultPii).toBe(false);
+    expect(options.enableLogs).toBe(true);
+    expect(options.enableMetrics).toBe(true);
     expect(options.tracesSampleRate).toBe(0.1);
     expect(options.traceLifecycle).toBe("stream");
     expect(options.dataCollection).toEqual({

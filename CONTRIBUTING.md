@@ -294,6 +294,11 @@ replay contents, and credentials are not sent as event data. It samples 10% of
 traces and streams sampled spans from the Worker. Local and test environments
 remain reporting-disabled when `SENTRY_DSN` is absent.
 
+Sentry Logs and Application Metrics are enabled explicitly. The Worker emits a
+fixed, content-free log and counter for API requests, plus a fixed error log
+for unhandled requests; request bodies, URLs, IDs, and replay contents are not
+included.
+
 ## Key conventions
 
 - **pnpm** only — no npm/yarn
