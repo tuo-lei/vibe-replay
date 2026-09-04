@@ -108,6 +108,8 @@ When any group payload is seen, the session title becomes `Group: <room title>`.
 
 What v1 still does **not** do: merge Eng's and GTM's transcripts into one shared HTML timeline. You replay each agent's view of the room.
 
+[Watch a real Grok Bot group session](https://vibe-replay.com/view/?gist=7edc281ec73e164379b8792eb185817e) to see that split: English, per-speaker turns after [#546](https://github.com/tuo-lei/vibe-replay/pull/546), still one agent's view of the room ([gist](https://gist.github.com/tuo-lei/7edc281ec73e164379b8792eb185817e)).
+
 ## Try it
 
 ```bash
@@ -128,5 +130,6 @@ For comparison, see the JSONL tree used by [Pi coding agent](/blog/pi-local-stor
 
 - [PR #544 — native `provider-grok-bot`](https://github.com/tuo-lei/vibe-replay/pull/544)
 - [PR #546 — group wake speaker split](https://github.com/tuo-lei/vibe-replay/pull/546)
+- [Example replay — Grok Bot group session](https://vibe-replay.com/view/?gist=7edc281ec73e164379b8792eb185817e)
 - [vibe-replay.com](https://vibe-replay.com/)
 - Earlier in this series: [Claude Code](/blog/claude-code-local-storage/), [Cursor](/blog/cursor-local-storage/), [Codex](/blog/codex-local-storage/), [Cowork](/blog/dispatch-deep-dive/), [Pi](/blog/pi-local-storage/), [OpenCode](/blog/opencode-local-storage/), [Hermes](/blog/hermes-local-storage/)
