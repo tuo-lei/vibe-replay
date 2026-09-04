@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Grok Bot local session storage map</title>
+  <desc id="desc">Grok Bot stores one JSONL per agent on the cloud box, with optional copies, sibling profile titles, and parse rewrites for hidden prompts, send_message, and group wakes.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#1a1608"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#eab308"/><stop offset="1" stop-color="#d29922"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7d8590"/></marker>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)"/>
+  <path d="M0 120H1200" stroke="#30363d" opacity=".5"/>
+  <text x="64" y="68" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="30" font-weight="700">Grok Bot local session storage</text>
+  <text x="64" y="101" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="16">Cloud-box JSONL - visible replies are a tool call</text>
+
+  <g font-family="JetBrains Mono,ui-monospace,Menlo,monospace">
+    <rect x="64" y="166" width="470" height="122" rx="16" fill="#161b22" stroke="#eab308" stroke-opacity=".65"/>
+    <text x="94" y="204" fill="#eab308" font-size="14" font-weight="700">TRANSCRIPT</text>
+    <text x="94" y="241" fill="#e6edf3" font-size="16">/home/box/agent-data/agent-transcripts/</text>
+    <text x="94" y="268" fill="#7d8590" font-size="14">&lt;agentId&gt;/&lt;agentId&gt;.jsonl</text>
+
+    <rect x="64" y="316" width="470" height="122" rx="16" fill="#161b22" stroke="#22d3ee" stroke-opacity=".6"/>
+    <text x="94" y="354" fill="#22d3ee" font-size="14" font-weight="700">OPTIONAL COPIES</text>
+    <text x="94" y="391" fill="#e6edf3" font-size="16">sand-data symlink</text>
+    <text x="94" y="418" fill="#7d8590" font-size="14">~/.grok-bot/agent-transcripts export</text>
+
+    <rect x="64" y="466" width="470" height="122" rx="16" fill="#161b22" stroke="#b392f0" stroke-opacity=".6"/>
+    <text x="94" y="504" fill="#b392f0" font-size="14" font-weight="700">PROFILE</text>
+    <text x="94" y="541" fill="#e6edf3" font-size="16">sibling agents/&lt;id&gt;/profile.json</text>
+    <text x="94" y="568" fill="#7d8590" font-size="14">display name · cwd · titles</text>
+  </g>
+
+  <path d="M534 227H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M534 377H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M534 527H618" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="548" y="211" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="13">rewrite</text>
+
+  <rect x="650" y="196" width="486" height="360" rx="20" fill="#0d1117" stroke="url(#accent)" stroke-width="2"/>
+  <text x="690" y="244" fill="#eab308" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15" font-weight="700">PARSE</text>
+  <text x="690" y="286" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="24" font-weight="700">The chat you actually saw</text>
+  <text x="690" y="340" fill="#f85149" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">skip [SAND_HIDDEN_PROMPT]</text>
+  <text x="690" y="378" fill="#3fb950" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">promote send_message -&gt; assistant text</text>
+  <text x="690" y="416" fill="#79b8ff" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">group wake -&gt; room header</text>
+  <text x="690" y="444" fill="#79b8ff" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">+ one turn per speaker</text>
+  <text x="690" y="494" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">strip [t0u] tags · map read/shell to Read/Bash</text>
+  <text x="690" y="522" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">tool_result lives on role:"tool" lines</text>
+
+  <rect x="64" y="628" width="1072" height="1" fill="#30363d"/>
+  <text x="64" y="664" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="14">sand-subagent-* stay separate · no merged Eng/GTM timeline · SSH indexing not yet</text>
+</svg>
