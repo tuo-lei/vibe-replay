@@ -9,14 +9,22 @@ import { getGrokBotTranscriptRoots } from "./config.js";
 import {
   formatGroupHeader,
   formatGroupSpeakerMessage,
+  groupHeaderSignature,
   parseGrokBotGroupWake,
 } from "./group-chat.js";
-import { isGrokBotEditTool, mapGrokBotToolArgs, mapGrokBotToolName } from "./tool-mapping.js";
+import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
+import {
+  grokBotMcpAttribution,
+  isGrokBotEditTool,
+  mapGrokBotToolArgs,
+  mapGrokBotToolName,
+} from "./tool-mapping.js";
 
 export {
   extractGroupMentions,
   formatGroupHeader,
   formatGroupSpeakerMessage,
+  groupHeaderSignature,
   isGrokBotGroupChatPayload,
   parseGrokBotGroupWake,
 } from "./group-chat.js";
@@ -25,10 +33,14 @@ export type {
   GrokBotGroupParticipant,
   GrokBotGroupWake,
 } from "./group-chat.js";
+export { classifyGrokBotUserWake, parseGrokBotMetaWake, peelGrokBotMetaTag } from "./meta-wake.js";
+export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
 
 export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 const USER_TURN_PREFIX_RE = /^\s*\[t\d+u\]\s*/i;
 const SEND_MESSAGE_TOOL = "send_message";
+const COMMUNICATE_UPDATE_TOOL = "communicate_update";
+const PROMOTED_TEXT_TOOLS = new Set([SEND_MESSAGE_TOOL, COMMUNICATE_UPDATE_TOOL]);
 
 interface GrokBotRecord {
   role?: unknown;
@@ -120,6 +132,8 @@ export function parseGrokBotLines(
   let toolUseIndex = 0;
   let groupTitle: string | undefined;
   let sawGroupChat = false;
+  let lastGroupHeaderKey: string | undefined;
+  let lastKnownTimestamp: string | undefined;
 
   const takeResult = (rawName: string, toolCallId?: string): CollectedResult | undefined => {
     if (toolCallId) {
@@ -157,12 +171,48 @@ export function parseGrokBotLines(
       const text = stripUserDecorators(extractText(content));
       if (!text || isHiddenPrompt(text)) continue;
       const timestamp = recordTs;
-      if (timestamp) allTimestamps.push(timestamp);
-      const groupTurns = turnsFromGroupWake(text, timestamp);
+      if (timestamp) {
+        allTimestamps.push(timestamp);
+        lastKnownTimestamp = timestamp;
+      }
+      const peeled = peelGrokBotMetaTag(text);
+      const groupSource = peeled?.rest || text;
+      const groupTurns = turnsFromGroupWake(groupSource, timestamp, lastGroupHeaderKey);
       if (groupTurns) {
         sawGroupChat = true;
         if (groupTurns.groupTitle) groupTitle = groupTurns.groupTitle;
+        if (groupTurns.headerKey) lastGroupHeaderKey = groupTurns.headerKey;
         turns.push(...groupTurns.turns);
+        continue;
+      }
+      const classified = classifyGrokBotUserWake(text);
+      if (classified) {
+        if (classified.kind === "skip") continue;
+        if (classified.kind === "context-injection") {
+          turns.push({
+            role: "user",
+            subtype: "context-injection",
+            ...(timestamp ? { timestamp } : {}),
+            blocks: [{ type: "text", text: classified.text }],
+          });
+          continue;
+        }
+        if (classified.label === "answering-question") {
+          const header = peeled ? formatAnsweringHeader(peeled.wake) : "";
+          if (header) {
+            turns.push({
+              role: "user",
+              subtype: "context-injection",
+              ...(timestamp ? { timestamp } : {}),
+              blocks: [{ type: "text", text: header }],
+            });
+          }
+        }
+        turns.push({
+          role: "user",
+          ...(timestamp ? { timestamp } : {}),
+          blocks: [{ type: "text", text: classified.text }],
+        });
         continue;
       }
       turns.push({
@@ -177,6 +227,7 @@ export function parseGrokBotLines(
 
     const blocks: ContentBlock[] = [];
     let turnTimestamp = recordTs;
+    let durationCursor = recordTs || lastKnownTimestamp;
     for (const block of asBlocks(content)) {
       const type = typeof block.type === "string" ? block.type : "";
       if (type === "text") {
@@ -189,23 +240,44 @@ export function parseGrokBotLines(
       const toolCallId = firstString(block.toolCallId, block.tool_call_id, block.tool_use_id);
       const id = toolCallId || `grok-${rawName}-${toolUseIndex++}`;
       const result = takeResult(rawName, toolCallId);
-      if (!turnTimestamp && result?.timestamp) turnTimestamp = result.timestamp;
-      if (result?.timestamp) allTimestamps.push(result.timestamp);
+      const durationStart = durationCursor;
+      if (result?.timestamp) {
+        allTimestamps.push(result.timestamp);
+        lastKnownTimestamp = result.timestamp;
+        durationCursor = result.timestamp;
+        if (!turnTimestamp) turnTimestamp = result.timestamp;
+      }
 
-      if (rawName.toLowerCase() === SEND_MESSAGE_TOOL) {
-        const visible = extractSendMessageText(block.input);
+      if (PROMOTED_TEXT_TOOLS.has(rawName.toLowerCase())) {
+        const isStatusUpdate = rawName.toLowerCase() === COMMUNICATE_UPDATE_TOOL;
+        if (isStatusUpdate && result?.isError) {
+          const call: ToolCallSite = {
+            name: mapGrokBotToolName(rawName),
+            rawName,
+            id,
+            input: mapGrokBotToolArgs(rawName, block.input),
+            result,
+          };
+          blocks.push(buildToolUseBlock(call, durationStart));
+          continue;
+        }
+        const visible = isStatusUpdate
+          ? extractStatusUpdateText(block.input)
+          : extractSendMessageText(block.input);
         if (visible.trim()) blocks.push({ type: "text", text: visible });
         continue;
       }
 
+      const mappedInput = mapGrokBotToolArgs(rawName, block.input);
+      const mcp = grokBotMcpAttribution(rawName, mappedInput);
       const call: ToolCallSite = {
         name: mapGrokBotToolName(rawName),
         rawName,
         id,
-        input: mapGrokBotToolArgs(rawName, block.input),
+        input: mappedInput,
         result,
       };
-      blocks.push(buildToolUseBlock(call, turnTimestamp));
+      blocks.push(buildToolUseBlock(call, durationStart, mcp));
     }
 
     if (blocks.length === 0) continue;
@@ -230,9 +302,10 @@ export function parseGrokBotLines(
   const roots = getGrokBotTranscriptRoots();
   const notes = [
     "Grok Bot JSONL does not record token usage, thinking blobs, or model IDs in v1.",
-    "send_message calls are promoted to assistant text rather than tool-call scenes.",
+    "send_message and successful communicate_update calls are promoted to assistant text; failed communicate_update stays a tool-call scene.",
     "sand-subagent transcripts are indexed as separate sessions.",
-    "Group-chat user payloads are split into a room context-injection and per-speaker turns; your-turn/wrapping-up cues are dropped.",
+    "Group-chat user payloads are split into a room context-injection and per-speaker turns; duplicate room headers and your-turn/wrapping-up cues are dropped.",
+    "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection.",
   ];
 
   return {
@@ -286,6 +359,16 @@ export function extractSendMessageText(input: unknown, depth = 0): string {
   if (parts.length > 0) return parts.join("\n");
   if (typeof obj.label === "string") return obj.label;
   if (typeof obj.title === "string") return obj.title;
+  return "";
+}
+
+export function extractStatusUpdateText(input: unknown): string {
+  const promoted = extractSendMessageText(input);
+  if (promoted.trim()) return promoted;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
+  const obj = input as Record<string, unknown>;
+  if (typeof obj.update === "string") return obj.update;
+  if (typeof obj.status === "string") return obj.status;
   return "";
 }
 
@@ -390,11 +473,12 @@ function omitKeys(obj: Record<string, unknown>, keys: string[]): Record<string, 
 
 function buildToolUseBlock(
   call: ToolCallSite,
-  assistantTimestamp?: string,
+  startTimestamp?: string,
+  mcp?: { server?: string; tool?: string },
 ): Extract<ContentBlock, { type: "tool_use" }> {
   const durationMs =
-    assistantTimestamp && call.result?.timestamp
-      ? toolDurationMs(assistantTimestamp, call.result.timestamp)
+    startTimestamp && call.result?.timestamp
+      ? toolDurationMs(startTimestamp, call.result.timestamp)
       : undefined;
   return {
     type: "tool_use",
@@ -404,7 +488,11 @@ function buildToolUseBlock(
     _hasResult: call.result !== undefined,
     ...(call.result !== undefined ? { _result: call.result.text } : {}),
     ...(call.result?.isError ? { _isError: true } : {}),
-    ...(durationMs !== undefined ? { _durationMs: durationMs } : {}),
+    ...(durationMs !== undefined
+      ? { _durationMs: durationMs, _durationSource: "timestamp" as const }
+      : {}),
+    ...(mcp?.server ? { _mcpServer: mcp.server } : {}),
+    ...(mcp?.tool ? { _mcpTool: mcp.tool } : {}),
   };
 }
 
@@ -502,7 +590,9 @@ export function countGrokBotDiscoveryStats(content: string): {
     if (record.role === "user") {
       const text = stripUserDecorators(extractText(record.message?.content));
       if (!text || isHiddenPrompt(text)) continue;
-      const group = parseGrokBotGroupWake(text);
+      const peeled = peelGrokBotMetaTag(text);
+      const groupSource = peeled?.rest || text;
+      const group = parseGrokBotGroupWake(groupSource);
       if (group) {
         isGroupChat = true;
         if (group.groupTitle) groupTitle = group.groupTitle;
@@ -515,6 +605,13 @@ export function countGrokBotDiscoveryStats(content: string): {
         }
         continue;
       }
+      const classified = classifyGrokBotUserWake(text);
+      if (classified) {
+        if (classified.kind !== "prompt") continue;
+        promptCount++;
+        if (prompts.length < 2) prompts.push(classified.text.slice(0, 200));
+        continue;
+      }
       promptCount++;
       if (prompts.length < 2) prompts.push(text.slice(0, 200));
       continue;
@@ -524,7 +621,7 @@ export function countGrokBotDiscoveryStats(content: string): {
     for (const block of asBlocks(record.message?.content)) {
       if (block.type !== "tool_use") continue;
       const name = typeof block.name === "string" ? block.name : "";
-      if (name.toLowerCase() === SEND_MESSAGE_TOOL) continue;
+      if (PROMOTED_TEXT_TOOLS.has(name.toLowerCase())) continue;
       toolCallCount++;
       if (isGrokBotEditTool(name)) editCountEst++;
     }
@@ -545,12 +642,15 @@ export function countGrokBotDiscoveryStats(content: string): {
 function turnsFromGroupWake(
   text: string,
   timestamp?: string,
-): { turns: ParsedTurn[]; groupTitle?: string } | undefined {
+  lastHeaderKey?: string,
+): { turns: ParsedTurn[]; groupTitle?: string; headerKey?: string } | undefined {
   const wake = parseGrokBotGroupWake(text);
   if (!wake) return undefined;
   const turns: ParsedTurn[] = [];
+  const headerKey = groupHeaderSignature(wake);
   const header = formatGroupHeader(wake);
-  if (header.trim()) {
+  const isDuplicateHeader = !!lastHeaderKey && lastHeaderKey === headerKey;
+  if (header.trim() && !isDuplicateHeader) {
     turns.push({
       role: "user",
       subtype: "context-injection",
@@ -566,5 +666,9 @@ function turnsFromGroupWake(
       blocks: [{ type: "text", text: formatGroupSpeakerMessage(message.speaker, message.text) }],
     });
   }
-  return { turns, ...(wake.groupTitle ? { groupTitle: wake.groupTitle } : {}) };
+  return {
+    turns,
+    ...(wake.groupTitle ? { groupTitle: wake.groupTitle } : {}),
+    ...(headerKey ? { headerKey } : {}),
+  };
 }

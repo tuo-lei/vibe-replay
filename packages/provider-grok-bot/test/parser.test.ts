@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  classifyGrokBotUserWake,
   extractSendMessageText,
+  extractStatusUpdateText,
   parseGrokBotLines,
   parseGrokBotSession,
   stripUserDecorators,
@@ -12,7 +14,11 @@ import {
 import { mapGrokBotToolArgs, mapGrokBotToolName } from "../src/grok-bot/tool-mapping.js";
 import { transformToReplay } from "./helpers/transform.js";
 
-const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "sample.jsonl");
+const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+const fixturePath = join(fixtures, "sample.jsonl");
+const dmFixturePath = join(fixtures, "dm-session.jsonl");
+const subagentFixturePath = join(fixtures, "subagent.jsonl");
+const metaWakeFixturePath = join(fixtures, "meta-wake.jsonl");
 
 async function withFixture(lines: unknown[], fn: (path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "vibe-replay-grok-bot-parser-"));
@@ -242,6 +248,379 @@ describe("Grok Bot parser", () => {
     );
     expect(extractSendMessageText({ text: "plain" })).toBe("plain");
     expect(extractSendMessageText({ text: { widgets: [{ label: "Continue" }] } })).toBe("Continue");
+    expect(
+      extractSendMessageText({
+        to: "dm",
+        text: { content: "Visible DM reply" },
+        attachments: [{ url: "https://example.invalid/card.png", title: "card" }],
+      }),
+    ).toBe("Visible DM reply");
+    expect(extractStatusUpdateText({ update: "Scanning inbox…" })).toBe("Scanning inbox…");
+  });
+
+  it("parses the DM fixture: send_message promotion, communicate_update, and mapped tools", async () => {
+    const parsed = await parseGrokBotSession(dmFixturePath);
+    const userTurns = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0].blocks[0]).toEqual({
+      type: "text",
+      text: "帮我查一下 dashboard badge copy",
+    });
+
+    const assistantText = parsed.turns
+      .filter((turn) => turn.role === "assistant")
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "text")
+      .map((block) => (block.type === "text" ? block.text : ""));
+    expect(assistantText).toContain("Hey — good to meet you.");
+    expect(assistantText).toContain("Checking the badge copy now.");
+    expect(assistantText).toContain("Badge copy looks good.");
+    expect(assistantText.some((text) => text.includes("example.invalid"))).toBe(false);
+
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools.map((block) => (block.type === "tool_use" ? block.name : ""))).toEqual([
+      "Read",
+      "TodoWrite",
+      "Bash",
+    ]);
+    expect(tools[1]).toMatchObject({
+      name: "TodoWrite",
+      input: {
+        todos: [
+          { content: "Confirm badge copy", status: "in_progress" },
+          { content: "Reply in DM", status: "pending" },
+        ],
+      },
+    });
+    const read = tools[0];
+    expect(read.type === "tool_use" && read._durationMs).toBe(3000);
+    expect(read.type === "tool_use" && read._durationSource).toBe("timestamp");
+
+    const replay = transformToReplay(parsed, "grok-bot", "~/grok-bot");
+    expect(
+      replay.scenes.some(
+        (scene) =>
+          scene.type === "tool-call" &&
+          (scene.toolName === "send_message" || scene.toolName === "communicate_update"),
+      ),
+    ).toBe(false);
+    expect(
+      replay.scenes.some((scene) => scene.type === "tool-call" && scene.toolName === "Read"),
+    ).toBe(true);
+    expect(
+      replay.scenes.some((scene) => scene.type === "tool-call" && scene.toolName === "TodoWrite"),
+    ).toBe(true);
+  });
+
+  it("parses a sand-subagent fixture as its own session with promoted replies", async () => {
+    const parsed = await parseGrokBotSession(subagentFixturePath, {
+      provider: "grok-bot",
+      sessionId: "sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      slug: "sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      title: "Grok Bot subagent",
+      project: "sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      cwd: "sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      version: "1",
+      timestamp: "2026-09-04T00:00:00.000Z",
+      lineCount: 5,
+      fileSize: 100,
+      filePath: subagentFixturePath,
+      filePaths: [subagentFixturePath],
+      firstPrompt: "",
+    });
+    expect(parsed.sessionId).toBe("sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(1);
+    expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("send_message"))).toBe(false);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ name: "Read", _hasResult: true });
+  });
+
+  it("classifies meta wakes and parses the meta-wake fixture", async () => {
+    expect(classifyGrokBotUserWake("[routine]\nCheck unread inbox.")).toEqual({
+      kind: "context-injection",
+      text: "Routine: Check unread inbox.",
+      label: "routine",
+    });
+    expect(classifyGrokBotUserWake("[inbound]\nBook a flight")).toEqual({
+      kind: "prompt",
+      text: "Book a flight",
+      label: "inbound",
+    });
+    expect(classifyGrokBotUserWake('[Answering your question tbs1: "what is grok bot"]')).toEqual({
+      kind: "context-injection",
+      text: "Answering previous question tbs1: what is grok bot",
+      label: "answering-question",
+    });
+
+    const parsed = await parseGrokBotSession(metaWakeFixturePath);
+    const injections = parsed.turns.filter((turn) => turn.subtype === "context-injection");
+    expect(injections.map((turn) => turn.blocks[0])).toEqual([
+      { type: "text", text: "Routine: Check unread inbox and send a digest." },
+      {
+        type: "text",
+        text: "Answering previous question tbs1: what is grok bot",
+      },
+    ]);
+    const prompts = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
+    expect(prompts.map((turn) => turn.blocks[0])).toEqual([
+      { type: "text", text: "Can you book a flight to Taipei next Tuesday?" },
+      { type: "text", text: "Also compare it to Claude Code." },
+    ]);
+    const assistantText = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "text")
+      .map((block) => (block.type === "text" ? block.text : ""));
+    expect(assistantText).toContain("Scanning inbox…");
+    expect(assistantText).toContain("I can help with that.");
+  });
+
+  it("maps Sand-native tools including mcp, await, computer_use, and task", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "use the tools" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "await",
+              toolCallId: "a-1",
+              input: { seconds: 2 },
+            },
+            {
+              type: "tool_use",
+              name: "task",
+              toolCallId: "t-1",
+              input: { goal: "explore UI", context: "list badge strings", role: "explore" },
+            },
+            {
+              type: "tool_use",
+              name: "mcp",
+              toolCallId: "m-1",
+              input: { server: "github", toolName: "pull_request_read", pullNumber: 544 },
+            },
+            {
+              type: "tool_use",
+              name: "get_mcp_tools",
+              toolCallId: "g-1",
+              input: {},
+            },
+            {
+              type: "tool_use",
+              name: "computer_use",
+              toolCallId: "c-1",
+              input: { action: "screenshot" },
+            },
+            {
+              type: "tool_use",
+              name: "web_search",
+              toolCallId: "w-1",
+              input: { search_term: "vibe-replay grok bot" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "await",
+              toolCallId: "a-1",
+              result: { success: { timestamp: 1788485460000 } },
+            },
+            {
+              type: "tool_result",
+              name: "task",
+              toolCallId: "t-1",
+              result: { success: { timestamp: 1788485465000, content: "done" } },
+            },
+            {
+              type: "tool_result",
+              name: "mcp",
+              toolCallId: "m-1",
+              result: { success: { timestamp: 1788485470000, content: "PR 544" } },
+            },
+            {
+              type: "tool_result",
+              name: "get_mcp_tools",
+              toolCallId: "g-1",
+              result: { success: { timestamp: 1788485472000, content: "github, slack" } },
+            },
+            {
+              type: "tool_result",
+              name: "computer_use",
+              toolCallId: "c-1",
+              result: { success: { timestamp: 1788485475000, content: "png" } },
+            },
+            {
+              type: "tool_result",
+              name: "web_search",
+              toolCallId: "w-1",
+              result: { success: { timestamp: 1788485480000, content: "hits" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools.map((block) => (block.type === "tool_use" ? block.name : ""))).toEqual([
+      "Await",
+      "Agent",
+      "mcp",
+      "GetMcpTools",
+      "ComputerUse",
+      "WebSearch",
+    ]);
+    expect(tools[1]).toMatchObject({
+      name: "Agent",
+      input: {
+        description: "explore UI",
+        prompt: "list badge strings",
+        subagent_type: "explore",
+      },
+    });
+    expect(tools[2]).toMatchObject({
+      name: "mcp",
+      input: { server: "github", toolName: "pull_request_read", tool: "pull_request_read" },
+      _mcpServer: "github",
+      _mcpTool: "pull_request_read",
+    });
+    expect(tools[5]).toMatchObject({
+      name: "WebSearch",
+      input: { search_term: "vibe-replay grok bot", query: "vibe-replay grok bot" },
+    });
+    expect(tools[2].type === "tool_use" && tools[2]._durationMs).toBe(5000);
+  });
+
+  it("advances duration from each result when the assistant record itself is timestamped", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "run two tools" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        timestamp: 1788485460000,
+        message: {
+          content: [
+            { type: "tool_use", name: "read", toolCallId: "r-1", input: { path: "/a.md" } },
+            { type: "tool_use", name: "shell", toolCallId: "s-1", input: { command: "rg badge" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "read",
+              toolCallId: "r-1",
+              result: { success: { timestamp: 1788485462000, content: "ok" } },
+            },
+            {
+              type: "tool_result",
+              name: "shell",
+              toolCallId: "s-1",
+              result: { success: { timestamp: 1788485467000, stdout: "hit" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools[0]).toMatchObject({ name: "Read", _durationMs: 2000 });
+    expect(tools[1]).toMatchObject({ name: "Bash", _durationMs: 5000 });
+  });
+
+  it("keeps a failed communicate_update as an error tool and still promotes successes", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "status please" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "communicate_update",
+              toolCallId: "cu-fail",
+              input: { text: { content: "This ping never landed." } },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "communicate_update",
+              toolCallId: "cu-fail",
+              result: { failure: { message: "delivery failed" } },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "communicate_update",
+              toolCallId: "cu-ok",
+              input: { update: "Still working." },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "communicate_update",
+              toolCallId: "cu-ok",
+              result: { success: { timestamp: 1788485490000 } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      name: "CommunicateUpdate",
+      _isError: true,
+      _result: "delivery failed",
+    });
+    const texts = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "text")
+      .map((block) => (block.type === "text" ? block.text : ""));
+    expect(texts).toContain("Still working.");
+    expect(texts).not.toContain("This ping never landed.");
   });
 });
 
@@ -249,6 +628,13 @@ describe("Grok Bot tool mapping", () => {
   it("maps sand tool names and path fields onto the viewer vocabulary", () => {
     expect(mapGrokBotToolName("read")).toBe("Read");
     expect(mapGrokBotToolName("shell")).toBe("Bash");
+    expect(mapGrokBotToolName("update_todos")).toBe("TodoWrite");
+    expect(mapGrokBotToolName("await")).toBe("Await");
+    expect(mapGrokBotToolName("computer_use")).toBe("ComputerUse");
+    expect(mapGrokBotToolName("get_mcp_tools")).toBe("GetMcpTools");
+    expect(mapGrokBotToolName("communicate_update")).toBe("CommunicateUpdate");
+    expect(mapGrokBotToolName("mcp")).toBe("mcp");
+    expect(mapGrokBotToolName("pull_request_read")).toBe("pull_request_read");
     expect(mapGrokBotToolArgs("read", { path: "/tmp/a.ts" })).toMatchObject({
       path: "/tmp/a.ts",
       file_path: "/tmp/a.ts",
@@ -259,6 +645,14 @@ describe("Grok Bot tool mapping", () => {
       file_path: "/tmp/a.ts",
       old_string: "a",
       new_string: "b",
+    });
+    expect(
+      mapGrokBotToolArgs("update_todos", { items: [{ content: "a", status: "pending" }] }),
+    ).toMatchObject({
+      todos: [{ content: "a", status: "pending" }],
+    });
+    expect(mapGrokBotToolArgs("web_search", { search_term: "grok" })).toMatchObject({
+      query: "grok",
     });
   });
 });

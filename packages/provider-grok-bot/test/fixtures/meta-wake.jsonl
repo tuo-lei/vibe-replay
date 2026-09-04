@@ -1,0 +1,9 @@
+{"role":"user","message":{"content":[{"type":"text","text":"[routine]\nCheck unread inbox and send a digest."}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"communicate_update","input":{"update":"Scanning inbox…"}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"communicate_update","result":{"success":{"timestamp":"1788485440095"}}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"[inbound]\nCan you book a flight to Taipei next Tuesday?"}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"send_message","input":{"text":{"content":"I can help with that."}}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"send_message","result":{"success":{"timestamp":"1788485445095","messageId":"t1s0"}}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"[Answering your question tbs1: \"what is grok bot\"]\nAlso compare it to Claude Code."}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"send_message","input":{"text":{"content":"Grok Bot is the cloud-box agent; Claude Code is the local CLI."}}}]}}
+{"role":"tool","message":{"content":[{"type":"tool_result","name":"send_message","result":{"success":{"timestamp":"1788485450095","messageId":"t2s0"}}}]}}
