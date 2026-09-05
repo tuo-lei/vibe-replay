@@ -129,6 +129,8 @@ pnpm monorepo with shared foundations, provider packages, and app layers:
   scene, usage, insight, and navigation tools to the local assistant. `packages/cli/src/server.ts`
   owns the SSE transport and provider-selection boundary; no shell, filesystem, arbitrary network,
   publishing, or mutation tools are exposed. SSH content requires explicit per-request consent.
+  The UI capability matrix lives in [`docs/ai-chat-feature-parity.md`](docs/ai-chat-feature-parity.md);
+  a new inspectable dashboard/replay surface does not automatically become a chat tool.
 - **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, generates replays, and serves the local dashboard/editor.
 - **`packages/viewer`** — React app built into a single HTML file (~1.0MB) via `vite-plugin-singlefile`. Handles playback, annotations, insights, theming, and search.
 
@@ -318,6 +320,23 @@ Set `VIBE_REPLAY_TELEMETRY=0` or `DO_NOT_TRACK=1` to disable it for a process
 or environment. CI runs disable telemetry automatically. The collector keeps
 daily aggregates and month-rotated pseudonymous installation hashes, not raw
 installation IDs.
+
+## Internal docs
+
+`docs/` is not a product documentation site. User-facing copy lives in the root
+`README.md` and `website/`. What remains under `docs/`:
+
+- [`docs/screenshots/`](docs/screenshots/) — synthetic marketing images referenced
+  by the root README. Keep them free of real transcripts; see
+  [`docs/screenshots/README.md`](docs/screenshots/README.md).
+- [`docs/ai-chat-feature-parity.md`](docs/ai-chat-feature-parity.md) — Ask Replay
+  vs UI capability matrix. Update it when adding inspectable dashboard or replay
+  features.
+- [`docs/session-observability-audit.md`](docs/session-observability-audit.md) —
+  canonical token, usage, and coverage metric definitions plus the provider
+  matrix for Insights.
+
+Do not add investigation write-ups or one-off postmortems here.
 
 ## Key conventions
 

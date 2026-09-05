@@ -154,6 +154,8 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | E2E: CLI smoke | `e2e/cli-smoke.test.ts` |
 | E2E: auth worker | `e2e/auth-worker.test.ts` |
 | Agent instruction wiring | `AGENTS.md`, `CLAUDE.md`, `.agents/skills/`, `.cursor/rules/` |
+| Ask Replay parity | `docs/ai-chat-feature-parity.md` |
+| Session observability | `docs/session-observability-audit.md` |
 
 ## Agent setup
 
