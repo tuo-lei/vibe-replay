@@ -19,6 +19,11 @@ import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
 
+function turnSpeakerFields(speaker?: string): { speaker?: string } {
+  const name = speaker?.trim();
+  return name ? { speaker: name } : {};
+}
+
 const HOME = homedir();
 
 /** Replace absolute home dir path with ~ to avoid leaking username */
@@ -189,6 +194,7 @@ export function transformToReplay(
   const syntheticSubAgentSummary: NonNullable<ReplaySession["meta"]["subAgentSummary"]> = [];
 
   for (const turn of parsed.turns) {
+    const speakerFields = turnSpeakerFields(turn.speaker);
     if (turn.role === "user") {
       const textBlocks = turn.blocks.filter(
         (b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
@@ -218,6 +224,7 @@ export function transformToReplay(
             content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
             timestamp: turn.timestamp,
             ...(images && images.length > 0 ? { images } : {}),
+            ...speakerFields,
           });
           userPrompts++;
         }
@@ -235,6 +242,7 @@ export function transformToReplay(
             content: truncate(redactPath(thinking), 2000),
             timestamp: turn.timestamp,
             ...(tokens > 0 ? { tokens } : {}),
+            ...speakerFields,
           });
           thinkingBlocks++;
         }
@@ -246,6 +254,7 @@ export function transformToReplay(
             content: redactSecrets(redactPath(text)),
             timestamp: turn.timestamp,
             ...(turn.stopReason === "max_tokens" ? { isTruncated: true as const } : {}),
+            ...speakerFields,
           });
         }
       } else if (block.type === "tool_use") {
@@ -293,6 +302,7 @@ export function transformToReplay(
             });
           }
         }
+        if (speakerFields.speaker) scene.speaker = speakerFields.speaker;
         scenes.push(scene);
         toolCalls++;
       }

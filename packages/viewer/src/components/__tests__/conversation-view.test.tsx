@@ -210,4 +210,59 @@ describe("ConversationView assistant metrics", () => {
     expect(screen.getByText(/2\.2s/)).toBeTruthy();
     expect(screen.queryByText(/tok/)).toBeNull();
   });
+
+  it("labels named human and assistant speakers instead of You/Assistant", () => {
+    render(
+      <ConversationView
+        scenes={[
+          {
+            type: "user-prompt",
+            content: "Let's ship the Grok Bot replay provider this week.",
+            speaker: "Tuo",
+          },
+          {
+            type: "text-response",
+            content: "On it — I'll draft the launch note.",
+            speaker: "Vibe Replay GTM",
+          },
+          {
+            type: "thinking",
+            content: "checking badge copy",
+            speaker: "Vibe Replay Eng",
+          },
+          {
+            type: "text-response",
+            content: "Badge copy looks good — I'll confirm on the Eng side.",
+            speaker: "Vibe Replay Eng",
+          },
+        ]}
+        visibleCount={4}
+        currentIndex={3}
+        effectivePrefs={prefs(false)}
+      />,
+    );
+
+    expect(screen.getByText("Tuo")).toBeTruthy();
+    expect(screen.getByText("Vibe Replay GTM")).toBeTruthy();
+    expect(screen.getByText("Vibe Replay Eng")).toBeTruthy();
+    expect(screen.queryByText("You")).toBeNull();
+    expect(screen.queryByText("Assistant")).toBeNull();
+  });
+
+  it("keeps generic User/human labels as You and unnamed bots as Assistant", () => {
+    render(
+      <ConversationView
+        scenes={[
+          { type: "user-prompt", content: "hello", speaker: "User" },
+          { type: "text-response", content: "hi" },
+        ]}
+        visibleCount={2}
+        currentIndex={1}
+        effectivePrefs={prefs(false)}
+      />,
+    );
+
+    expect(screen.getByText("You")).toBeTruthy();
+    expect(screen.getByText("Assistant")).toBeTruthy();
+  });
 });

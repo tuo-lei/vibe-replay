@@ -95,6 +95,8 @@ descriptions, and schemas are never copied into this breakdown.
 
 GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, and cost tracking across all your sessions. See how your coding patterns evolve over time.
 
+The aggregate Insights dashboard also shows per-session percentile distributions for duration, tool calls, turns, and tokens, plus per-turn distributions for duration, tool calls, and tokens.
+
 <p align="center">
   <img src="docs/screenshots/personal-insights.png" alt="Personal insights — GitHub-style heatmap, streaks, session stats, and cost tracking" width="800" />
 </p>
