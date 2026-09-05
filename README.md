@@ -73,7 +73,7 @@ Pick a session and step through every prompt, thinking block, tool call, and cod
 
 ### Deep insights for every session
 
-Auto-generated analytics: token burn & cost over time, context window usage, cache read share, tool call distribution, and model breakdown, plus session and per-turn percentile distributions for duration, tool calls, turns, and tokens.
+Auto-generated analytics: token burn & cost over time, context window usage, cache read share, tool call distribution, and model breakdown, plus per-session percentile distributions for duration, tool calls, turns, and tokens and per-turn distributions for duration, tool calls, and tokens.
 
 <p align="center">
   <img src="docs/screenshots/insights.png" alt="Session insights — token usage, cost tracking, tool distribution, and context window charts" width="800" />
