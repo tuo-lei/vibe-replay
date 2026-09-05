@@ -73,7 +73,7 @@ Pick a session and step through every prompt, thinking block, tool call, and cod
 
 ### Deep insights for every session
 
-Auto-generated analytics: token burn & cost over time, context window usage, cache read share, tool call distribution, and model breakdown, plus per-session percentile distributions for duration, tool calls, turns, and tokens and per-turn distributions for duration, tool calls, and tokens.
+Auto-generated analytics: token burn & cost over time, context window usage, cache read share, tool call distribution, model breakdown, and per-turn breakdowns.
 
 <p align="center">
   <img src="docs/screenshots/insights.png" alt="Session insights — token usage, cost tracking, tool distribution, and context window charts" width="800" />
@@ -94,6 +94,8 @@ descriptions, and schemas are never copied into this breakdown.
 ### Your AI coding wrapped
 
 GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, and cost tracking across all your sessions. See how your coding patterns evolve over time.
+
+The aggregate Insights dashboard also shows per-session percentile distributions for duration, tool calls, turns, and tokens, plus per-turn distributions for duration, tool calls, and tokens.
 
 <p align="center">
   <img src="docs/screenshots/personal-insights.png" alt="Personal insights — GitHub-style heatmap, streaks, session stats, and cost tracking" width="800" />
