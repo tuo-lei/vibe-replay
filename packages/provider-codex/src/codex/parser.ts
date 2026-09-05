@@ -48,6 +48,13 @@ function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function worldStatePayload(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const state = (payload as { state?: unknown }).state;
+  if (!state || typeof state !== "object" || Array.isArray(state)) return undefined;
+  return state as Record<string, unknown>;
+}
+
 export async function parseCodexSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -94,6 +101,11 @@ export function parseCodexLines(
   const seenUserMessages = new Map<string, number[]>();
   const seenAssistantMessages = new Map<string, number[]>();
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
+
+  // Codex JSONL now carries a sequential `ordinal` envelope field. Sampled
+  // rollouts match file order, so we keep JSONL order rather than sorting:
+  // concatenated `/resume` files each restart ordinal at 0, and a global sort
+  // would scramble them.
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex];
@@ -351,6 +363,14 @@ export function parseCodexLines(
           blocks: [{ type: "text", text }],
         });
       }
+      continue;
+    }
+
+    if (obj.type === "world_state") {
+      // Environment snapshot (skills, agents.md, plugins, permissions). Keep
+      // it metadata-only — never turn those blobs into replay scenes.
+      const state = worldStatePayload(obj.payload);
+      model = model || asOptionalString(state?.model);
       continue;
     }
 

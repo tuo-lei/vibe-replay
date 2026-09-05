@@ -231,6 +231,43 @@ describe("extractCodexSessionInfo transcript status", () => {
     expect(result?.prompts).toBeUndefined();
   });
 
+  it("treats world_state envelope records as known Codex metadata", async () => {
+    const secret = "WORLD_STATE_INSTRUCTION_BLOB";
+    const filePath = await writeRollout(
+      [
+        JSON.stringify({
+          type: "session_meta",
+          ordinal: 0,
+          timestamp: "2026-09-04T15:32:40.000Z",
+          payload: { id: "codex-session", cwd: "/tmp/project" },
+        }),
+        JSON.stringify({
+          type: "world_state",
+          ordinal: 1,
+          timestamp: "2026-09-04T15:32:40.100Z",
+          payload: {
+            full: true,
+            state: {
+              model: "gpt-5.6-sol",
+              skills: { body: secret },
+            },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const result = await extractCodexSessionInfo(filePath, 2);
+
+    expect(result).toMatchObject({
+      sessionId: "codex-session",
+      model: "gpt-5.6-sol",
+      firstPrompt: "",
+      promptCount: 0,
+      transcriptStatus: "no-prompts",
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
   it("keeps short human prompts replayable", async () => {
     const filePath = await writeRollout(
       [
