@@ -282,11 +282,84 @@ It's your turn, Vibe Replay Eng. Reply in the room.`,
       title: "Group: Vibe Replay launch",
       project: "Vibe Replay launch",
       cwd: "Vibe Replay Eng",
-      promptCount: 2,
-      firstPrompt: "**User:** Let's ship the Grok Bot replay provider this week.",
+      promptCount: 1,
+      firstPrompt: "Let's ship the Grok Bot replay provider this week.",
     });
     expect(sessions[0].firstPrompt).not.toContain("It's your turn");
     expect(sessions[0].firstPrompt).not.toContain("[Group chat:");
+    expect(sessions[0].firstPrompt).not.toContain("**User:**");
+  });
+
+  it("merges sibling Eng+GTM group transcripts into one discovered session", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-group-merge-"));
+    tempDirs.push(dataRoot);
+    const transcripts = join(dataRoot, "agent-transcripts");
+    const engId = "11111111-1111-4111-8111-111111111111";
+    const gtmId = "22222222-2222-4222-8222-222222222222";
+    await writeSession(transcripts, engId, [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: Let's ship the Grok Bot replay provider this week.
+Vibe Replay GTM: @Vibe Replay Eng can you confirm the dashboard badge copy?
+
+It's your turn, Vibe Replay Eng.`,
+            },
+          ],
+        },
+      },
+    ]);
+    await writeSession(transcripts, gtmId, [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `[Group chat: "Vibe Replay launch" - with Vibe Replay Eng]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: Let's ship the Grok Bot replay provider this week.
+
+It's your turn, Vibe Replay GTM.`,
+            },
+          ],
+        },
+      },
+    ]);
+    await mkdir(join(dataRoot, "agents", engId), { recursive: true });
+    await mkdir(join(dataRoot, "agents", gtmId), { recursive: true });
+    await writeFile(
+      join(dataRoot, "agents", engId, "profile.json"),
+      JSON.stringify({ name: "Vibe Replay Eng" }),
+      "utf-8",
+    );
+    await writeFile(
+      join(dataRoot, "agents", gtmId, "profile.json"),
+      JSON.stringify({ name: "Vibe Replay GTM" }),
+      "utf-8",
+    );
+    process.env.GROK_BOT_TRANSCRIPTS_DIR = transcripts;
+
+    const sessions = await discoverGrokBotSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "group-vibe-replay-launch",
+      slug: "group-vibe-replay-launch",
+      title: "Group: Vibe Replay launch",
+      project: "Vibe Replay launch",
+      promptCount: 1,
+      firstPrompt: "Let's ship the Grok Bot replay provider this week.",
+    });
+    expect(sessions[0].filePaths).toHaveLength(2);
+    expect(sessions[0].filePaths.some((path) => path.includes(engId))).toBe(true);
+    expect(sessions[0].filePaths.some((path) => path.includes(gtmId))).toBe(true);
   });
 
   it("uses group.json / profile groupTitle when the transcript has not named the room yet", async () => {

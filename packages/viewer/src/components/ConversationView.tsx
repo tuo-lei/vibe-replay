@@ -5,6 +5,7 @@ import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Annotation, Scene, TurnStat } from "../types";
 import { textHighlightsByScene, type TextHighlight } from "../utils/annotation-highlights";
+import { assistantSpeakerLabel, userSpeakerLabel } from "../utils/speaker-label";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import { fmtNum, formatTokens, formatToolDuration } from "./StatsPanel";
@@ -52,6 +53,14 @@ interface TurnGroup {
   scenes: { scene: Scene; index: number }[];
   turnNumber?: number;
   assistantSegmentIndex?: number;
+  /** Named speaker for multi-party sessions; omitted for generic You/Assistant. */
+  speaker?: string;
+}
+
+function sceneSpeaker(scene: Scene): string | undefined {
+  return "speaker" in scene && typeof scene.speaker === "string" && scene.speaker.trim()
+    ? scene.speaker.trim()
+    : undefined;
 }
 
 interface StickyPromptSummary {
@@ -227,15 +236,18 @@ export default function ConversationView({
               ? "context-injection"
               : "user";
         if (type === "user") turnCount++;
+        const speaker = type === "user" ? sceneSpeaker(scene) : undefined;
         result.push({
           type,
           timestamp: scene.timestamp,
           scenes: [{ scene, index: i }],
           turnNumber: type === "user" || type === "compaction" ? turnCount : undefined,
+          ...(speaker ? { speaker } : {}),
         } as TurnGroup);
         current = null;
       } else {
-        if (!current || current.type !== "assistant") {
+        const speaker = sceneSpeaker(scene);
+        if (!current || current.type !== "assistant" || current.speaker !== speaker) {
           if (current && current.scenes.length > 0) result.push(current);
           current = {
             type: "assistant",
@@ -243,6 +255,7 @@ export default function ConversationView({
             scenes: [],
             turnNumber: turnCount > 0 ? turnCount : undefined,
             assistantSegmentIndex: assistantSegmentCount++,
+            ...(speaker ? { speaker } : {}),
           };
         }
         current.scenes.push({ scene, index: i });
@@ -855,7 +868,9 @@ const GroupCard = memo(function GroupCard({
       >
         {userCommentButton}
         <div className="flex items-center gap-2 mb-2.5">
-          <span className="ui-section-title text-terminal-user">You</span>
+          <span className="ui-section-title text-terminal-user">
+            {userSpeakerLabel(group.speaker)}
+          </span>
           {group.timestamp && (
             <span className="text-[10px] font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -1095,6 +1110,7 @@ const GroupCard = memo(function GroupCard({
         groupHasCurrent={groupHasCurrent}
         groupHasFocusedTarget={groupHasFocusedTarget}
         timestamp={group.timestamp}
+        speaker={group.speaker}
         annotationCounts={annotationCounts}
         highlightsByScene={highlightsByScene}
         onComment={onComment}
@@ -1118,7 +1134,9 @@ const GroupCard = memo(function GroupCard({
       }`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="ui-section-title text-terminal-response">Assistant</span>
+        <span className="ui-section-title text-terminal-response">
+          {assistantSpeakerLabel(group.speaker)}
+        </span>
         {group.timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(group.timestamp)}
@@ -1175,6 +1193,7 @@ function CompactAssistantGroup({
   groupHasCurrent,
   groupHasFocusedTarget,
   timestamp,
+  speaker,
   annotationCounts,
   highlightsByScene,
   onComment,
@@ -1191,6 +1210,7 @@ function CompactAssistantGroup({
   groupHasCurrent: boolean;
   groupHasFocusedTarget: boolean;
   timestamp?: string;
+  speaker?: string;
   annotationCounts?: Map<number, number>;
   highlightsByScene?: Map<number, TextHighlight[]>;
   onComment?: (sceneIndex: number) => void;
@@ -1340,7 +1360,9 @@ function CompactAssistantGroup({
       )}
 
       <div className="flex items-center gap-2 mb-2">
-        <span className="ui-section-title text-terminal-response">Assistant</span>
+        <span className="ui-section-title text-terminal-response">
+          {assistantSpeakerLabel(speaker)}
+        </span>
         {timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(timestamp)}

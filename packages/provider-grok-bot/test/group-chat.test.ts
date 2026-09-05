@@ -6,6 +6,7 @@ import {
   formatGroupHeader,
   formatGroupSpeakerMessage,
   isGrokBotGroupChatPayload,
+  isHumanGroupSpeaker,
   parseGrokBotGroupWake,
   parseGrokBotLines,
   parseGrokBotSession,
@@ -143,6 +144,14 @@ It's your turn, Vibe Replay Eng.`);
       "@Vibe Replay Eng",
     ]);
   });
+
+  it("treats listed participants as bots and everyone else as human", () => {
+    const bots = ["Vibe Replay Eng", "Vibe Replay GTM"];
+    expect(isHumanGroupSpeaker("User", bots)).toBe(true);
+    expect(isHumanGroupSpeaker("Tuo", bots)).toBe(true);
+    expect(isHumanGroupSpeaker("Vibe Replay GTM", bots)).toBe(false);
+    expect(isHumanGroupSpeaker("vibe replay eng", bots)).toBe(false);
+  });
 });
 
 describe("Grok Bot group-chat session parse", () => {
@@ -168,57 +177,90 @@ It's your turn, Vibe Replay Eng.`,
     expect(parsed.title).toBe("Group: Vibe Replay launch");
     const users = parsed.turns.filter((turn) => turn.role === "user");
     expect(users[0]).toMatchObject({ subtype: "context-injection" });
-    expect(users[1].blocks[0]).toEqual({ type: "text", text: "**User:** Let's ship it." });
+    expect(users[1]).toMatchObject({
+      role: "user",
+      speaker: "User",
+      blocks: [{ type: "text", text: "Let's ship it." }],
+    });
     expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("[routine]"))).toBe(false);
   });
 
-  it("splits the Engineer fixture into room context plus per-speaker user turns", async () => {
+  it("splits the Engineer fixture into room context, a human user, and assistant-side GTM", async () => {
     const parsed = await parseGrokBotSession(join(fixtures, "group-eng.jsonl"));
     expect(parsed.title).toBe("Group: Vibe Replay launch");
 
-    const userTurns = parsed.turns.filter((turn) => turn.role === "user");
-    expect(userTurns).toHaveLength(3);
-    expect(userTurns[0]).toMatchObject({
-      subtype: "context-injection",
+    const injections = parsed.turns.filter((turn) => turn.subtype === "context-injection");
+    expect(injections).toHaveLength(1);
+    expect(injections[0].blocks[0]).toEqual({
+      type: "text",
+      text: [
+        "Group chat: Vibe Replay launch",
+        "Participants: Vibe Replay Eng (engineer), Vibe Replay GTM (go-to-market)",
+        "Mentions: @Vibe Replay Eng",
+      ].join("\n"),
+    });
+
+    const humans = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
+    expect(humans).toHaveLength(1);
+    expect(humans[0]).toMatchObject({
+      speaker: "User",
+      blocks: [{ type: "text", text: "Let's ship the Grok Bot replay provider this week." }],
+    });
+
+    const gtm = parsed.turns.find((turn) => turn.speaker === "Vibe Replay GTM");
+    expect(gtm).toMatchObject({
+      role: "assistant",
       blocks: [
         {
           type: "text",
-          text: [
-            "Group chat: Vibe Replay launch",
-            "Participants: Vibe Replay Eng (engineer), Vibe Replay GTM (go-to-market)",
-            "Mentions: @Vibe Replay Eng",
-          ].join("\n"),
+          text: "@Vibe Replay Eng can you confirm the dashboard badge copy?",
         },
       ],
     });
-    expect(userTurns[1].subtype).toBeUndefined();
-    expect(userTurns[1].blocks[0]).toEqual({
+
+    const eng = parsed.turns.find(
+      (turn) => turn.role === "assistant" && turn.speaker === "Vibe Replay Eng",
+    );
+    expect(eng?.blocks[0]).toEqual({ type: "thinking", thinking: "checking badge copy" });
+    expect(eng?.blocks[1]).toEqual({
       type: "text",
-      text: "**User:** Let's ship the Grok Bot replay provider this week.",
+      text: "Badge copy looks good — I'll confirm on the Eng side.",
     });
-    expect(userTurns[2].blocks[0]).toEqual({
-      type: "text",
-      text: "**Vibe Replay GTM:** @Vibe Replay Eng can you confirm the dashboard badge copy?",
-    });
+    expect(eng?.blocks[2]).toMatchObject({ type: "tool_use", name: "Read" });
     expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("It's your turn"))).toBe(
       false,
     );
 
     const replay = transformToReplay(parsed, "grok-bot", "Vibe Replay launch");
     expect(replay.meta.title).toBe("Group: Vibe Replay launch");
-    const types = replay.scenes.map((scene) => scene.type);
-    expect(types[0]).toBe("context-injection");
     expect(replay.scenes[0]).toMatchObject({
       type: "context-injection",
       injectionType: "system",
     });
     const prompts = replay.scenes.filter((scene) => scene.type === "user-prompt");
-    expect(prompts).toHaveLength(2);
-    expect(prompts[0]?.type === "user-prompt" && prompts[0].content).toContain("**User:**");
-    expect(prompts[1]?.type === "user-prompt" && prompts[1].content).toContain(
-      "**Vibe Replay GTM:**",
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({
+      content: "Let's ship the Grok Bot replay provider this week.",
+      speaker: "User",
+    });
+    const gtmScene = replay.scenes.find(
+      (scene) => scene.type === "text-response" && scene.speaker === "Vibe Replay GTM",
     );
-    expect(prompts[1]?.type === "user-prompt" && prompts[1].content).toContain("@Vibe Replay Eng");
+    expect(gtmScene).toMatchObject({
+      type: "text-response",
+      content: "@Vibe Replay Eng can you confirm the dashboard badge copy?",
+    });
+    const engReply = replay.scenes.find(
+      (scene) => scene.type === "text-response" && scene.speaker === "Vibe Replay Eng",
+    );
+    expect(engReply).toMatchObject({
+      content: "Badge copy looks good — I'll confirm on the Eng side.",
+    });
+    expect(
+      replay.scenes.some(
+        (scene) => scene.type === "thinking" && scene.content === "checking badge copy",
+      ),
+    ).toBe(true);
   });
 
   it("parses the GTM fixture, keeps the User message, and skips empty wakes as prompts", async () => {
@@ -236,13 +278,87 @@ It's your turn, Vibe Replay Eng.`,
 
     const speakerTurns = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
     expect(speakerTurns).toHaveLength(1);
-    expect(speakerTurns[0].blocks[0]).toEqual({
+    expect(speakerTurns[0]).toMatchObject({
+      speaker: "User",
+      blocks: [{ type: "text", text: "Let's ship the Grok Bot replay provider this week." }],
+    });
+    const gtm = parsed.turns.find((turn) => turn.role === "assistant");
+    expect(gtm?.blocks[0]).toEqual({
+      type: "thinking",
+      thinking: "drafting launch note internally",
+    });
+    expect(gtm?.blocks[1]).toEqual({
       type: "text",
-      text: "**User:** Let's ship the Grok Bot replay provider this week.",
+      text: "On it — I'll draft the launch note.",
     });
     expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("wrapping up"))).toBe(false);
     expect(parsed.turns.some((turn) => JSON.stringify(turn).includes("No new messages"))).toBe(
       false,
     );
+  });
+
+  it("merges Eng+GTM transcripts onto one timeline and drops injected peer text", async () => {
+    const parsed = await parseGrokBotSession([
+      join(fixtures, "group-eng.jsonl"),
+      join(fixtures, "group-gtm.jsonl"),
+    ]);
+    expect(parsed.title).toBe("Group: Vibe Replay launch");
+    expect(parsed.diagnosticNotes?.some((note) => /merged group room/i.test(note))).toBe(true);
+    expect(parsed.turns.filter((turn) => turn.subtype === "context-injection")).toHaveLength(1);
+
+    const humans = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
+    expect(humans).toHaveLength(1);
+    expect(humans[0].blocks[0]).toEqual({
+      type: "text",
+      text: "Let's ship the Grok Bot replay provider this week.",
+    });
+
+    const injectedParaphrase = parsed.turns.some(
+      (turn) =>
+        JSON.stringify(turn).includes("can you confirm the dashboard badge copy") &&
+        turn.role === "assistant",
+    );
+    expect(injectedParaphrase).toBe(false);
+
+    const gtmReplies = parsed.turns.filter((turn) => turn.speaker === "Vibe Replay GTM");
+    expect(gtmReplies).toHaveLength(1);
+    expect(gtmReplies[0]).toMatchObject({
+      role: "assistant",
+      blocks: [
+        { type: "thinking", thinking: "drafting launch note internally" },
+        { type: "text", text: "On it — I'll draft the launch note." },
+      ],
+    });
+
+    const eng = parsed.turns.find((turn) => turn.speaker === "Vibe Replay Eng");
+    expect(eng).toMatchObject({
+      role: "assistant",
+      blocks: [
+        { type: "thinking", thinking: "checking badge copy" },
+        { type: "text", text: "Badge copy looks good — I'll confirm on the Eng side." },
+        { type: "tool_use", name: "Read" },
+      ],
+    });
+
+    const replay = transformToReplay(parsed, "grok-bot", "Vibe Replay launch");
+    const speakers = replay.scenes
+      .map((scene) => ("speaker" in scene ? scene.speaker : undefined))
+      .filter(Boolean);
+    expect(speakers).toContain("User");
+    expect(speakers).toContain("Vibe Replay Eng");
+    expect(speakers).toContain("Vibe Replay GTM");
+    expect(replay.scenes.filter((scene) => scene.type === "user-prompt")).toHaveLength(1);
+    expect(
+      replay.scenes.some(
+        (scene) =>
+          scene.type === "text-response" &&
+          scene.content.includes("On it — I'll draft the launch note."),
+      ),
+    ).toBe(true);
+    expect(
+      replay.scenes.some((scene) =>
+        JSON.stringify(scene).includes("can you confirm the dashboard badge copy"),
+      ),
+    ).toBe(false);
   });
 });

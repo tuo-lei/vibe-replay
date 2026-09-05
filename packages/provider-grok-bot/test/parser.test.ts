@@ -46,7 +46,7 @@ describe("Grok Bot parser", () => {
     expect(greeting.timestamp).toBe(new Date(1788485400095).toISOString());
 
     const reply = assistantTurns[1];
-    expect(reply.blocks[0]).toEqual({ type: "text", text: "private scratch reasoning" });
+    expect(reply.blocks[0]).toEqual({ type: "thinking", thinking: "private scratch reasoning" });
     expect(reply.blocks[1]).toEqual({ type: "text", text: "先给你讲清楚…" });
 
     const readTurn = assistantTurns[2];
@@ -64,7 +64,13 @@ describe("Grok Bot parser", () => {
     const types = replay.scenes.map((scene) => scene.type);
     expect(types).toContain("user-prompt");
     expect(types).toContain("text-response");
+    expect(types).toContain("thinking");
     expect(types).toContain("tool-call");
+    expect(
+      replay.scenes.some(
+        (scene) => scene.type === "thinking" && scene.content === "private scratch reasoning",
+      ),
+    ).toBe(true);
     const userScene = replay.scenes.find((scene) => scene.type === "user-prompt");
     expect(userScene?.type === "user-prompt" && userScene.content).toBe("你给我介绍grok bot");
     const toolScene = replay.scenes.find((scene) => scene.type === "tool-call");
