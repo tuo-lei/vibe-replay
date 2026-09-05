@@ -1,9 +1,9 @@
 ---
 title: "What Does Grok Bot Store Locally? agent-transcripts JSONL Explained"
-excerpt: "Grok Bot keeps each agent session as cloud-box JSONL under agent-transcripts — with send_message as the visible reply, hidden prompts filtered, and group wakes split by speaker."
+excerpt: "Grok Bot keeps each agent session as cloud-box JSONL under agent-transcripts — with send_message as the visible reply, hidden prompts filtered, and group rooms merged into a multi-speaker timeline."
 cover: "/blog/grok-bot-storage/storage-map.png"
 date: 2026-09-04
-updated: 2026-09-04
+updated: 2026-09-05
 readTime: "7 min read"
 ---
 
@@ -95,20 +95,20 @@ On disk, builtins show up as lowercase implementation names: `read`, `shell`, `w
 
 Folders named `sand-subagent-<uuid>/` are discovered as **their own sessions**. v1 does not stitch them under a parent agent.
 
-## Group chats: split speakers, still per-agent
+## Group chats: split speakers, then merge the room
 
 A group turn still lands as ordinary `role:"user"` text starting with `[Group chat:` — and it's still written into **each participating agent's** own JSONL. As of [PR #546](https://github.com/tuo-lei/vibe-replay/pull/546), vibe-replay splits that blob into:
 
 1. A room header (`subtype: "context-injection"`) with title, participants, and `@` mentions
-2. One user turn per `Speaker: message`, in order (rendered with a `**Speaker:**` prefix)
+2. One turn per `Speaker: message`, in order — humans stay on the user side, peer bots on the assistant side, each labeled with `speaker`
 
 Procedural noise is dropped: `It's your turn…`, `The room is wrapping up…`, `No new messages in the room…`.
 
 When any group payload is seen, the session title becomes `Group: <room title>`. Discovery can also pull the title from recent wakes or sibling `agents/<id>/group.json`.
 
-What v1 still does **not** do: merge Eng's and GTM's transcripts into one shared HTML timeline. You replay each agent's view of the room.
+[PR #565](https://github.com/tuo-lei/vibe-replay/pull/565) then merges sibling transcripts that share a room into one playable HTML timeline. Eng and GTM stay separate JSONLs on disk; the replay joins them by room so you see each bot's own `send_message`, tools, and scratch instead of a single-agent view. Default visible replies are still `send_message`. Private assistant `text` is draft/thinking — the model sees it, the chat bubble does not.
 
-[Watch a real Grok Bot group session](https://vibe-replay.com/view/?gist=7edc281ec73e164379b8792eb185817e) to see that split: English, per-speaker turns after [#546](https://github.com/tuo-lei/vibe-replay/pull/546), still one agent's view of the room ([gist](https://gist.github.com/tuo-lei/7edc281ec73e164379b8792eb185817e)).
+[Watch a merged Eng+GTM multi-speaker timeline](https://vibe-replay.com/view/?gist=f1e134205551e3d65aeb6b849f0bff79) after [#565](https://github.com/tuo-lei/vibe-replay/pull/565) — one room, both agents, English speaker turns ([gist](https://gist.github.com/tuo-lei/f1e134205551e3d65aeb6b849f0bff79)).
 
 ## Try it
 
@@ -122,7 +122,7 @@ Or open the full dashboard:
 npx vibe-replay -d
 ```
 
-Grok Bot is a good reminder that JSONL does not automatically mean “linear Claude-style chat.” The durable truth is a cloud-box transcript whose visible replies are a tool call, with hidden wakes filtered out and group rooms split by speaker — still one file per agent, not a shared timeline. Once you model those rewrites, the replay matches the product instead of the raw log.
+Grok Bot is a good reminder that JSONL does not automatically mean “linear Claude-style chat.” The durable truth is still one cloud-box file per agent, whose visible replies are a tool call. Hidden wakes are filtered out, group rooms are split by speaker, and sibling JSONLs that share a room merge into one multi-speaker timeline. Once you model those rewrites, the replay matches the product instead of the raw log.
 
 For comparison, see the JSONL tree used by [Pi coding agent](/blog/pi-local-storage/) and [Hermes’s profile-aware `state.db`](/blog/hermes-local-storage/).
 
@@ -130,6 +130,7 @@ For comparison, see the JSONL tree used by [Pi coding agent](/blog/pi-local-stor
 
 - [PR #544 — native `provider-grok-bot`](https://github.com/tuo-lei/vibe-replay/pull/544)
 - [PR #546 — group wake speaker split](https://github.com/tuo-lei/vibe-replay/pull/546)
-- [Example replay — Grok Bot group session](https://vibe-replay.com/view/?gist=7edc281ec73e164379b8792eb185817e)
+- [PR #565 — multi-party group-session merge](https://github.com/tuo-lei/vibe-replay/pull/565)
+- [Example replay — merged Eng+GTM multi-speaker timeline](https://vibe-replay.com/view/?gist=f1e134205551e3d65aeb6b849f0bff79)
 - [vibe-replay.com](https://vibe-replay.com/)
 - Earlier in this series: [Claude Code](/blog/claude-code-local-storage/), [Cursor](/blog/cursor-local-storage/), [Codex](/blog/codex-local-storage/), [Cowork](/blog/dispatch-deep-dive/), [Pi](/blog/pi-local-storage/), [OpenCode](/blog/opencode-local-storage/), [Hermes](/blog/hermes-local-storage/)
