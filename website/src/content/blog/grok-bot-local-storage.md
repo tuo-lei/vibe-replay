@@ -108,7 +108,7 @@ When any group payload is seen, the session title becomes `Group: <room title>`.
 
 [PR #565](https://github.com/tuo-lei/vibe-replay/pull/565) then merges sibling transcripts that share a room into one playable HTML timeline. Eng and GTM stay separate JSONLs on disk; the replay joins them by room so you see each bot's own `send_message`, tools, and scratch instead of a single-agent view. Default visible replies are still `send_message`. Private assistant `text` is draft/thinking — the model sees it, the chat bubble does not.
 
-[Watch a merged Eng+GTM multi-speaker timeline](https://vibe-replay.com/view/?gist=f1e134205551e3d65aeb6b849f0bff79) after [#565](https://github.com/tuo-lei/vibe-replay/pull/565) — one room, both agents, English speaker turns ([gist](https://gist.github.com/tuo-lei/f1e134205551e3d65aeb6b849f0bff79)).
+[Watch this room's real Eng+GTM multi-speaker replay](https://vibe-replay.com/view/?gist=acad9ab8e8ab9a4510fb765684f2d60c) after [#565](https://github.com/tuo-lei/vibe-replay/pull/565) — the actual group room (Tuo Lei / Vibe Replay GTM / Vibe Replay Eng) merged into one timeline, not a synthetic or translated stand-in ([gist](https://gist.github.com/tuo-lei/acad9ab8e8ab9a4510fb765684f2d60c)).
 
 ## Try it
 
@@ -131,6 +131,6 @@ For comparison, see the JSONL tree used by [Pi coding agent](/blog/pi-local-stor
 - [PR #544 — native `provider-grok-bot`](https://github.com/tuo-lei/vibe-replay/pull/544)
 - [PR #546 — group wake speaker split](https://github.com/tuo-lei/vibe-replay/pull/546)
 - [PR #565 — multi-party group-session merge](https://github.com/tuo-lei/vibe-replay/pull/565)
-- [Example replay — merged Eng+GTM multi-speaker timeline](https://vibe-replay.com/view/?gist=f1e134205551e3d65aeb6b849f0bff79)
+- [This room's real Eng+GTM multi-speaker replay](https://vibe-replay.com/view/?gist=acad9ab8e8ab9a4510fb765684f2d60c)
 - [vibe-replay.com](https://vibe-replay.com/)
 - Earlier in this series: [Claude Code](/blog/claude-code-local-storage/), [Cursor](/blog/cursor-local-storage/), [Codex](/blog/codex-local-storage/), [Cowork](/blog/dispatch-deep-dive/), [Pi](/blog/pi-local-storage/), [OpenCode](/blog/opencode-local-storage/), [Hermes](/blog/hermes-local-storage/)
