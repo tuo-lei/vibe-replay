@@ -1454,6 +1454,78 @@ describe("Codex parser", () => {
       _result: "permission denied",
     });
   });
+
+  it("keeps world_state snapshots out of replay turns", () => {
+    const secret = "WORLD_STATE_INSTRUCTION_BLOB";
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-09-04T15:32:40.000Z",
+          type: "session_meta",
+          ordinal: 0,
+          payload: { id: "codex-session-world", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-09-04T15:32:40.100Z",
+          type: "world_state",
+          ordinal: 1,
+          payload: {
+            full: true,
+            state: {
+              model: "gpt-5.6-sol",
+              skills: { body: secret },
+              agents_md: { "AGENTS.md": secret },
+              plugins_instructions: secret,
+            },
+          },
+        },
+        {
+          timestamp: "2026-09-04T15:32:41.000Z",
+          type: "event_msg",
+          ordinal: 2,
+          payload: { type: "user_message", message: "Ship the parser change." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const texts = result.turns.flatMap((turn) =>
+      turn.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])),
+    );
+    expect(texts).toEqual(["Ship the parser change."]);
+    expect(texts.join("\n")).not.toContain(secret);
+    expect(result.model).toBe("gpt-5.6-sol");
+  });
+
+  it("keeps JSONL file order when envelope ordinals are not sequential", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-09-04T15:33:00.000Z",
+          type: "session_meta",
+          ordinal: 0,
+          payload: { id: "codex-session-ordinal", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-09-04T15:33:01.000Z",
+          type: "event_msg",
+          ordinal: 9,
+          payload: { type: "user_message", message: "First in file." },
+        },
+        {
+          timestamp: "2026-09-04T15:33:02.000Z",
+          type: "event_msg",
+          ordinal: 1,
+          payload: { type: "user_message", message: "Second in file." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(
+      result.turns
+        .filter((turn) => turn.role === "user")
+        .map((turn) => turn.blocks.find((block) => block.type === "text")?.text),
+    ).toEqual(["First in file.", "Second in file."]);
+  });
 });
 
 describe("Codex response item compatibility", () => {

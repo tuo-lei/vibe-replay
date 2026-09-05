@@ -227,7 +227,8 @@ export async function extractCodexSessionInfo(
         obj.type === "turn_context" ||
         obj.type === "event_msg" ||
         obj.type === "response_item" ||
-        obj.type === "compacted"
+        obj.type === "compacted" ||
+        obj.type === "world_state"
       ) {
         sawKnownRecord = true;
       }
@@ -262,6 +263,15 @@ export async function extractCodexSessionInfo(
       if (obj.type === "turn_context") {
         const p = obj.payload || {};
         model = model || p.model;
+        continue;
+      }
+
+      if (obj.type === "world_state") {
+        const state = obj.payload?.state;
+        if (state && typeof state === "object" && !Array.isArray(state) && !model) {
+          const worldModel = state.model;
+          if (typeof worldModel === "string" && worldModel.trim()) model = worldModel;
+        }
         continue;
       }
 
