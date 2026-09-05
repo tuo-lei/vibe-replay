@@ -69,46 +69,35 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
     normalized === "multiedit" ||
     normalized === "delete"
   ) {
-    if (typeof obj.file_path !== "string" && typeof obj.path === "string") {
-      obj.file_path = obj.path;
-    }
+    const filePath = firstString(obj.file_path, obj.path);
+    if (filePath) obj.file_path = filePath;
   }
 
   if (normalized === "edit" || normalized === "strreplace" || normalized === "search_replace") {
-    if (typeof obj.old_string !== "string") {
-      if (typeof obj.oldText === "string") obj.old_string = obj.oldText;
-      else if (typeof obj.old_text === "string") obj.old_string = obj.old_text;
-    }
-    if (typeof obj.new_string !== "string") {
-      if (typeof obj.newText === "string") obj.new_string = obj.newText;
-      else if (typeof obj.new_text === "string") obj.new_string = obj.new_text;
-    }
+    const oldString = firstString(obj.old_string, obj.oldText, obj.old_text);
+    const newString = firstString(obj.new_string, obj.newText, obj.new_text);
+    if (oldString) obj.old_string = oldString;
+    if (newString) obj.new_string = newString;
   }
 
-  if (
-    normalized === "write" &&
-    typeof obj.content !== "string" &&
-    typeof obj.contents === "string"
-  ) {
-    obj.content = obj.contents;
+  if (normalized === "write") {
+    const content = firstString(obj.content, obj.contents);
+    if (content) obj.content = content;
   }
 
   if (normalized === "shell" || normalized === "bash" || normalized === "exec") {
-    if (typeof obj.command !== "string") {
-      if (typeof obj.cmd === "string") obj.command = obj.cmd;
-      else if (typeof obj.command_line === "string") obj.command = obj.command_line;
-    }
+    const command = firstString(obj.command, obj.cmd, obj.command_line);
+    if (command) obj.command = command;
   }
 
   if (normalized === "web_search" || normalized === "websearch") {
-    if (typeof obj.query !== "string") {
-      if (typeof obj.search_term === "string") obj.query = obj.search_term;
-      else if (typeof obj.q === "string") obj.query = obj.q;
-    }
+    const query = firstString(obj.query, obj.search_term, obj.q);
+    if (query) obj.query = query;
   }
 
   if (normalized === "web_fetch" || normalized === "webfetch") {
-    if (typeof obj.url !== "string" && typeof obj.uri === "string") obj.url = obj.uri;
+    const url = firstString(obj.url, obj.uri);
+    if (url) obj.url = url;
   }
 
   if (normalized === "todo" || normalized === "todowrite" || normalized === "update_todos") {
@@ -119,27 +108,21 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
   }
 
   if (normalized === "task" || normalized === "delegate_task") {
-    if (typeof obj.description !== "string") {
-      const description = firstString(obj.goal, obj.title);
-      if (description) obj.description = description;
-    }
-    if (typeof obj.prompt !== "string") {
-      const prompt = firstString(obj.context, obj.task, obj.instruction);
-      if (prompt) obj.prompt = prompt;
-    }
-    if (typeof obj.subagent_type !== "string") {
-      const subagentType = firstString(obj.subagentType, obj.role, obj.type);
-      if (subagentType) obj.subagent_type = subagentType;
-    }
+    const description = firstString(obj.description, obj.goal, obj.title);
+    const prompt = firstString(obj.prompt, obj.context, obj.task, obj.instruction);
+    const subagentType = firstString(obj.subagent_type, obj.subagentType, obj.role, obj.type);
+    if (description) obj.description = description;
+    if (prompt) obj.prompt = prompt;
+    if (subagentType) obj.subagent_type = subagentType;
   }
 
   if (normalized === "mcp") {
     const server = firstString(obj.server, obj.serverName, obj.server_name);
     const tool = firstString(obj.tool, obj.toolName, obj.tool_name, obj.name);
-    if (server && typeof obj.server !== "string") obj.server = server;
+    if (server) obj.server = server;
     if (tool) {
-      if (typeof obj.tool !== "string") obj.tool = tool;
-      if (typeof obj.tool_name !== "string") obj.tool_name = tool;
+      obj.tool = tool;
+      if (!firstString(obj.tool_name)) obj.tool_name = tool;
     }
   }
 
@@ -162,7 +145,7 @@ export function grokBotMcpAttribution(
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim()) return value;
   }
   return undefined;
 }

@@ -266,6 +266,7 @@ export function parseGrokBotLines(
 
     const blocks: ContentBlock[] = [];
     let turnTimestamp = recordTs;
+    if (recordTs) lastKnownTimestamp = recordTs;
     let durationCursor = recordTs || lastKnownTimestamp;
     for (const block of asBlocks(content)) {
       const type = typeof block.type === "string" ? block.type : "";
