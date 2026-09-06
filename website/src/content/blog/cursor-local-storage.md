@@ -1,8 +1,8 @@
 ---
-title: "What Does Cursor Store Locally? ~/.cursor/ + state.vscdb"
-excerpt: "Cursor stores sessions across SQLite, JSONL transcripts, global state, checkpoints, and editor history. Here's how the layers connect—and what each tells you."
+title: "Find Cursor Chat History: state.vscdb, agent-transcripts"
+excerpt: "Where Cursor keeps chat history: state.vscdb, ~/.cursor/chats, agent-transcripts, and globalStorage — a practical map of the layers, and how to recover sessions."
 date: 2026-03-27
-updated: 2026-09-03
+updated: 2026-09-06
 readTime: "9 min read"
 ---
 
