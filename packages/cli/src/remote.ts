@@ -46,6 +46,7 @@ const MAX_REMOTE_FILE_BYTES = 512 * 1024 * 1024;
 const MAX_REMOTE_INDEX_BYTES = 2 * 1024 * 1024 * 1024;
 const REMOTE_CACHE_LOCK_TIMEOUT_MS = 2 * 60_000;
 const REMOTE_CACHE_LOCK_STALE_MS = 30 * 60_000;
+const UNSAFE_REMOTE_FILE_PATH_ERROR = "Unsafe remote file path";
 
 /**
  * A configured SSH endpoint. Authentication is intentionally not part of this
@@ -1168,7 +1169,7 @@ done`;
             throw new Error("Remote file changed during transfer");
           }
           const localPath = localPathForRemoteFile(cacheRoot, file.relativePath);
-          if (!localPath) throw new Error("Unsafe remote file path");
+          if (!localPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
           await mkdir(dirname(localPath), { recursive: true });
           output = await open(localPath, "wx", 0o600);
           createdPaths.push(localPath);
@@ -1229,7 +1230,7 @@ async function downloadRemoteFile(
   cacheRoot: string,
 ): Promise<void> {
   const localPath = localPathForRemoteFile(cacheRoot, file.relativePath);
-  if (!localPath) throw new Error("Unsafe remote file path");
+  if (!localPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
   await mkdir(dirname(localPath), { recursive: true });
 
   const child = spawnSsh(target, [`cat -- ${shellQuote(file.remotePath)}`]);
@@ -1418,13 +1419,13 @@ async function syncRemoteFiles(
         ? localPathForRemoteFile(stagingRoot, file.relativePath)
         : null;
       const localPath = localPathForRemoteFile(cacheRoot, file.relativePath);
-      if (!stagedPath || !localPath) throw new Error("Unsafe remote file path");
+      if (!stagedPath || !localPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
       let backupPath: string | undefined;
       if (transactionRoot) {
         const existing = await lstat(localPath).catch(() => null);
         if (existing) {
           backupPath = localPathForRemoteFile(transactionRoot, file.relativePath) || undefined;
-          if (!backupPath) throw new Error("Unsafe remote file path");
+          if (!backupPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
           await mkdir(dirname(backupPath), { recursive: true });
           await rename(localPath, backupPath);
         }
@@ -1452,12 +1453,12 @@ async function syncRemoteFiles(
 
     for (const relativePath of removed) {
       const localPath = localPathForRemoteFile(cacheRoot, relativePath);
-      if (!localPath) throw new Error("Unsafe remote file path");
+      if (!localPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
       const inspection = await inspectCachedPath(cacheRoot, relativePath);
       if (inspection.status === "unsafe") throw new Error("Unsafe remote cache path");
       if (inspection.status === "missing" || !transactionRoot) continue;
       const backupPath = localPathForRemoteFile(transactionRoot, relativePath);
-      if (!backupPath) throw new Error("Unsafe remote file path");
+      if (!backupPath) throw new Error(UNSAFE_REMOTE_FILE_PATH_ERROR);
       await mkdir(dirname(backupPath), { recursive: true });
       const operation = { localPath, backupPath };
       removedOperations.push(operation);
