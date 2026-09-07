@@ -36,6 +36,10 @@ const MAX_ANNOTATIONS = 40;
 const MAX_OVERLAYS = 40;
 const MAX_SESSION_LIST = 20;
 
+function generatedReplayNotFoundError(slug: string): Error {
+  return new Error(`Generated replay not found: ${slug}`);
+}
+
 type LocalAssistantTool = AgentTool<any, LocalAssistantToolDetails>;
 
 export interface LocalAssistantContext {
@@ -1566,7 +1570,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as SessionArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
@@ -1595,7 +1599,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as ContentArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
@@ -1685,7 +1689,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as SceneArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
@@ -1757,7 +1761,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as AnnotationArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const annotations = (session.annotations || [])
@@ -1825,7 +1829,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as OverlayArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
       if (!overlays) throw new Error("Replay overlay data is unavailable for this server");
@@ -2531,7 +2535,7 @@ export function createLocalAssistantTools(
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as OpenReplayArgs;
       const record = findRecord(await buildSessionRecords(data), args);
-      if (!record?.replay) throw new Error(`Generated replay not found: ${args.slug}`);
+      if (!record?.replay) throw generatedReplayNotFoundError(args.slug);
       assertRecordAccess(record, context);
       const sceneIndex =
         args.sceneIndex === undefined ? undefined : Math.max(0, Math.floor(args.sceneIndex));
