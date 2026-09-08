@@ -62,8 +62,3 @@ export async function openOpencodeDb(
     return null;
   }
 }
-
-/** True when the session id looks like an opencode session id (`ses_...`). */
-export function isOpencodeSessionId(value: string): boolean {
-  return value.startsWith("ses_");
-}
