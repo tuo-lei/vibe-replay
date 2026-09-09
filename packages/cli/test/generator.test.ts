@@ -8,6 +8,8 @@ import {
   injectDataScript,
   loadViewerHtml,
 } from "../src/generator.js";
+import { parseGrokBotLines } from "../src/providers/grok-bot/parser.js";
+import { transformToReplay } from "../src/transform.js";
 
 // `loadViewerHtml` reads packages/cli/assets/viewer.html, which is produced
 // by `pnpm build` (viewer → copy → CLI) and is NOT checked into git. The
@@ -371,6 +373,90 @@ describe("loadViewerHtml", () => {
     "throws a descriptive error when viewer.html is missing",
     async () => {
       await expect(loadViewerHtml()).rejects.toThrow(/Could not find viewer\.html/);
+    },
+  );
+});
+
+describe("Grok Bot shareable HTML smoke", () => {
+  const parsed = parseGrokBotLines([
+    JSON.stringify({
+      role: "user",
+      message: { content: [{ type: "text", text: "[t0u]\n一起画画" }] },
+    }),
+    JSON.stringify({
+      role: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "private scratch" },
+          {
+            type: "tool_use",
+            name: "send_message",
+            input: {
+              text: { content: "See ![cat](<file:///home/box/agent-data/attachments/cat.png>)" },
+            },
+          },
+          {
+            type: "tool_use",
+            name: "mcp",
+            toolCallId: "m-1",
+            input: { server: "github", toolName: "pull_request_read" },
+          },
+          {
+            type: "tool_use",
+            name: "generate_image",
+            toolCallId: "img-1",
+            input: { prompt: "a cat" },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      role: "tool",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            name: "mcp",
+            toolCallId: "m-1",
+            result: { success: { content: "PR 1" } },
+          },
+          {
+            type: "tool_result",
+            name: "generate_image",
+            toolCallId: "img-1",
+            result: {
+              success: {
+                filePath: "/home/box/agent-data/assets/cat.png",
+                imageData: `iVBOR${"A".repeat(80)}`,
+              },
+            },
+          },
+        ],
+      },
+    }),
+  ]);
+  const replay = transformToReplay(parsed, "grok-bot", "~/grok-bot");
+  const json = escapeJsonForScript(JSON.stringify(replay));
+
+  it("rewrites file:// images and omits generate_image bytes from injected JSON", () => {
+    const scenes = JSON.stringify(replay.scenes);
+    expect(json).toContain("一起画画");
+    expect(scenes).toContain("[attached image: cat (cat.png)]");
+    expect(scenes).toContain("mcp__github__pull_request_read");
+    expect(scenes).not.toContain("file://");
+    expect(scenes).not.toContain("iVBOR");
+    expect(json).not.toContain("</script>");
+  });
+
+  it.runIf(VIEWER_HTML_AVAILABLE)(
+    "injects the stub into viewer.html without file:// scenes",
+    async () => {
+      const html = await loadViewerHtml();
+      const script = `<script id="vibe-replay-data">window.__VIBE_REPLAY_DATA__ = ${json};</script>`;
+      const result = injectDataScript(html, script);
+      expect(result).toContain("[attached image: cat (cat.png)]");
+      expect(result).toContain("mcp__github__pull_request_read");
+      expect(result).not.toContain("file:///home/box/agent-data/attachments/cat.png");
     },
   );
 });

@@ -45,6 +45,8 @@ interface Props {
   liveCursorDiagnostics?: LiveCursorDiagnostics;
   liveCursorRowsChanged?: boolean;
   liveCursorProbeAt?: number;
+  /** Override the thinking-scene label (Grok Bot uses "Scratch"). */
+  thinkingLabel?: string;
 }
 
 interface TurnGroup {
@@ -209,6 +211,7 @@ export default function ConversationView({
   liveCursorDiagnostics,
   liveCursorRowsChanged,
   liveCursorProbeAt,
+  thinkingLabel = "Thinking",
 }: Props & { onSeek?: (index: number) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeStickyPrompt, setActiveStickyPrompt] = useState<StickyPromptSummary | null>(null);
@@ -432,6 +435,7 @@ export default function ConversationView({
                     overlayActions={overlayActions}
                     turnStats={turnStats}
                     contextLimit={contextLimit}
+                    thinkingLabel={thinkingLabel}
                   />
                 </>
               );
@@ -781,6 +785,7 @@ const GroupCard = memo(function GroupCard({
   overlayActions,
   turnStats,
   contextLimit,
+  thinkingLabel = "Thinking",
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -794,6 +799,7 @@ const GroupCard = memo(function GroupCard({
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
   contextLimit?: number;
+  thinkingLabel?: string;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -949,6 +955,7 @@ const GroupCard = memo(function GroupCard({
                   effectiveContent={effectiveContent ?? undefined}
                   highlights={highlightsByScene?.get(index) ?? []}
                   onHighlightClick={onAnnotationClick}
+                  thinkingLabel={thinkingLabel}
                 />
                 {sceneOverlays.length > 0 && (
                   <div className="flex items-center gap-2 mt-1.5">
@@ -1117,6 +1124,7 @@ const GroupCard = memo(function GroupCard({
         onAnnotationClick={onAnnotationClick}
         overlayActions={overlayActions}
         turnStat={turnStat}
+        thinkingLabel={thinkingLabel}
       />
     );
   }
@@ -1173,6 +1181,7 @@ const GroupCard = memo(function GroupCard({
           highlightsByScene={highlightsByScene}
           onAnnotationClick={onAnnotationClick}
           overlayActions={overlayActions}
+          thinkingLabel={thinkingLabel}
         />
       </div>
     </div>
@@ -1200,6 +1209,7 @@ function CompactAssistantGroup({
   onAnnotationClick,
   overlayActions,
   turnStat,
+  thinkingLabel = "Thinking",
 }: {
   /** All scenes in the group — used for stable stats (not affected by playback progress) */
   allScenes: { scene: Scene; index: number }[];
@@ -1217,6 +1227,7 @@ function CompactAssistantGroup({
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
   turnStat?: TurnStat;
+  thinkingLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1405,7 +1416,7 @@ function CompactAssistantGroup({
         )}
         {stats.thinking > 0 && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-thinking-subtle text-terminal-thinking">
-            {stats.thinking} thinking
+            {stats.thinking} {thinkingLabel.toLowerCase()}
           </span>
         )}
         {sortedToolEntries.length > 0 && (
@@ -1465,6 +1476,7 @@ function CompactAssistantGroup({
                   effectiveContent={ec}
                   highlights={highlightsByScene?.get(index) ?? []}
                   onHighlightClick={onAnnotationClick}
+                  thinkingLabel={thinkingLabel}
                 />
                 {onComment && (
                   <button
@@ -1518,6 +1530,7 @@ function BatchedScenes({
   highlightsByScene,
   onAnnotationClick,
   overlayActions,
+  thinkingLabel,
 }: {
   scenes: { scene: Scene; index: number }[];
   currentIndex: number;
@@ -1527,6 +1540,7 @@ function BatchedScenes({
   highlightsByScene?: Map<number, TextHighlight[]>;
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
+  thinkingLabel?: string;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
   const batches: { scene: Scene; index: number }[][] = [];
@@ -1576,6 +1590,7 @@ function BatchedScenes({
                 effectiveContent={effectiveContent ?? undefined}
                 highlights={highlightsByScene?.get(index) ?? []}
                 onHighlightClick={onAnnotationClick}
+                thinkingLabel={thinkingLabel}
               />
               {sceneOverlays.length > 0 && (
                 <div className="flex items-center gap-2 mt-1">
@@ -1812,6 +1827,8 @@ function summarizeToolInput(name: string, input: Record<string, any>): string {
       return input.pattern || "";
     case "Agent":
       return input.description || "";
+    case "CommunicateUpdate":
+      return typeof input.update === "string" ? input.update : "";
     default:
       return "";
   }
@@ -1824,6 +1841,7 @@ const SceneBlock = memo(function SceneBlock({
   effectiveContent,
   highlights = NO_HIGHLIGHTS,
   onHighlightClick,
+  thinkingLabel = "Thinking",
 }: {
   scene: Scene;
   isActive: boolean;
@@ -1831,6 +1849,7 @@ const SceneBlock = memo(function SceneBlock({
   effectiveContent?: string;
   highlights?: TextHighlight[];
   onHighlightClick?: (annotationId: string) => void;
+  thinkingLabel?: string;
 }) {
   switch (scene.type) {
     case "user-prompt":
@@ -1869,6 +1888,7 @@ const SceneBlock = memo(function SceneBlock({
           tokens={scene.tokens}
           highlights={highlights}
           onHighlightClick={onHighlightClick}
+          label={thinkingLabel}
         />
       );
     case "text-response":

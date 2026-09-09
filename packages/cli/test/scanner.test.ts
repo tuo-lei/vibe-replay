@@ -392,6 +392,104 @@ describe("scanSession", () => {
     expect(result.usageSummary?.mcpTools).toMatchObject({ "github/pull_request_read": 1 });
   });
 
+  it("keeps a short CJK Grok Bot prompt as firstPrompt and skips background-task wakes", async () => {
+    const grokPath = join(tmpDir, "grok-bot-cjk.jsonl");
+    await writeFile(
+      grokPath,
+      [
+        {
+          role: "user",
+          message: {
+            content: [
+              { type: "text", text: "[A background task just completed]\nWrote a long recap." },
+            ],
+          },
+        },
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "[t0u]\n一起画画" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "send_message", input: { text: { content: "好的" } } },
+            ],
+          },
+        },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(""),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "grok-bot-cjk",
+      provider: "grok-bot",
+      project: "/home/box",
+      slug: "grok-bot-cjk",
+      filePaths: [grokPath],
+    });
+
+    expect(result.firstPrompt).toBe("一起画画");
+    expect(result.firstPrompt).not.toContain("background");
+    expect(result.promptCount).toBe(1);
+  });
+
+  it("indexes the Grok Bot mcp wrapper as an MCP server/tool, not a generic mcp tool", async () => {
+    const grokPath = join(tmpDir, "grok-bot-mcp-wrapper.jsonl");
+    await writeFile(
+      grokPath,
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "[t0u]\ncheck the PR" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "mcp",
+                toolCallId: "m-1",
+                input: { server: "github", toolName: "pull_request_read" },
+              },
+            ],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "mcp",
+                toolCallId: "m-1",
+                result: { success: { content: "PR 544" } },
+              },
+            ],
+          },
+        },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(""),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "grok-bot-mcp-wrapper",
+      provider: "grok-bot",
+      project: "/home/box",
+      slug: "grok-bot-mcp-wrapper",
+      filePaths: [grokPath],
+    });
+
+    expect(result.usageSummary?.tools).toEqual({});
+    expect(result.usageSummary?.mcpServers).toMatchObject({ github: 1 });
+    expect(result.usageSummary?.mcpTools).toMatchObject({ "github/pull_request_read": 1 });
+  });
+
   it("persists structured Pi compaction diagnostics in scan results", async () => {
     const piPath = join(tmpDir, "pi-diagnostics.jsonl");
     await writeFile(

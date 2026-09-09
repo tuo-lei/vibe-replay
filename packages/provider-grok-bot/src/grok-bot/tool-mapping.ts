@@ -5,12 +5,12 @@
  *
  * `send_message` is promoted to assistant text in the parser.
  * `communicate_update` is a status/memory side-effect and stays a
- * `CommunicateUpdate` tool scene (success and failure). `get_mcp_tools` is
- * discovery noise and is omitted from replay scenes. `mcp` keeps its raw
- * name so the scanner's Pi-style `parseMcpUsage` branch can attribute
- * server/tool from args. Dynamic MCP calls use short names plus
- * `serverIdentifier` / `toolName` / `args` and are rewritten to
- * `mcp__<server>__<tool>` cards. Unrecognized non-MCP tools pass through.
+ * `CommunicateUpdate` tool scene (success and failure); its update text is
+ * flattened onto `update` so tool cards have a one-line summary.
+ * `get_mcp_tools` is discovery noise and is omitted from replay scenes.
+ * `mcp` and dynamic short names (`pull_request_read`) both become
+ * `mcp__<server>__<tool>` cards when server+tool are known so Insights and
+ * the 🔌 viewer label stay consistent. Unrecognized non-MCP tools pass through.
  */
 
 const GROK_BOT_TOOL_NAME_MAP: Record<string, string> = {
@@ -153,6 +153,15 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
     if (prompt) obj.prompt = prompt;
   }
 
+  if (normalized === "communicate_update") {
+    const nestedText =
+      obj.text && typeof obj.text === "object" && !Array.isArray(obj.text)
+        ? (obj.text as Record<string, unknown>).content
+        : obj.text;
+    const update = firstString(obj.update, obj.status, nestedText);
+    if (update) obj.update = update;
+  }
+
   const mcp = grokBotMcpFields(obj);
   if (mcp.server) obj.server = mcp.server;
   if (mcp.tool) {
@@ -183,7 +192,6 @@ export function grokBotMcpAttribution(
 
 /** Viewer MCP cards use `mcp__server__tool` so the 🔌 label parses. */
 export function grokBotReplayToolName(rawName: string, input: Record<string, unknown>): string {
-  if (rawName.toLowerCase() === "mcp") return "mcp";
   const mcp = grokBotMcpAttribution(rawName, input);
   if (mcp?.server && mcp.tool) return `mcp__${mcp.server}__${mcp.tool}`;
   return mapGrokBotToolName(rawName);

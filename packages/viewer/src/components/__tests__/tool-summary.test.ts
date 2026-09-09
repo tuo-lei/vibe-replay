@@ -79,6 +79,13 @@ describe("summarizeInput", () => {
   it("uses shortenScalarSummary fallback for unknown tools (e.g. mcp__*)", () => {
     expect(summarizeInput("mcp__server__tool", { url: "https://x.com" })).toBe("https://x.com");
   });
+
+  it("surfaces CommunicateUpdate status text", () => {
+    expect(summarizeInput("CommunicateUpdate", { update: "Scanning inbox…" })).toBe(
+      "Scanning inbox…",
+    );
+    expect(summarizeInput("CommunicateUpdate", { text: { content: "hidden nested" } })).toBe("");
+  });
 });
 
 describe("shortenScalarSummary", () => {

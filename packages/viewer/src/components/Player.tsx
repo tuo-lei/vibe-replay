@@ -1067,6 +1067,7 @@ export default function Player({
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
                     contextLimit={session.meta.contextLimit}
+                    thinkingLabel={session.meta.provider === "grok-bot" ? "Scratch" : "Thinking"}
                     isLive={isLive}
                     liveCursorDiagnostics={live?.cursorDiagnostics}
                     liveCursorProbeAt={live?.lastCursorProbe}

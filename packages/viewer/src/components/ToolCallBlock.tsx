@@ -89,6 +89,14 @@ function toolIcon(name: string): string {
       return "🔎";
     case "Agent":
       return "🤖";
+    case "Await":
+      return "⏳";
+    case "ComputerUse":
+      return "🖥";
+    case "GenerateImage":
+      return "🖼";
+    case "CommunicateUpdate":
+      return "📣";
     default:
       return "⚙️";
   }
@@ -541,6 +549,8 @@ export function summarizeInput(name: string, input: Record<string, any>): string
       return input.command || "";
     case "ExitPlanMode":
       return (input.plan || "").slice(0, 80);
+    case "CommunicateUpdate":
+      return typeof input.update === "string" ? input.update.slice(0, 80) : "";
     default:
       // mcp__server__tool — surface the most likely identifying value, or
       // fall back to a short joined string of scalar args.

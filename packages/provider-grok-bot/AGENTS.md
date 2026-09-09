@@ -16,7 +16,8 @@ Env (Pi-style, replaces defaults): `GROK_BOT_TRANSCRIPTS_DIR` or
 
 Layout: `<root>/<agentId>/<agentId>.jsonl`. `sand-subagent-<uuid>/` files stay
 in discovery as their own sessions. A parent `task` call attaches a child-run
-card when the result/input names that sibling id (no nested grandchildren).
+card when the result/input names that sibling id (no nested grandchildren). Live
+JSONL parsing attaches the same way when the parent path is on disk.
 Duplicate roots (symlink overlap) are collapsed via `realpath`.
 
 Project/title: sibling `agents/<id>/profile.json` `name` (and `cwd` / `workspace`
@@ -41,15 +42,19 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
     Explore firstPrompt)
   - `<<SAND_AGENT_PROFILE_UPDATE…>>` → skipped (or stripped if other text remains)
   - A meta tag wrapping `[Group chat:` is peeled so the group splitter still runs
-- Assistant `text` is private scratch → `thinking` blocks (not the visible reply)
+- Assistant `text` is private scratch → `thinking` blocks (not the visible reply).
+  The viewer labels those scenes **Scratch** so they are not confused with the
+  `send_message` reply.
 - `send_message` is the user-visible reply (`input.text.content` dict or string,
   widgets). Promote visible text to an assistant `text` block; do **not** emit
-  it as a tool-call scene. Ignore `to` / `attachments` when extracting text.
-  `file://` / data-URL markdown images in that text become a path mention —
-  they are not inlined into shareable HTML
+  it as a tool-call scene. Ignore `to` when extracting text. `file://` /
+  data-URL markdown images and `send_message` attachments become a basename
+  mention (`[attached image: sketch (cat.png)]`) — they are not inlined into
+  shareable HTML. Windows `file:///C:/...` paths are included.
 - `communicate_update` is a high-volume status/memory side-effect. Keep it as a
   `CommunicateUpdate` tool scene (including success). Do **not** promote it to
-  an assistant reply. `_isError` still marks `failure` / `rejected` / `error`
+  an assistant reply. Flatten the status text onto `update` so the tool card
+  has a one-line summary. `_isError` still marks `failure` / `rejected` / `error`
 - `role: "tool"` lines carry `tool_result` (not Claude's user-nested pattern).
   Pair to the preceding `tool_use` by `toolCallId` when present, else by order
   (prefer matching tool name; leave unenriched rather than attaching another
@@ -69,9 +74,8 @@ Sand builtins map onto the viewer vocabulary in `tool-mapping.ts`: `read`→`Rea
 `shell`→`Bash`, `update_todos`→`TodoWrite`, `task`→`Agent`, `await`→`Await`,
 `computer_use`→`ComputerUse`, `generate_image`→`GenerateImage`, plus the usual
 web/edit aliases. `get_mcp_tools` is discovery noise and is omitted from scenes.
-`mcp` keeps its raw name and normalizes `server` / `tool` / `tool_name`. Dynamic
-MCP calls use short names (`pull_request_read`, `search_analytics_query`) plus
-`serverIdentifier` / `providerIdentifier` / `toolName` / `args` and become
+`mcp` and dynamic MCP short names (`pull_request_read`, `search_analytics_query`)
+plus `serverIdentifier` / `providerIdentifier` / `toolName` / `args` become
 `mcp__<server>__<tool>` cards with `_mcpServer` / `_mcpTool`.
 
 ## Group chat
@@ -121,6 +125,9 @@ prefer). `sand-subagent-*` never merges into a group room.
 
 Fixtures: `test/fixtures/sample.jsonl` (DM), `dm-session.jsonl`,
 `group-eng.jsonl`, `group-gtm.jsonl`, `subagent.jsonl`, `meta-wake.jsonl`.
+Edge coverage lives in `test/parser-edges.test.ts` (mismatched results,
+hidden-tool leak, Windows file URLs, attachment-only replies, missing
+subagents, nested grandchildren).
 
 Try with:
 

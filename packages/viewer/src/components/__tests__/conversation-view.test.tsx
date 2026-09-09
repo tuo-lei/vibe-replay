@@ -265,4 +265,25 @@ describe("ConversationView assistant metrics", () => {
     expect(screen.getByText("You")).toBeTruthy();
     expect(screen.getByText("Assistant")).toBeTruthy();
   });
+
+  it("labels Grok Bot scratch as Scratch instead of Thinking", () => {
+    render(
+      <ConversationView
+        scenes={[
+          { type: "user-prompt", content: "一起画画", speaker: "User" },
+          { type: "thinking", content: "private scratch reasoning" },
+          { type: "text-response", content: "好的，我来起草图", speaker: "艺术家" },
+        ]}
+        visibleCount={3}
+        currentIndex={2}
+        effectivePrefs={prefs(false)}
+        thinkingLabel="Scratch"
+      />,
+    );
+
+    expect(screen.getByText("Scratch")).toBeTruthy();
+    expect(screen.queryByText("Thinking")).toBeNull();
+    expect(screen.getByText("You")).toBeTruthy();
+    expect(screen.getByText("艺术家")).toBeTruthy();
+  });
 });

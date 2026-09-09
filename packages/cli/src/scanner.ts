@@ -76,7 +76,9 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v36: index privacy-safe provider context composition metadata.
 // v37: count concrete SKILL.md reads as skill activations across providers.
 // v38: retain compact per-turn duration/tool/token metrics for distributions.
-export const SCANNER_VERSION = 38;
+// v39: keep short CJK Grok Bot prompts as Explore firstPrompt instead of skipping
+// them for the 10-character English-oriented threshold.
+export const SCANNER_VERSION = 39;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -1985,7 +1987,9 @@ function buildScanResultFromParsed(
   const turnMetrics = buildTurnMetrics(parsed.turns, parsed.turnStats);
   const firstPrompt = input.transcriptStatus
     ? ""
-    : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
+    : firstUserPrompt(parsed.turns, { minLength: input.provider === "grok-bot" ? 1 : 10 }) ||
+      input.firstPrompt ||
+      parsed.title;
   for (const skill of skillActivations) {
     const normalized = skill.trim();
     if (!normalized) continue;
@@ -2073,13 +2077,17 @@ function parseWarningQualityNotes(warnings: ParseWarning[] | undefined): string[
   });
 }
 
-function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefined {
+function firstUserPrompt(
+  turns: ProviderParseResult["turns"],
+  options: { minLength?: number } = {},
+): string | undefined {
+  const minLength = options.minLength ?? 10;
   for (const turn of turns) {
     if (turn.role !== "user" || turn.subtype) continue;
     for (const block of turn.blocks) {
       if (block.type !== "text") continue;
       const text = block.text.replace(/\s+/g, " ").trim();
-      if (text.length >= 10) return text.slice(0, 200);
+      if (text.length >= minLength) return text.slice(0, 200);
     }
   }
   return undefined;
