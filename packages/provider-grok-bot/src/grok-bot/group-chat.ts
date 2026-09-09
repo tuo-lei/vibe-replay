@@ -365,13 +365,21 @@ function findSpeaker(
   return { name, text: fallback[2], known: false };
 }
 
+const MAX_FALLBACK_SPEAKER_WORDS = 4;
+
 function looksLikeSpeakerName(name: string): boolean {
   if (name.length < 1 || name.length > 60) return false;
   if (RESERVED_SPEAKERS.has(name.toLowerCase())) return false;
   if (/[.?!]$/.test(name)) return false;
   const letters = speakerIdentityKey(name);
   if (!letters) return false;
-  return /^[\p{L}\p{N}\p{M}\p{S}][\p{L}\p{N}\p{M}\p{S} .'_-]*$/u.test(name);
+  if (!/^[\p{L}\p{N}\p{M}\p{S}][\p{L}\p{N}\p{M}\p{S} .'_-]*$/u.test(name)) return false;
+  const words = name.trim().split(/\s+/);
+  if (words.length > MAX_FALLBACK_SPEAKER_WORDS) return false;
+  // Lowercase Latin phrases ("one thing to note:") are prose, not speakers.
+  // CJK/Han, emoji, symbol, and uppercase labels stay valid.
+  if (words.length > 1 && /^[a-z0-9][a-z0-9 .'_-]*$/.test(name)) return false;
+  return true;
 }
 
 function startsWithInsensitive(line: string, prefix: string): boolean {

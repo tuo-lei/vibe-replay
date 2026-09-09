@@ -200,7 +200,9 @@ export function mergeGrokBotGroupParses(
   sessionInfo?: SessionInfo,
 ): ProviderParseResult {
   const usable = members.filter((member) => member.parsed.turns.length > 0 || members.length === 1);
-  if (usable.length === 1) return usable[0]?.parsed ?? emptyParse(sessionInfo);
+  if (usable.length === 1) {
+    return applySessionInfo(usable[0]?.parsed ?? emptyParse(sessionInfo), sessionInfo);
+  }
 
   const ownerNames = uniqueStrings(
     usable.map((member) => member.ownerName).filter((name): name is string => !!name),
@@ -381,6 +383,20 @@ function uniqueStrings(values: string[]): string[] {
     out.push(trimmed);
   }
   return out;
+}
+
+function applySessionInfo(
+  parsed: ProviderParseResult,
+  sessionInfo?: SessionInfo,
+): ProviderParseResult {
+  if (!sessionInfo) return parsed;
+  return {
+    ...parsed,
+    sessionId: sessionInfo.sessionId || parsed.sessionId,
+    slug: sessionInfo.slug || parsed.slug,
+    cwd: sessionInfo.cwd || sessionInfo.project || parsed.cwd,
+    title: parsed.title || sessionInfo.title,
+  };
 }
 
 function emptyParse(sessionInfo?: SessionInfo): ProviderParseResult {

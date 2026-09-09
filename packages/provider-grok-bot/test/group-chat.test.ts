@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -172,6 +174,22 @@ It's your turn, 🧭旅游助手.`);
     expect(isHumanGroupSpeaker("Tuo", bots)).toBe(true);
     expect(isHumanGroupSpeaker("Vibe Replay GTM", bots)).toBe(false);
     expect(isHumanGroupSpeaker("vibe replay eng", bots)).toBe(false);
+  });
+
+  it("does not treat lowercase prose before a colon as a speaker turn", () => {
+    const wake = parseGrokBotGroupWake(`[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: Let's ship the Grok Bot replay provider this week.
+one thing to note: we should ship
+It's your turn, Vibe Replay Eng.`);
+    expect(wake?.messages).toEqual([
+      {
+        speaker: "User",
+        text: "Let's ship the Grok Bot replay provider this week.\none thing to note: we should ship",
+        mentions: [],
+      },
+    ]);
   });
 });
 
@@ -381,5 +399,66 @@ It's your turn, Vibe Replay Eng.`,
         JSON.stringify(scene).includes("can you confirm the dashboard badge copy"),
       ),
     ).toBe(false);
+  });
+
+  it("keeps discovery session metadata when one group sibling has zero turns", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-grok-bot-empty-sib-"));
+    const engId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const emptyId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const engPath = join(dir, `${engId}.jsonl`);
+    const emptyPath = join(dir, `${emptyId}.jsonl`);
+    try {
+      await writeFile(
+        engPath,
+        `${JSON.stringify({
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
+Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
+New messages in the room (oldest first):
+User: Let's ship it.
+It's your turn, Vibe Replay Eng.`,
+              },
+            ],
+          },
+        })}\n`,
+      );
+      await writeFile(
+        emptyPath,
+        `${JSON.stringify({
+          role: "user",
+          message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT][first run]" }] },
+        })}\n`,
+      );
+
+      const parsed = await parseGrokBotSession([engPath, emptyPath], {
+        provider: "grok-bot",
+        sessionId: "group-vibe-replay-launch",
+        slug: "group-vibe-replay-launch",
+        title: "Group: Vibe Replay launch",
+        project: "Vibe Replay launch",
+        cwd: "/workspace",
+        version: "1",
+        timestamp: "2026-09-04T00:00:00.000Z",
+        lineCount: 2,
+        fileSize: 100,
+        filePath: engPath,
+        filePaths: [engPath, emptyPath],
+        firstPrompt: "Let's ship it.",
+      });
+      expect(parsed.sessionId).toBe("group-vibe-replay-launch");
+      expect(parsed.slug).toBe("group-vibe-replay-launch");
+      expect(parsed.cwd).toBe("/workspace");
+      expect(parsed.title).toBe("Group: Vibe Replay launch");
+      expect(parsed.sessionId).not.toBe(engId);
+      const humans = parsed.turns.filter((turn) => turn.role === "user" && !turn.subtype);
+      expect(humans).toHaveLength(1);
+      expect(humans[0].blocks[0]).toEqual({ type: "text", text: "Let's ship it." });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
