@@ -138,6 +138,7 @@ export async function parseGrokBotSession(
       const parsed = await attachGrokBotSubAgents(
         parseGrokBotLines(content.split("\n"), {
           sourcePath: path,
+          sessionInfo,
           ownerName,
         }),
         path,

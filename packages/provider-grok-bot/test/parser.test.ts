@@ -15,6 +15,7 @@ import {
   stripUserDecorators,
 } from "../src/grok-bot/parser.js";
 import {
+  grokBotMcpAttribution,
   grokBotReplayToolName,
   mapGrokBotToolArgs,
   mapGrokBotToolName,
@@ -1088,6 +1089,20 @@ describe("Grok Bot tool mapping", () => {
     });
     expect(mapGrokBotToolArgs("communicate_update", { update: "Scanning inbox…" })).toMatchObject({
       update: "Scanning inbox…",
+    });
+    expect(mapGrokBotToolArgs("read", { path: "/tmp/a.ts", name: "readme" })).toEqual({
+      path: "/tmp/a.ts",
+      name: "readme",
+      file_path: "/tmp/a.ts",
+    });
+    expect(grokBotMcpAttribution("read", { path: "/tmp/a.ts", name: "readme" })).toBeUndefined();
+    expect(grokBotMcpAttribution("mystery", { args: { name: "foo" } })).toBeUndefined();
+    expect(grokBotReplayToolName("mystery", { args: { name: "foo" } })).toBe("mystery");
+    expect(
+      grokBotMcpAttribution("mcp", { server: "github", toolName: "pull_request_read" }),
+    ).toEqual({
+      server: "github",
+      tool: "pull_request_read",
     });
   });
 });

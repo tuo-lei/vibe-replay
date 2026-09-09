@@ -162,11 +162,13 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
     if (update) obj.update = update;
   }
 
-  const mcp = grokBotMcpFields(obj);
-  if (mcp.server) obj.server = mcp.server;
-  if (mcp.tool) {
-    obj.tool = mcp.tool;
-    if (!firstString(obj.tool_name)) obj.tool_name = mcp.tool;
+  if (normalized === "mcp" || !isGrokBotBuiltinTool(toolName)) {
+    const mcp = grokBotMcpFields(obj);
+    if (mcp.server) obj.server = mcp.server;
+    if (mcp.tool) {
+      obj.tool = mcp.tool;
+      if (!firstString(obj.tool_name)) obj.tool_name = mcp.tool;
+    }
   }
 
   return obj;
@@ -205,7 +207,7 @@ function grokBotMcpFields(input: Record<string, unknown>): { server?: string; to
     input.server_name,
     input.providerIdentifier,
   );
-  const tool = firstString(input.tool, input.toolName, input.tool_name, input.name);
+  const tool = firstString(input.tool, input.toolName, input.tool_name);
   return {
     ...(server ? { server } : {}),
     ...(tool ? { tool } : {}),
@@ -215,8 +217,7 @@ function grokBotMcpFields(input: Record<string, unknown>): { server?: string; to
 function hasDynamicMcpIdentifiers(input: Record<string, unknown>): boolean {
   return !!(
     firstString(input.serverIdentifier, input.providerIdentifier, input.server) ||
-    firstString(input.toolName, input.tool_name) ||
-    (input.args && typeof input.args === "object")
+    firstString(input.toolName, input.tool_name)
   );
 }
 
