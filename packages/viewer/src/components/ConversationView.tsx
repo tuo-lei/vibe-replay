@@ -1828,7 +1828,7 @@ function summarizeToolInput(name: string, input: Record<string, any>): string {
     case "Agent":
       return input.description || "";
     case "CommunicateUpdate":
-      return typeof input.update === "string" ? input.update : "";
+      return typeof input.update === "string" ? input.update.slice(0, 80) : "";
     default:
       return "";
   }

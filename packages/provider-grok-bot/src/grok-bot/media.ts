@@ -127,7 +127,9 @@ export function rewriteGrokBotShareableText(text: string): string {
 
 export function stripFileUrl(url: string): string {
   const trimmed = url.trim();
-  if (DATA_URL_RE.test(trimmed)) return "embedded";
+  // Any data-image URL (base64 or not) would dump payload into replay text.
+  if (/^data:image\//i.test(trimmed)) return "embedded";
+  if (/^https?:\/\//i.test(trimmed)) return remoteUrlPath(trimmed);
   let path = trimmed;
   // Windows drive: file:///C:/Users/... or file:///C|\Users\...
   path = path.replace(/^file:\/\/\/([A-Za-z]):/i, "$1:");
@@ -139,4 +141,31 @@ export function stripFileUrl(url: string): string {
   } catch {
     return path;
   }
+}
+
+/** Pathname only — signed query/fragment tokens must not enter shareable replays. */
+function remoteUrlPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    try {
+      return decodeURIComponent(parsed.pathname);
+    } catch {
+      return parsed.pathname;
+    }
+  } catch {
+    const cut = trimmedQueryAndFragment(url);
+    try {
+      return decodeURIComponent(cut);
+    } catch {
+      return cut;
+    }
+  }
+}
+
+function trimmedQueryAndFragment(url: string): string {
+  const hash = url.indexOf("#");
+  const query = url.indexOf("?");
+  const end =
+    hash >= 0 && query >= 0 ? Math.min(hash, query) : hash >= 0 ? hash : query >= 0 ? query : -1;
+  return end >= 0 ? url.slice(0, end) : url;
 }

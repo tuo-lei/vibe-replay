@@ -408,18 +408,39 @@ export function extractSendMessageText(input: unknown, depth = 0): string {
   if (depth !== 0) return raw;
   const rewritten = rewriteGrokBotShareableText(raw);
   const attachments = formatSendMessageAttachments(input);
-  if (!attachments) return rewritten;
-  if (!rewritten.trim()) return attachments;
-  if (rewritten.includes("[attached image:") || rewritten.includes("[attachment:")) {
-    return rewritten;
+  if (attachments.length === 0) return rewritten;
+  if (!rewritten.trim()) return attachments.join("\n");
+  const seen = attachmentIdentitiesInText(rewritten);
+  const extra: string[] = [];
+  for (const mention of attachments) {
+    const id = attachmentMentionIdentity(mention);
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    extra.push(mention);
   }
-  return `${rewritten}\n${attachments}`;
+  return extra.length > 0 ? `${rewritten}\n${extra.join("\n")}` : rewritten;
 }
 
-function formatSendMessageAttachments(input: unknown): string {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
+const ATTACHMENT_MENTION_RE = /\[(?:attached image|attachment): ([^\]]+)\]/g;
+
+function attachmentMentionIdentity(mention: string): string {
+  const inner = mention.replace(/^\[(?:attached image|attachment):\s*/, "").replace(/\]$/, "");
+  const paren = inner.match(/\(([^)]+)\)$/);
+  return (paren ? paren[1] : inner).trim().toLowerCase();
+}
+
+function attachmentIdentitiesInText(text: string): Set<string> {
+  const ids = new Set<string>();
+  for (const match of text.matchAll(ATTACHMENT_MENTION_RE)) {
+    ids.add(attachmentMentionIdentity(match[0]));
+  }
+  return ids;
+}
+
+function formatSendMessageAttachments(input: unknown): string[] {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return [];
   const attachments = (input as Record<string, unknown>).attachments;
-  if (!Array.isArray(attachments) || attachments.length === 0) return "";
+  if (!Array.isArray(attachments) || attachments.length === 0) return [];
   const mentions: string[] = [];
   for (const item of attachments) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
@@ -440,7 +461,7 @@ function formatSendMessageAttachments(input: unknown): string {
     }
     if (title) mentions.push(`[attachment: ${title}]`);
   }
-  return mentions.join("\n");
+  return mentions;
 }
 
 function extractSendMessageTextRaw(input: unknown, depth = 0): string {
