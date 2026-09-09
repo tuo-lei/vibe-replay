@@ -91,6 +91,10 @@ Do **not** treat the blob as one human prompt.
 - Other bots are `role: "assistant"` with `speaker` set (Eng, GTM, 艺术家, …).
   Display names (including emoji/CJK) are labels; merge/dedupe keys strip
   punctuation/emoji so `🧭旅游助手` matches `旅游助手`
+- Unknown `Name: text` fallback labels: CJK/emoji/uppercase stay valid; lowercase
+  Latin display names of 2–3 alphabetic words (`john smith`) are speakers;
+  longer phrases or function-word prose (`one thing to note`) stay in the
+  previous turn
 - Drop procedural cues: `It's your turn…`, `The room is wrapping up…`,
   `The conversation is wrapping up…`, `Waiting for participants…`,
   `No new messages in the room…` (empty wakes are not prompts)

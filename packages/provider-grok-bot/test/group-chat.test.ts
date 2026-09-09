@@ -176,17 +176,33 @@ It's your turn, 🧭旅游助手.`);
     expect(isHumanGroupSpeaker("vibe replay eng", bots)).toBe(false);
   });
 
-  it("does not treat lowercase prose before a colon as a speaker turn", () => {
+  it("treats short lowercase names as speakers and keeps function-word prose in the previous turn", () => {
+    // Rule: unlisted fallback labels — CJK/emoji/uppercase stay valid; lowercase
+    // Latin of 2–3 alphabetic words with no function words (`john smith`) is a
+    // speaker; longer phrases or stop-word prose (`one thing to note`) is not.
     const wake = parseGrokBotGroupWake(`[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
 Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
 New messages in the room (oldest first):
 User: Let's ship the Grok Bot replay provider this week.
 one thing to note: we should ship
+john smith: hello
+mary jane watson: three-word names are fine
+please note: this is still prose
 It's your turn, Vibe Replay Eng.`);
     expect(wake?.messages).toEqual([
       {
         speaker: "User",
         text: "Let's ship the Grok Bot replay provider this week.\none thing to note: we should ship",
+        mentions: [],
+      },
+      {
+        speaker: "john smith",
+        text: "hello",
+        mentions: [],
+      },
+      {
+        speaker: "mary jane watson",
+        text: "three-word names are fine\nplease note: this is still prose",
         mentions: [],
       },
     ]);
