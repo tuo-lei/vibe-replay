@@ -326,6 +326,72 @@ describe("scanSession", () => {
     expect(result.usageSummary?.tools).toMatchObject({ Read: 1 });
   });
 
+  it("indexes Grok Bot dynamic MCP short names and skips get_mcp_tools", async () => {
+    const grokPath = join(tmpDir, "grok-bot-mcp.jsonl");
+    await writeFile(
+      grokPath,
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "[t0u]\ncheck the PR" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "get_mcp_tools", toolCallId: "g-1", input: {} },
+              {
+                type: "tool_use",
+                name: "pull_request_read",
+                toolCallId: "p-1",
+                input: {
+                  serverIdentifier: "github",
+                  toolName: "pull_request_read",
+                  args: { pullNumber: 544 },
+                },
+              },
+            ],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "get_mcp_tools",
+                toolCallId: "g-1",
+                result: { success: { content: "github" } },
+              },
+              {
+                type: "tool_result",
+                name: "pull_request_read",
+                toolCallId: "p-1",
+                result: { success: { content: "PR 544" } },
+              },
+            ],
+          },
+        },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(""),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "grok-bot-mcp",
+      provider: "grok-bot",
+      project: "/home/box",
+      slug: "grok-bot-mcp",
+      filePaths: [grokPath],
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(result.usageSummary?.tools).toEqual({});
+    expect(result.usageSummary?.mcpServers).toMatchObject({ github: 1 });
+    expect(result.usageSummary?.mcpTools).toMatchObject({ "github/pull_request_read": 1 });
+  });
+
   it("persists structured Pi compaction diagnostics in scan results", async () => {
     const piPath = join(tmpDir, "pi-diagnostics.jsonl");
     await writeFile(

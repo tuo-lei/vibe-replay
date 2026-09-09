@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,11 +7,18 @@ import {
   classifyGrokBotUserWake,
   extractSendMessageText,
   extractStatusUpdateText,
+  findSandSubagentId,
   parseGrokBotLines,
   parseGrokBotSession,
+  rewriteGrokBotShareableText,
+  scrubGrokBotMediaPayload,
   stripUserDecorators,
 } from "../src/grok-bot/parser.js";
-import { mapGrokBotToolArgs, mapGrokBotToolName } from "../src/grok-bot/tool-mapping.js";
+import {
+  grokBotReplayToolName,
+  mapGrokBotToolArgs,
+  mapGrokBotToolName,
+} from "../src/grok-bot/tool-mapping.js";
 import { transformToReplay } from "./helpers/transform.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -279,7 +286,7 @@ describe("Grok Bot parser", () => {
       .filter((block) => block.type === "text")
       .map((block) => (block.type === "text" ? block.text : ""));
     expect(assistantText).toContain("Hey — good to meet you.");
-    expect(assistantText).toContain("Checking the badge copy now.");
+    expect(assistantText).not.toContain("Checking the badge copy now.");
     expect(assistantText).toContain("Badge copy looks good.");
     expect(assistantText.some((text) => text.includes("example.invalid"))).toBe(false);
 
@@ -287,11 +294,12 @@ describe("Grok Bot parser", () => {
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.type === "tool_use");
     expect(tools.map((block) => (block.type === "tool_use" ? block.name : ""))).toEqual([
+      "CommunicateUpdate",
       "Read",
       "TodoWrite",
       "Bash",
     ]);
-    expect(tools[1]).toMatchObject({
+    expect(tools[2]).toMatchObject({
       name: "TodoWrite",
       input: {
         todos: [
@@ -300,18 +308,21 @@ describe("Grok Bot parser", () => {
         ],
       },
     });
-    const read = tools[0];
+    const read = tools[1];
     expect(read.type === "tool_use" && read._durationMs).toBe(3000);
     expect(read.type === "tool_use" && read._durationSource).toBe("timestamp");
 
     const replay = transformToReplay(parsed, "grok-bot", "~/grok-bot");
     expect(
       replay.scenes.some(
-        (scene) =>
-          scene.type === "tool-call" &&
-          (scene.toolName === "send_message" || scene.toolName === "communicate_update"),
+        (scene) => scene.type === "tool-call" && scene.toolName === "send_message",
       ),
     ).toBe(false);
+    expect(
+      replay.scenes.some(
+        (scene) => scene.type === "tool-call" && scene.toolName === "CommunicateUpdate",
+      ),
+    ).toBe(true);
     expect(
       replay.scenes.some((scene) => scene.type === "tool-call" && scene.toolName === "Read"),
     ).toBe(true);
@@ -381,8 +392,12 @@ describe("Grok Bot parser", () => {
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.type === "text")
       .map((block) => (block.type === "text" ? block.text : ""));
-    expect(assistantText).toContain("Scanning inbox…");
     expect(assistantText).toContain("I can help with that.");
+    expect(assistantText).not.toContain("Scanning inbox…");
+    const statusTools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use" && block.name === "CommunicateUpdate");
+    expect(statusTools).toHaveLength(1);
   });
 
   it("maps Sand-native tools including mcp, await, computer_use, and task", () => {
@@ -485,7 +500,6 @@ describe("Grok Bot parser", () => {
       "Await",
       "Agent",
       "mcp",
-      "GetMcpTools",
       "ComputerUse",
       "WebSearch",
     ]);
@@ -503,7 +517,7 @@ describe("Grok Bot parser", () => {
       _mcpServer: "github",
       _mcpTool: "pull_request_read",
     });
-    expect(tools[5]).toMatchObject({
+    expect(tools[4]).toMatchObject({
       name: "WebSearch",
       input: { search_term: "vibe-replay grok bot", query: "vibe-replay grok bot" },
     });
@@ -592,7 +606,7 @@ describe("Grok Bot parser", () => {
     expect(tools[0]).toMatchObject({ name: "Read", _durationMs: 4000 });
   });
 
-  it("keeps a failed communicate_update as an error tool and still promotes successes", () => {
+  it("keeps communicate_update as a status tool for both failure and success", () => {
     const parsed = parseGrokBotLines([
       JSON.stringify({
         role: "user",
@@ -654,18 +668,340 @@ describe("Grok Bot parser", () => {
     const tools = parsed.turns
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.type === "tool_use");
-    expect(tools).toHaveLength(1);
+    expect(tools).toHaveLength(2);
     expect(tools[0]).toMatchObject({
       name: "CommunicateUpdate",
       _isError: true,
       _result: "delivery failed",
     });
+    expect(tools[1]).toMatchObject({
+      name: "CommunicateUpdate",
+    });
+    expect(tools[1].type === "tool_use" && tools[1]._isError).toBeUndefined();
     const texts = parsed.turns
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.type === "text")
       .map((block) => (block.type === "text" ? block.text : ""));
-    expect(texts).toContain("Still working.");
+    expect(texts).not.toContain("Still working.");
     expect(texts).not.toContain("This ping never landed.");
+  });
+
+  it("classifies background-task, first-run, and profile-update wakes", () => {
+    expect(
+      classifyGrokBotUserWake("[A background task just completed]\nWrote the travel recap."),
+    ).toEqual({
+      kind: "context-injection",
+      text: "Background task completed:\nWrote the travel recap.",
+      label: "background-task",
+    });
+    expect(classifyGrokBotUserWake("[first run]\nbootstrap")).toEqual({ kind: "skip" });
+    expect(classifyGrokBotUserWake("<<SAND_AGENT_PROFILE_UPDATE\nname: 艺术家\n>>")).toEqual({
+      kind: "skip",
+    });
+    expect(
+      classifyGrokBotUserWake("<<SAND_AGENT_PROFILE_UPDATE name=x >>\nPlease draw a cat"),
+    ).toEqual({ kind: "prompt", text: "Please draw a cat" });
+  });
+
+  it("omits get_mcp_tools discovery noise and maps dynamic MCP short names", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "check the PR" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "get_mcp_tools", toolCallId: "g-1", input: {} },
+            {
+              type: "tool_use",
+              name: "pull_request_read",
+              toolCallId: "p-1",
+              input: {
+                serverIdentifier: "github",
+                providerIdentifier: "github",
+                toolName: "pull_request_read",
+                args: { pullNumber: 544, method: "get" },
+              },
+            },
+            {
+              type: "tool_use",
+              name: "search_analytics_query",
+              toolCallId: "s-1",
+              input: {
+                serverIdentifier: "google-analytics",
+                toolName: "search_analytics_query",
+                args: { property: "properties/1" },
+              },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "get_mcp_tools",
+              toolCallId: "g-1",
+              result: { success: { timestamp: 1788485472000, content: "github, slack" } },
+            },
+            {
+              type: "tool_result",
+              name: "pull_request_read",
+              toolCallId: "p-1",
+              result: { success: { timestamp: 1788485474000, content: "PR 544" } },
+            },
+            {
+              type: "tool_result",
+              name: "search_analytics_query",
+              toolCallId: "s-1",
+              result: { success: { timestamp: 1788485476000, content: "rows" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools.map((block) => (block.type === "tool_use" ? block.name : ""))).toEqual([
+      "mcp__github__pull_request_read",
+      "mcp__google-analytics__search_analytics_query",
+    ]);
+    expect(tools[0]).toMatchObject({
+      _mcpServer: "github",
+      _mcpTool: "pull_request_read",
+      input: { pullNumber: 544, method: "get", server: "github", tool: "pull_request_read" },
+      _result: "PR 544",
+    });
+    expect(JSON.stringify(parsed.turns)).not.toContain("GetMcpTools");
+  });
+
+  it("strips generate_image and computer_use base64 while keeping file paths", () => {
+    const imageData = `iVBOR${"A".repeat(120)}`;
+    const screenshot = `iVBOR${"B".repeat(120)}`;
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "draw then screenshot" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "generate_image",
+              toolCallId: "img-1",
+              input: { prompt: "a cat" },
+            },
+            {
+              type: "tool_use",
+              name: "computer_use",
+              toolCallId: "cu-1",
+              input: { action: "screenshot" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "generate_image",
+              toolCallId: "img-1",
+              result: {
+                success: {
+                  timestamp: 1788485500000,
+                  filePath: "/home/box/agent-data/assets/cat.png",
+                  imageData,
+                },
+              },
+            },
+            {
+              type: "tool_result",
+              name: "computer_use",
+              toolCallId: "cu-1",
+              result: {
+                success: {
+                  timestamp: 1788485505000,
+                  screenshotPath: "/tmp/screenshot.png",
+                  screenshot,
+                },
+              },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools[0]).toMatchObject({
+      name: "GenerateImage",
+    });
+    expect(tools[0].type === "tool_use" && tools[0]._result).toContain(
+      "/home/box/agent-data/assets/cat.png",
+    );
+    expect(tools[1]).toMatchObject({
+      name: "ComputerUse",
+    });
+    expect(tools[1].type === "tool_use" && tools[1]._result).toContain("/tmp/screenshot.png");
+    const dumped = JSON.stringify(tools);
+    expect(dumped).not.toContain(imageData);
+    expect(dumped).not.toContain(screenshot);
+    expect(dumped).toContain("omitted");
+    expect(scrubGrokBotMediaPayload({ imageData, filePath: "/x.png" })).toMatchObject({
+      filePath: "/x.png",
+      imageData: expect.stringContaining("omitted"),
+    });
+  });
+
+  it("rewrites file:// markdown images in send_message instead of leaving a file URI", () => {
+    const input = {
+      text: {
+        content: "See ![sketch](<file:///home/box/agent-data/attachments/cat.png>) and the rest.",
+      },
+    };
+    expect(extractSendMessageText(input)).toBe(
+      "See [image: sketch — /home/box/agent-data/attachments/cat.png] and the rest.",
+    );
+    expect(rewriteGrokBotShareableText("![x](file:///home/box/agent-data/assets/a.png)")).toBe(
+      "[image: x — /home/box/agent-data/assets/a.png]",
+    );
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: "send_message", input }],
+        },
+      }),
+    ]);
+    expect(parsed.turns[0].blocks[0]).toEqual({
+      type: "text",
+      text: "See [image: sketch — /home/box/agent-data/attachments/cat.png] and the rest.",
+    });
+  });
+
+  it("attaches a sibling sand-subagent transcript onto a parent task card", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-replay-grok-bot-task-"));
+    const parentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const subId = "sand-subagent-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    await mkdir(join(root, parentId), { recursive: true });
+    await mkdir(join(root, subId), { recursive: true });
+    await writeFile(
+      join(root, parentId, `${parentId}.jsonl`),
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "explore the UI" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "task",
+                toolCallId: "t-1",
+                input: { goal: "explore UI", context: "list badges", role: "explore" },
+              },
+            ],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "task",
+                toolCallId: "t-1",
+                result: {
+                  success: {
+                    timestamp: 1788485510000,
+                    sessionId: subId,
+                    content: "started",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf-8",
+    );
+    await writeFile(
+      join(root, subId, `${subId}.jsonl`),
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: "list badges" }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "opening spec" },
+              {
+                type: "tool_use",
+                name: "read",
+                toolCallId: "r-1",
+                input: { path: "/home/box/reference/app-ui.md" },
+              },
+            ],
+          },
+        },
+        {
+          role: "tool",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                name: "read",
+                toolCallId: "r-1",
+                result: { success: { content: "# UI" } },
+              },
+            ],
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf-8",
+    );
+    try {
+      expect(findSandSubagentId({ sessionId: subId })).toBe(subId);
+      const parsed = await parseGrokBotSession(join(root, parentId, `${parentId}.jsonl`));
+      const agent = parsed.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.type === "tool_use" && block.name === "Agent");
+      expect(agent?.type === "tool_use" && agent._subAgent).toMatchObject({
+        agentId: subId,
+        agentType: "Explore",
+        description: "explore UI",
+        prompt: "list badges",
+        toolCalls: 1,
+        thinkingBlocks: 1,
+      });
+      expect(parsed.subAgentSummary).toEqual([
+        { agentId: subId, agentType: "Explore", description: "explore UI", toolCalls: 1 },
+      ]);
+      const replay = transformToReplay(parsed, "grok-bot", "~/grok-bot");
+      const scene = replay.scenes.find(
+        (item) => item.type === "tool-call" && item.toolName === "Agent",
+      );
+      expect(scene?.type === "tool-call" && scene.subAgent?.agentId).toBe(subId);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -676,6 +1012,7 @@ describe("Grok Bot tool mapping", () => {
     expect(mapGrokBotToolName("update_todos")).toBe("TodoWrite");
     expect(mapGrokBotToolName("await")).toBe("Await");
     expect(mapGrokBotToolName("computer_use")).toBe("ComputerUse");
+    expect(mapGrokBotToolName("generate_image")).toBe("GenerateImage");
     expect(mapGrokBotToolName("get_mcp_tools")).toBe("GetMcpTools");
     expect(mapGrokBotToolName("communicate_update")).toBe("CommunicateUpdate");
     expect(mapGrokBotToolName("mcp")).toBe("mcp");
@@ -713,14 +1050,21 @@ describe("Grok Bot tool mapping", () => {
       new_string: "b",
     });
     expect(
-      mapGrokBotToolArgs("edit", {
-        path: "/tmp/a.ts",
-        oldText: "  indented\n",
-        newText: "  indented\n  more\n",
+      grokBotReplayToolName("pull_request_read", {
+        serverIdentifier: "github",
+        toolName: "pull_request_read",
+      }),
+    ).toBe("mcp__github__pull_request_read");
+    expect(
+      mapGrokBotToolArgs("pull_request_read", {
+        serverIdentifier: "github",
+        toolName: "pull_request_read",
+        args: { pullNumber: 544 },
       }),
     ).toMatchObject({
-      old_string: "  indented\n",
-      new_string: "  indented\n  more\n",
+      server: "github",
+      tool: "pull_request_read",
+      pullNumber: 544,
     });
   });
 });

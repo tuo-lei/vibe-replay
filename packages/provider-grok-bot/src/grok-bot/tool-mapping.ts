@@ -3,44 +3,56 @@
  * (`read`, `write`, `shell`). The viewer's transform layer keys off canonical
  * names like `Read`, `Write`, `Bash` to build diffs and shell scenes.
  *
- * `send_message` and successful `communicate_update` are promoted to assistant
- * text in the parser. Failed `communicate_update` reaches this map as
- * `CommunicateUpdate`. `mcp` keeps its raw name so the scanner's
- * Pi-style `parseMcpUsage` branch can attribute server/tool from args.
- * Unrecognized tools (GitHub MCP names, future builtins) pass through unchanged.
+ * `send_message` is promoted to assistant text in the parser.
+ * `communicate_update` is a status/memory side-effect and stays a
+ * `CommunicateUpdate` tool scene (success and failure). `get_mcp_tools` is
+ * discovery noise and is omitted from replay scenes. `mcp` keeps its raw
+ * name so the scanner's Pi-style `parseMcpUsage` branch can attribute
+ * server/tool from args. Dynamic MCP calls use short names plus
+ * `serverIdentifier` / `toolName` / `args` and are rewritten to
+ * `mcp__<server>__<tool>` cards. Unrecognized non-MCP tools pass through.
  */
+
+const GROK_BOT_TOOL_NAME_MAP: Record<string, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  strreplace: "Edit",
+  search_replace: "Edit",
+  multiedit: "MultiEdit",
+  delete: "Delete",
+  grep: "Grep",
+  glob: "Glob",
+  glob_file_search: "Glob",
+  ls: "LS",
+  find: "Find",
+  shell: "Bash",
+  bash: "Bash",
+  exec: "Bash",
+  web_search: "WebSearch",
+  websearch: "WebSearch",
+  web_fetch: "WebFetch",
+  webfetch: "WebFetch",
+  todo: "TodoWrite",
+  todowrite: "TodoWrite",
+  update_todos: "TodoWrite",
+  task: "Agent",
+  delegate_task: "Agent",
+  await: "Await",
+  computer_use: "ComputerUse",
+  generate_image: "GenerateImage",
+  get_mcp_tools: "GetMcpTools",
+  communicate_update: "CommunicateUpdate",
+};
+
+const GROK_BOT_BUILTIN_TOOLS = new Set([
+  ...Object.keys(GROK_BOT_TOOL_NAME_MAP),
+  "send_message",
+  "mcp",
+]);
+
 export function mapGrokBotToolName(name: string): string {
-  const mapping: Record<string, string> = {
-    read: "Read",
-    write: "Write",
-    edit: "Edit",
-    strreplace: "Edit",
-    search_replace: "Edit",
-    multiedit: "MultiEdit",
-    delete: "Delete",
-    grep: "Grep",
-    glob: "Glob",
-    glob_file_search: "Glob",
-    ls: "LS",
-    find: "Find",
-    shell: "Bash",
-    bash: "Bash",
-    exec: "Bash",
-    web_search: "WebSearch",
-    websearch: "WebSearch",
-    web_fetch: "WebFetch",
-    webfetch: "WebFetch",
-    todo: "TodoWrite",
-    todowrite: "TodoWrite",
-    update_todos: "TodoWrite",
-    task: "Agent",
-    delegate_task: "Agent",
-    await: "Await",
-    computer_use: "ComputerUse",
-    get_mcp_tools: "GetMcpTools",
-    communicate_update: "CommunicateUpdate",
-  };
-  return mapping[name.toLowerCase()] || name;
+  return GROK_BOT_TOOL_NAME_MAP[name.toLowerCase()] || name;
 }
 
 export function isGrokBotEditTool(name: string): boolean {
@@ -48,10 +60,20 @@ export function isGrokBotEditTool(name: string): boolean {
   return mapped === "Edit" || mapped === "Write" || mapped === "MultiEdit" || mapped === "Delete";
 }
 
+/** Discovery/list_tools noise — consume the result, do not emit a scene. */
+export function isGrokBotHiddenTool(name: string): boolean {
+  return name.toLowerCase() === "get_mcp_tools";
+}
+
+export function isGrokBotBuiltinTool(name: string): boolean {
+  return GROK_BOT_BUILTIN_TOOLS.has(name.toLowerCase());
+}
+
 /**
  * Normalize Grok Bot tool input into the field names the transform expects.
  * File tools use `path`; the transform wants `file_path`. Edit replacements
- * map onto `old_string` / `new_string`.
+ * map onto `old_string` / `new_string`. Dynamic MCP calls flatten `args` and
+ * copy `serverIdentifier` / `toolName` onto `server` / `tool`.
  */
 export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<string, unknown> {
   const obj =
@@ -59,6 +81,8 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
       ? { ...(input as Record<string, unknown>) }
       : {};
   const normalized = toolName.toLowerCase();
+
+  flattenToolArgs(obj);
 
   if (
     normalized === "read" ||
@@ -111,19 +135,29 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
     const description = firstString(obj.description, obj.goal, obj.title);
     const prompt = firstString(obj.prompt, obj.context, obj.task, obj.instruction);
     const subagentType = firstString(obj.subagent_type, obj.subagentType, obj.role, obj.type);
+    const sessionId = firstString(
+      obj.sessionId,
+      obj.session_id,
+      obj.agentId,
+      obj.agent_id,
+      obj.subagentId,
+    );
     if (description) obj.description = description;
     if (prompt) obj.prompt = prompt;
     if (subagentType) obj.subagent_type = subagentType;
+    if (sessionId) obj.sessionId = sessionId;
   }
 
-  if (normalized === "mcp") {
-    const server = firstString(obj.server, obj.serverName, obj.server_name);
-    const tool = firstString(obj.tool, obj.toolName, obj.tool_name, obj.name);
-    if (server) obj.server = server;
-    if (tool) {
-      obj.tool = tool;
-      if (!firstString(obj.tool_name)) obj.tool_name = tool;
-    }
+  if (normalized === "generate_image") {
+    const prompt = firstString(obj.prompt, obj.text, obj.description);
+    if (prompt) obj.prompt = prompt;
+  }
+
+  const mcp = grokBotMcpFields(obj);
+  if (mcp.server) obj.server = mcp.server;
+  if (mcp.tool) {
+    obj.tool = mcp.tool;
+    if (!firstString(obj.tool_name)) obj.tool_name = mcp.tool;
   }
 
   return obj;
@@ -133,14 +167,57 @@ export function grokBotMcpAttribution(
   toolName: string,
   input: Record<string, unknown>,
 ): { server?: string; tool?: string } | undefined {
-  if (toolName.toLowerCase() !== "mcp") return undefined;
-  const server = firstString(input.server, input.serverName, input.server_name);
-  const tool = firstString(input.tool, input.toolName, input.tool_name);
-  if (!server && !tool) return undefined;
+  const fields = grokBotMcpFields(input);
+  if (toolName.toLowerCase() === "mcp") {
+    if (!fields.server && !fields.tool) return undefined;
+    return fields;
+  }
+  if (isGrokBotBuiltinTool(toolName)) return undefined;
+  if (!hasDynamicMcpIdentifiers(input)) return undefined;
+  if (!fields.server && !fields.tool) return undefined;
+  return {
+    ...(fields.server ? { server: fields.server } : {}),
+    ...(fields.tool ? { tool: fields.tool } : { tool: toolName }),
+  };
+}
+
+/** Viewer MCP cards use `mcp__server__tool` so the 🔌 label parses. */
+export function grokBotReplayToolName(rawName: string, input: Record<string, unknown>): string {
+  if (rawName.toLowerCase() === "mcp") return "mcp";
+  const mcp = grokBotMcpAttribution(rawName, input);
+  if (mcp?.server && mcp.tool) return `mcp__${mcp.server}__${mcp.tool}`;
+  return mapGrokBotToolName(rawName);
+}
+
+function grokBotMcpFields(input: Record<string, unknown>): { server?: string; tool?: string } {
+  const server = firstString(
+    input.server,
+    input.serverIdentifier,
+    input.serverName,
+    input.server_name,
+    input.providerIdentifier,
+  );
+  const tool = firstString(input.tool, input.toolName, input.tool_name, input.name);
   return {
     ...(server ? { server } : {}),
     ...(tool ? { tool } : {}),
   };
+}
+
+function hasDynamicMcpIdentifiers(input: Record<string, unknown>): boolean {
+  return !!(
+    firstString(input.serverIdentifier, input.providerIdentifier, input.server) ||
+    firstString(input.toolName, input.tool_name) ||
+    (input.args && typeof input.args === "object")
+  );
+}
+
+function flattenToolArgs(obj: Record<string, unknown>): void {
+  const args = obj.args;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return;
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (obj[key] === undefined) obj[key] = value;
+  }
 }
 
 function firstString(...values: unknown[]): string | undefined {

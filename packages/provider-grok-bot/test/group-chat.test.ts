@@ -7,9 +7,12 @@ import {
   formatGroupSpeakerMessage,
   isGrokBotGroupChatPayload,
   isHumanGroupSpeaker,
+  normalizeGroupKey,
   parseGrokBotGroupWake,
   parseGrokBotLines,
   parseGrokBotSession,
+  sameSpeakerName,
+  speakerIdentityKey,
 } from "../src/grok-bot/parser.js";
 import { transformToReplay } from "./helpers/transform.js";
 
@@ -143,6 +146,24 @@ It's your turn, Vibe Replay Eng.`);
     expect(extractGroupMentions("@Vibe Replay Eng please look", ["Vibe Replay Eng"])).toEqual([
       "@Vibe Replay Eng",
     ]);
+  });
+
+  it("splits CJK and emoji display names as speakers and keeps Unicode room keys", () => {
+    const wake = parseGrokBotGroupWake(`[Group chat: "周末出行" - with 🧭旅游助手]
+Participants: 🧭旅游助手 (travel) 艺术家 (artist)
+New messages in the room (oldest first):
+User: 一起画画
+艺术家: 好的，我来起草图
+It's your turn, 🧭旅游助手.`);
+    expect(wake).toMatchObject({
+      groupTitle: "周末出行",
+      turnRecipient: "🧭旅游助手",
+    });
+    expect(wake?.messages.map((msg) => msg.speaker)).toEqual(["User", "艺术家"]);
+    expect(normalizeGroupKey("周末出行")).toBe("周末出行");
+    expect(normalizeGroupKey("🧭旅游助手")).toBe("旅游助手");
+    expect(sameSpeakerName("🧭旅游助手", "旅游助手")).toBe(true);
+    expect(speakerIdentityKey("🧭旅游助手")).toBe("旅游助手");
   });
 
   it("treats listed participants as bots and everyone else as human", () => {

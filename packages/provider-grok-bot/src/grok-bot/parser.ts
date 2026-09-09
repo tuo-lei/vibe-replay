@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
+import { normalizeSubAgentType } from "@vibe-replay/provider-contract";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
@@ -20,11 +21,18 @@ import {
 } from "./group-merge.js";
 import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
 import {
+  mediaPathFromPayload,
+  rewriteGrokBotShareableText,
+  scrubGrokBotMediaPayload,
+} from "./media.js";
+import {
   grokBotMcpAttribution,
+  grokBotReplayToolName,
   isGrokBotEditTool,
+  isGrokBotHiddenTool,
   mapGrokBotToolArgs,
-  mapGrokBotToolName,
 } from "./tool-mapping.js";
+import { findSandSubagentId } from "./subagent.js";
 
 export {
   extractGroupMentions,
@@ -38,6 +46,7 @@ export {
   normalizeGroupKey,
   parseGrokBotGroupWake,
   sameSpeakerName,
+  speakerIdentityKey,
 } from "./group-chat.js";
 export type {
   GrokBotGroupMessage,
@@ -52,12 +61,13 @@ export {
 } from "./group-merge.js";
 export { classifyGrokBotUserWake, parseGrokBotMetaWake, peelGrokBotMetaTag } from "./meta-wake.js";
 export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
+export { rewriteGrokBotShareableText, scrubGrokBotMediaPayload } from "./media.js";
+export { findSandSubagentId } from "./subagent.js";
 
 export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 const USER_TURN_PREFIX_RE = /^\s*\[t\d+u\]\s*/i;
 const SEND_MESSAGE_TOOL = "send_message";
-const COMMUNICATE_UPDATE_TOOL = "communicate_update";
-const PROMOTED_TEXT_TOOLS = new Set([SEND_MESSAGE_TOOL, COMMUNICATE_UPDATE_TOOL]);
+const SAND_SUBAGENT_PREFIX = "sand-subagent-";
 
 interface GrokBotRecord {
   role?: unknown;
@@ -83,6 +93,7 @@ interface CollectedResult {
   text: string;
   isError: boolean;
   timestamp?: string;
+  subagentId?: string;
   used: boolean;
 }
 
@@ -103,21 +114,25 @@ export async function parseGrokBotSession(
     const sourcePath = paths[0] || (Array.isArray(filePaths) ? filePaths[0] : filePaths);
     const content = sourcePath ? await readFile(sourcePath, "utf-8") : "";
     const ownerName = sourcePath ? await resolveOwnerName(sourcePath, sessionInfo) : undefined;
-    return parseGrokBotLines(content.split("\n"), {
+    const parsed = parseGrokBotLines(content.split("\n"), {
       sourcePath,
       sessionInfo,
       ownerName,
     });
+    return attachGrokBotSubAgents(parsed, sourcePath);
   }
 
   const members = await Promise.all(
     paths.map(async (path) => {
       const content = await readFile(path, "utf-8");
       const ownerName = await resolveOwnerName(path, sessionInfo);
-      const parsed = parseGrokBotLines(content.split("\n"), {
-        sourcePath: path,
-        ownerName,
-      });
+      const parsed = await attachGrokBotSubAgents(
+        parseGrokBotLines(content.split("\n"), {
+          sourcePath: path,
+          ownerName,
+        }),
+        path,
+      );
       return {
         path,
         ownerName: ownerName || parsed.agentName,
@@ -288,30 +303,22 @@ export function parseGrokBotLines(
         if (!turnTimestamp) turnTimestamp = result.timestamp;
       }
 
-      if (PROMOTED_TEXT_TOOLS.has(rawName.toLowerCase())) {
-        const isStatusUpdate = rawName.toLowerCase() === COMMUNICATE_UPDATE_TOOL;
-        if (isStatusUpdate && result?.isError) {
-          const call: ToolCallSite = {
-            name: mapGrokBotToolName(rawName),
-            rawName,
-            id,
-            input: mapGrokBotToolArgs(rawName, block.input),
-            result,
-          };
-          blocks.push(buildToolUseBlock(call, durationStart));
-          continue;
-        }
-        const visible = isStatusUpdate
-          ? extractStatusUpdateText(block.input)
-          : extractSendMessageText(block.input);
+      if (rawName.toLowerCase() === SEND_MESSAGE_TOOL) {
+        const visible = extractSendMessageText(block.input);
         if (visible.trim()) blocks.push({ type: "text", text: visible });
         continue;
       }
 
+      if (isGrokBotHiddenTool(rawName)) continue;
+
       const mappedInput = mapGrokBotToolArgs(rawName, block.input);
+      const childId = result?.subagentId || findSandSubagentId(mappedInput);
+      if (childId && !stringField(mappedInput, "sessionId")) {
+        mappedInput.sessionId = childId;
+      }
       const mcp = grokBotMcpAttribution(rawName, mappedInput);
       const call: ToolCallSite = {
-        name: mapGrokBotToolName(rawName),
+        name: grokBotReplayToolName(rawName, mappedInput),
         rawName,
         id,
         input: mappedInput,
@@ -343,11 +350,12 @@ export function parseGrokBotLines(
   const roots = getGrokBotTranscriptRoots();
   const notes = [
     "Grok Bot JSONL does not record token usage or model IDs in v1.",
-    "send_message and successful communicate_update calls are promoted to assistant text; failed communicate_update stays a tool-call scene.",
+    "send_message is promoted to assistant text. communicate_update is a status/memory tool scene, not a user-visible reply.",
     "Assistant text blocks are private scratch and map to thinking scenes; they are not the visible reply.",
-    "sand-subagent transcripts are indexed as separate sessions.",
+    "sand-subagent transcripts stay discoverable as their own sessions; parent `task` calls attach a child-run card when the result names a sibling id.",
     "Group-chat wakes split into a room context-injection, human user turns, and assistant-side turns for other bots. Sibling transcripts that share the room title merge into one timeline.",
-    "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection.",
+    "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection; background-task wakes are context-injection.",
+    "generate_image / computer_use results keep filePath/screenshotPath and omit embedded imageData. file:// markdown images in send_message are rewritten to a path mention and are not bundled into shareable HTML.",
   ];
 
   return {
@@ -387,11 +395,16 @@ export function stripUserDecorators(text: string): string {
 }
 
 export function extractSendMessageText(input: unknown, depth = 0): string {
+  const raw = extractSendMessageTextRaw(input, depth);
+  return depth === 0 ? rewriteGrokBotShareableText(raw) : raw;
+}
+
+function extractSendMessageTextRaw(input: unknown, depth = 0): string {
   if (depth > 6 || input == null) return "";
   if (typeof input === "string") return input;
   if (Array.isArray(input)) {
     return input
-      .map((item) => extractSendMessageText(item, depth + 1))
+      .map((item) => extractSendMessageTextRaw(item, depth + 1))
       .filter(Boolean)
       .join("\n");
   }
@@ -400,7 +413,7 @@ export function extractSendMessageText(input: unknown, depth = 0): string {
   if (typeof obj.content === "string") return obj.content;
   if (typeof obj.text === "string") return obj.text;
   const nested = [obj.text, obj.content, obj.message, obj.widgets];
-  const parts = nested.map((item) => extractSendMessageText(item, depth + 1)).filter(Boolean);
+  const parts = nested.map((item) => extractSendMessageTextRaw(item, depth + 1)).filter(Boolean);
   if (parts.length > 0) return parts.join("\n");
   if (typeof obj.label === "string") return obj.label;
   if (typeof obj.title === "string") return obj.title;
@@ -426,12 +439,14 @@ function collectToolResults(records: { record: GrokBotRecord }[]): CollectedResu
       const name = typeof block.name === "string" ? block.name : "";
       const id = firstString(block.toolCallId, block.tool_call_id, block.tool_use_id);
       const formatted = formatToolResult(block.result ?? block.content);
+      const subagentId = findSandSubagentId(block.result ?? block.content);
       results.push({
         name,
         ...(id ? { id } : {}),
         text: formatted.text,
         isError: formatted.isError,
         ...(formatted.timestamp ? { timestamp: formatted.timestamp } : {}),
+        ...(subagentId ? { subagentId } : {}),
         used: false,
       });
     }
@@ -440,10 +455,11 @@ function collectToolResults(records: { record: GrokBotRecord }[]): CollectedResu
 }
 
 function formatToolResult(result: unknown): { text: string; isError: boolean; timestamp?: string } {
-  if (result == null) return { text: "", isError: false };
-  if (typeof result === "string") return { text: result, isError: false };
-  if (typeof result !== "object") return { text: String(result), isError: false };
-  const obj = result as Record<string, unknown>;
+  const scrubbed = scrubGrokBotMediaPayload(result);
+  if (scrubbed == null) return { text: "", isError: false };
+  if (typeof scrubbed === "string") return { text: scrubbed, isError: false };
+  if (typeof scrubbed !== "object") return { text: String(scrubbed), isError: false };
+  const obj = scrubbed as Record<string, unknown>;
   if ("success" in obj) {
     return {
       text: formatSuccessPayload(obj.success),
@@ -472,31 +488,56 @@ function formatToolResult(result: unknown): { text: string; isError: boolean; ti
 }
 
 function formatSuccessPayload(success: unknown): string {
-  if (typeof success === "string") return success;
-  if (!success || typeof success !== "object") return success == null ? "" : String(success);
-  const obj = success as Record<string, unknown>;
+  const scrubbed = scrubGrokBotMediaPayload(success);
+  if (typeof scrubbed === "string") return scrubbed;
+  if (!scrubbed || typeof scrubbed !== "object") return scrubbed == null ? "" : String(scrubbed);
+  const obj = scrubbed as Record<string, unknown>;
   if (typeof obj.content === "string") return obj.content;
   if (typeof obj.stdout === "string") return obj.stdout;
   if (typeof obj.output === "string") return obj.output;
   if (typeof obj.text === "string") return obj.text;
+  const mediaPath = mediaPathFromPayload(obj);
   const rest = omitKeys(obj, ["timestamp", "messageId", "message_id"]);
-  if (Object.keys(rest).length === 0) return "";
+  const remaining = mediaPath
+    ? omitKeys(rest, [
+        "filePath",
+        "file_path",
+        "screenshotPath",
+        "screenshot_path",
+        "imagePath",
+        "image_path",
+        "path",
+      ])
+    : rest;
+  const omittedNotes = Object.values(remaining).filter(
+    (item): item is string => typeof item === "string" && item.startsWith("[omitted "),
+  );
+  const onlyOmitted =
+    Object.keys(remaining).length === 0 ||
+    Object.values(remaining).every(
+      (item) => typeof item === "string" && item.startsWith("[omitted "),
+    );
+  if (mediaPath && onlyOmitted) {
+    return omittedNotes.length > 0 ? `${mediaPath}\n${omittedNotes[0]}` : mediaPath;
+  }
+  if (Object.keys(rest).length === 0) return mediaPath || "";
   return formatPayload(rest);
 }
 
 function formatPayload(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (typeof value === "object") {
-    const obj = value as Record<string, unknown>;
+  const scrubbed = scrubGrokBotMediaPayload(value);
+  if (scrubbed == null) return "";
+  if (typeof scrubbed === "string") return scrubbed;
+  if (typeof scrubbed === "number" || typeof scrubbed === "boolean") return String(scrubbed);
+  if (typeof scrubbed === "object") {
+    const obj = scrubbed as Record<string, unknown>;
     if (typeof obj.message === "string") return obj.message;
     if (typeof obj.reason === "string") return obj.reason;
     if (typeof obj.error === "string") return obj.error;
     if (typeof obj.content === "string") return obj.content;
   }
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(scrubbed, null, 2);
   } catch {
     return "";
   }
@@ -588,8 +629,126 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function stringField(obj: Record<string, unknown>, key: string): string | undefined {
+  const value = obj[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 function namesMatch(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+const SUBAGENT_MAX_SCENES = 60;
+const SUBAGENT_PROMPT_CHARS = 500;
+const SUBAGENT_TEXT_CHARS = 1000;
+const SUBAGENT_THINKING_CHARS = 500;
+
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+type AttachedSubAgent = NonNullable<ToolUseBlock["_subAgent"]>;
+
+async function attachGrokBotSubAgents(
+  parsed: ProviderParseResult,
+  sourcePath?: string,
+): Promise<ProviderParseResult> {
+  if (!sourcePath) return parsed;
+  const parentId = basename(sourcePath, ".jsonl");
+  if (!parentId || parentId.startsWith(SAND_SUBAGENT_PREFIX)) return parsed;
+  const transcriptsRoot = dirname(dirname(sourcePath));
+  const summaries: NonNullable<ProviderParseResult["subAgentSummary"]> = [
+    ...(parsed.subAgentSummary || []),
+  ];
+
+  for (const turn of parsed.turns) {
+    for (const block of turn.blocks) {
+      if (block.type !== "tool_use" || block.name !== "Agent" || block._subAgent) continue;
+      const childId = findSandSubagentId(block.input) || findSandSubagentId(block._result);
+      if (!childId || childId === parentId) continue;
+      const childPath = join(transcriptsRoot, childId, `${childId}.jsonl`);
+      const content = await readFile(childPath, "utf-8").catch(() => null);
+      if (content == null) continue;
+      const child = parseGrokBotLines(content.split("\n"), { sourcePath: childPath });
+      const subAgent = subAgentFromParsed(child, block, childId);
+      block._subAgent = subAgent;
+      summaries.push({
+        agentId: subAgent.agentId,
+        agentType: subAgent.agentType,
+        ...(subAgent.description ? { description: subAgent.description } : {}),
+        toolCalls: subAgent.toolCalls,
+        ...(subAgent.model ? { model: subAgent.model } : {}),
+      });
+    }
+  }
+
+  if (summaries.length === 0) return parsed;
+  return { ...parsed, subAgentSummary: summaries };
+}
+
+function subAgentFromParsed(
+  child: ProviderParseResult,
+  parentBlock: ToolUseBlock,
+  childId: string,
+): AttachedSubAgent {
+  const input = parentBlock.input || {};
+  const agentType = normalizeSubAgentType(
+    typeof input.subagent_type === "string" && input.subagent_type.trim()
+      ? input.subagent_type
+      : "unknown",
+  );
+  const description =
+    typeof input.description === "string" && input.description.trim()
+      ? input.description.trim()
+      : undefined;
+  const prompt =
+    typeof input.prompt === "string" ? input.prompt.slice(0, SUBAGENT_PROMPT_CHARS) : "";
+
+  let toolCalls = 0;
+  let thinkingBlocks = 0;
+  let textResponses = 0;
+  const scenes: AttachedSubAgent["scenes"] = [];
+
+  for (const turn of child.turns) {
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks) {
+      if (block.type === "thinking") {
+        thinkingBlocks++;
+        scenes.push({
+          type: "thinking",
+          content: block.thinking.slice(0, SUBAGENT_THINKING_CHARS),
+          ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
+        });
+      } else if (block.type === "text") {
+        textResponses++;
+        scenes.push({
+          type: "text-response",
+          content: block.text.slice(0, SUBAGENT_TEXT_CHARS),
+          ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
+        });
+      } else if (block.type === "tool_use") {
+        toolCalls++;
+        scenes.push({
+          type: "tool-call",
+          toolName: block.name,
+          input: block.input,
+          result: (block._result || "").slice(0, SUBAGENT_TEXT_CHARS),
+          ...(block._hasResult !== undefined ? { hasResult: block._hasResult } : {}),
+          isError: block._isError || false,
+          ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
+          ...(block._durationMs ? { durationMs: block._durationMs } : {}),
+        });
+      }
+    }
+  }
+
+  return {
+    agentId: childId,
+    agentType,
+    ...(description ? { description } : {}),
+    prompt,
+    toolCalls,
+    thinkingBlocks,
+    textResponses,
+    scenes: scenes.length > SUBAGENT_MAX_SCENES ? scenes.slice(0, SUBAGENT_MAX_SCENES) : scenes,
+  };
 }
 
 export function countGrokBotDiscoveryStats(content: string): {
@@ -666,7 +825,8 @@ export function countGrokBotDiscoveryStats(content: string): {
     for (const block of asBlocks(record.message?.content)) {
       if (block.type !== "tool_use") continue;
       const name = typeof block.name === "string" ? block.name : "";
-      if (PROMOTED_TEXT_TOOLS.has(name.toLowerCase())) continue;
+      if (name.toLowerCase() === SEND_MESSAGE_TOOL) continue;
+      if (isGrokBotHiddenTool(name)) continue;
       toolCallCount++;
       if (isGrokBotEditTool(name)) editCountEst++;
     }

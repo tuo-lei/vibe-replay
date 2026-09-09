@@ -29,7 +29,7 @@ const GROUP_PREFIX_RE = /^\s*\[Group chat:/i;
 const HEADER_RE =
   /^\[Group chat:\s*(?:"([^"]+)"|“([^”]+)”|([^\]-]+?))(?:\s*-\s*with\s+([^\]]+))?\]\s*/i;
 const PARTICIPANT_PAIR_RE = /([^,()]+?)\s*\(([^)]*)\)/g;
-const MENTION_TOKEN_RE = /@([A-Za-z][\w.-]*)/g;
+const MENTION_TOKEN_RE = /@([\p{L}][\p{L}\p{N}_.-]*)/gu;
 const TURN_RECIPIENT_RE = /^It's your turn,\s*(.+?)(?:\.|$)/i;
 const NEW_MESSAGES_RE = /^New messages in the room\b/i;
 const NO_NEW_MESSAGES_RE = /^No new messages in the room\b/i;
@@ -204,7 +204,22 @@ export function groupHeaderSignature(wake: GrokBotGroupWake): string {
   return [wake.groupTitle.trim().toLowerCase(), ...participants].join("\0");
 }
 
+/**
+ * Compare speaker labels after stripping punctuation/emoji. Display names
+ * (`🧭旅游助手`) stay on the turn; merge/dedupe uses this letter+number key
+ * so a profile rename that only adds an emoji still matches.
+ */
+export function speakerIdentityKey(name: string): string {
+  return name
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLowerCase();
+}
+
 export function sameSpeakerName(left: string, right: string): boolean {
+  const leftKey = speakerIdentityKey(left);
+  const rightKey = speakerIdentityKey(right);
+  if (leftKey && rightKey) return leftKey === rightKey;
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
@@ -219,16 +234,17 @@ export function isHumanGroupSpeaker(name: string, botNames: string[] = []): bool
 export function normalizeGroupKey(title: string): string {
   return (
     title
+      .normalize("NFC")
       .trim()
       .toLowerCase()
       .replace(/['"]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
       .replace(/^-+|-+$/g, "") || "group"
   );
 }
 
 export function humanMessageKey(speaker: string, text: string): string {
-  return `${speaker.trim().toLowerCase()}\0${text.replace(/\s+/g, " ").trim().toLowerCase()}`;
+  return `${speakerIdentityKey(speaker) || speaker.trim().toLowerCase()}\0${text.replace(/\s+/g, " ").trim().toLowerCase()}`;
 }
 
 export function groupWakeBotNames(wake: GrokBotGroupWake): string[] {
@@ -340,7 +356,9 @@ function findSpeaker(
     }
   }
 
-  const fallback = /^([A-Z][\w .'-]{0,60}?)\s*:\s+(.*)$/.exec(line);
+  const fallback = /^([\p{L}\p{N}\p{M}\p{S}][\p{L}\p{N}\p{M}\p{S} .'_-]{0,60}?)\s*:\s+(.*)$/u.exec(
+    line,
+  );
   if (!fallback) return null;
   const name = fallback[1].trim();
   if (!looksLikeSpeakerName(name)) return null;
@@ -351,7 +369,9 @@ function looksLikeSpeakerName(name: string): boolean {
   if (name.length < 1 || name.length > 60) return false;
   if (RESERVED_SPEAKERS.has(name.toLowerCase())) return false;
   if (/[.?!]$/.test(name)) return false;
-  return /^[A-Z][A-Za-z0-9]*(?:[ _-][A-Z][A-Za-z0-9]*)*$/.test(name);
+  const letters = speakerIdentityKey(name);
+  if (!letters) return false;
+  return /^[\p{L}\p{N}\p{M}\p{S}][\p{L}\p{N}\p{M}\p{S} .'_-]*$/u.test(name);
 }
 
 function startsWithInsensitive(line: string, prefix: string): boolean {
