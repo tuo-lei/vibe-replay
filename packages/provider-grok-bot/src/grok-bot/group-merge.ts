@@ -271,7 +271,7 @@ export function mergeGrokBotGroupParses(
   const notes = [
     `Merged ${usable.length} sibling Grok Bot transcripts for group "${groupTitle || "room"}" (${ownerLabel}).`,
     "Peer messages use each agent's own send_message / tools / scratch; injected wake copies are dropped when that peer's JSONL is present.",
-    "Assistant text blocks are private scratch (thinking); send_message and successful communicate_update stay visible replies.",
+    "Assistant text blocks are private scratch (thinking); send_message stays the visible reply. communicate_update is a status tool scene.",
   ];
 
   const parseWarnings = usable.flatMap((member) => member.parsed.parseWarnings || []);

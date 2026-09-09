@@ -9,9 +9,19 @@
  *   [inbound]  channel wrap; remaining body is the inbound message (prompt)
  *   [Answering your question tbs1: "…"] → context-injection; trailing text
  *              after the wrapper is a follow-up prompt when present
+ *   [A background task just completed] → context-injection (not a user chat)
+ *   [first run] → skip (bootstrap; often also wrapped in SAND_HIDDEN_PROMPT)
+ *   <<SAND_AGENT_PROFILE_UPDATE…>> → skip / strip; not a prompt
  */
 
-export type GrokBotMetaLabel = "routine" | "agent" | "inbound" | "answering-question";
+export type GrokBotMetaLabel =
+  | "routine"
+  | "agent"
+  | "inbound"
+  | "answering-question"
+  | "background-task"
+  | "first-run"
+  | "profile-update";
 
 export interface GrokBotMetaWake {
   label: GrokBotMetaLabel;
@@ -31,10 +41,35 @@ export type ClassifiedGrokBotUserWake =
 const META_TAG_RE = /^\s*\[(routine|agent|inbound)\]\s*/i;
 const ANSWERING_RE =
   /^\s*\[Answering your question\s+([^\]:]+):\s*(?:"([^"]*)"|“([^”]*)”|'([^']*)')\]\s*/i;
+const BACKGROUND_TASK_RE = /^\s*\[A background task just completed\]\s*/i;
+const FIRST_RUN_RE = /^\s*\[first run\]\s*/i;
+export function stripGrokBotProfileUpdate(text: string): string {
+  return text.replace(/<<SAND_AGENT_PROFILE_UPDATE[\s\S]*?>>/gi, "").trim();
+}
+
+function hasProfileUpdate(text: string): boolean {
+  return /<<SAND_AGENT_PROFILE_UPDATE/i.test(text);
+}
 
 export function parseGrokBotMetaWake(text: string): GrokBotMetaWake | null {
   const trimmed = text.replace(/^\uFEFF/, "").trim();
   if (!trimmed) return null;
+
+  const firstRun = FIRST_RUN_RE.exec(trimmed);
+  if (firstRun) {
+    return {
+      label: "first-run",
+      body: trimmed.slice(firstRun[0].length).trim(),
+    };
+  }
+
+  const background = BACKGROUND_TASK_RE.exec(trimmed);
+  if (background) {
+    return {
+      label: "background-task",
+      body: trimmed.slice(background[0].length).trim(),
+    };
+  }
 
   const answering = ANSWERING_RE.exec(trimmed);
   if (answering) {
@@ -57,8 +92,28 @@ export function parseGrokBotMetaWake(text: string): GrokBotMetaWake | null {
 }
 
 export function classifyGrokBotUserWake(text: string): ClassifiedGrokBotUserWake | null {
-  const wake = parseGrokBotMetaWake(text);
-  if (!wake) return null;
+  const trimmed = text.replace(/^\uFEFF/, "").trim();
+  const stripped = stripGrokBotProfileUpdate(trimmed);
+  if (hasProfileUpdate(trimmed) && !stripped) return { kind: "skip" };
+  const source = stripped || trimmed;
+
+  const wake = parseGrokBotMetaWake(source);
+  if (!wake) {
+    if (stripped && stripped !== trimmed) return { kind: "prompt", text: stripped };
+    return null;
+  }
+
+  if (wake.label === "first-run") return { kind: "skip" };
+
+  if (wake.label === "background-task") {
+    const header = "Background task completed";
+    if (!wake.body) return { kind: "context-injection", text: header, label: "background-task" };
+    return {
+      kind: "context-injection",
+      text: `${header}:\n${wake.body}`,
+      label: "background-task",
+    };
+  }
 
   if (wake.label === "inbound") {
     if (!wake.body) return { kind: "skip" };
@@ -93,7 +148,8 @@ export function formatAnsweringHeader(wake: GrokBotMetaWake): string {
 
 /** Remainder after peeling one meta tag — used so `[routine]\\n[Group chat:` still splits. */
 export function peelGrokBotMetaTag(text: string): { rest: string; wake: GrokBotMetaWake } | null {
-  const wake = parseGrokBotMetaWake(text);
+  const stripped = stripGrokBotProfileUpdate(text);
+  const wake = parseGrokBotMetaWake(stripped || text);
   if (!wake) return null;
   return { rest: wake.body, wake };
 }

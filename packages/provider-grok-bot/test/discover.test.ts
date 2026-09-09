@@ -460,6 +460,73 @@ It's your turn, Vibe Replay GTM.`,
     expect(sessions[0].firstPrompt).not.toContain("[routine]");
   });
 
+  it("does not use a background-task wake as firstPrompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-grok-bot-bg-task-"));
+    tempDirs.push(root);
+    await writeSession(root, "77777777-7777-4777-8777-777777777777", [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "[A background task just completed]\nLong recap that must not be the Explore prompt.",
+            },
+          ],
+        },
+      },
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "[t0u]\nDraw a cat" }] },
+      },
+    ]);
+
+    const sessions = await discoverGrokBotSessions([root], false);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      promptCount: 1,
+      firstPrompt: "Draw a cat",
+    });
+    expect(sessions[0].firstPrompt).not.toContain("background task");
+    expect(sessions[0].firstPrompt).not.toContain("Long recap");
+  });
+
+  it("keeps CJK group titles as merge keys instead of collapsing to group", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-grok-bot-cjk-group-"));
+    tempDirs.push(root);
+    const travelId = "88888888-8888-4888-8888-888888888888";
+    const artistId = "99999999-9999-4999-8999-999999999999";
+    const wake = (recipient: string) =>
+      `[Group chat: "周末出行" - with 🧭旅游助手]
+Participants: 🧭旅游助手 (travel) 艺术家 (artist)
+New messages in the room (oldest first):
+User: 一起画画
+It's your turn, ${recipient}.`;
+    await writeSession(root, travelId, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: wake("🧭旅游助手") }] },
+      },
+    ]);
+    await writeSession(root, artistId, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: wake("艺术家") }] },
+      },
+    ]);
+
+    const sessions = await discoverGrokBotSessions([root], false);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "group-周末出行",
+      slug: "group-周末出行",
+      title: "Group: 周末出行",
+      firstPrompt: "一起画画",
+    });
+    expect(sessions[0].sessionId).not.toBe("group-group");
+    expect(sessions[0].filePaths).toHaveLength(2);
+  });
+
   it("prefers profile.json name for a non-group DM and labels subagents without a profile", async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-dm-title-"));
     tempDirs.push(dataRoot);
