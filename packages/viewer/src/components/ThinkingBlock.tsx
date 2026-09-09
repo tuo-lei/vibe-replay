@@ -15,6 +15,8 @@ interface Props {
   tokens?: number;
   highlights?: TextHighlight[];
   onHighlightClick?: (annotationId: string) => void;
+  /** Grok Bot maps private scratch onto thinking scenes; those use "Scratch". */
+  label?: string;
 }
 
 export default memo(function ThinkingBlock({
@@ -23,6 +25,7 @@ export default memo(function ThinkingBlock({
   tokens,
   highlights = NO_HIGHLIGHTS,
   onHighlightClick,
+  label = "Thinking",
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const tokenLabel = formatTokens(tokens);
@@ -40,7 +43,7 @@ export default memo(function ThinkingBlock({
         className="flex items-center gap-2 text-xs text-terminal-dim hover:text-terminal-text transition-colors duration-200 ease-material font-mono"
       >
         <span className={`transition-transform ${expanded ? "rotate-90" : ""}`}>{"▶"}</span>
-        <span className={`text-terminal-purple ${isActive ? "animate-pulse" : ""}`}>Thinking</span>
+        <span className={`text-terminal-purple ${isActive ? "animate-pulse" : ""}`}>{label}</span>
         {tokenLabel ? (
           <span
             className="text-terminal-purple/70 text-[10px]"

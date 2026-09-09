@@ -267,7 +267,7 @@ describe("Grok Bot parser", () => {
         text: { content: "Visible DM reply" },
         attachments: [{ url: "https://example.invalid/card.png", title: "card" }],
       }),
-    ).toBe("Visible DM reply");
+    ).toBe("Visible DM reply\n[attachment: card (card.png)]");
     expect(extractStatusUpdateText({ update: "Scanning inbox…" })).toBe("Scanning inbox…");
   });
 
@@ -285,7 +285,8 @@ describe("Grok Bot parser", () => {
       .flatMap((turn) => turn.blocks)
       .filter((block) => block.type === "text")
       .map((block) => (block.type === "text" ? block.text : ""));
-    expect(assistantText).toContain("Hey — good to meet you.");
+    expect(assistantText.some((text) => text.includes("Hey — good to meet you."))).toBe(true);
+    expect(assistantText.some((text) => text.includes("[attachment: card.png]"))).toBe(true);
     expect(assistantText).not.toContain("Checking the badge copy now.");
     expect(assistantText).toContain("Badge copy looks good.");
     expect(assistantText.some((text) => text.includes("example.invalid"))).toBe(false);
@@ -299,6 +300,10 @@ describe("Grok Bot parser", () => {
       "TodoWrite",
       "Bash",
     ]);
+    expect(tools[0]).toMatchObject({
+      name: "CommunicateUpdate",
+      input: { update: "Checking the badge copy now." },
+    });
     expect(tools[2]).toMatchObject({
       name: "TodoWrite",
       input: {
@@ -499,7 +504,7 @@ describe("Grok Bot parser", () => {
     expect(tools.map((block) => (block.type === "tool_use" ? block.name : ""))).toEqual([
       "Await",
       "Agent",
-      "mcp",
+      "mcp__github__pull_request_read",
       "ComputerUse",
       "WebSearch",
     ]);
@@ -512,7 +517,7 @@ describe("Grok Bot parser", () => {
       },
     });
     expect(tools[2]).toMatchObject({
-      name: "mcp",
+      name: "mcp__github__pull_request_read",
       input: { server: "github", toolName: "pull_request_read", tool: "pull_request_read" },
       _mcpServer: "github",
       _mcpTool: "pull_request_read",
@@ -673,9 +678,11 @@ describe("Grok Bot parser", () => {
       name: "CommunicateUpdate",
       _isError: true,
       _result: "delivery failed",
+      input: { update: "This ping never landed." },
     });
     expect(tools[1]).toMatchObject({
       name: "CommunicateUpdate",
+      input: { update: "Still working." },
     });
     expect(tools[1].type === "tool_use" && tools[1]._isError).toBeUndefined();
     const texts = parsed.turns
@@ -869,10 +876,10 @@ describe("Grok Bot parser", () => {
       },
     };
     expect(extractSendMessageText(input)).toBe(
-      "See [image: sketch — /home/box/agent-data/attachments/cat.png] and the rest.",
+      "See [attached image: sketch (cat.png)] and the rest.",
     );
     expect(rewriteGrokBotShareableText("![x](file:///home/box/agent-data/assets/a.png)")).toBe(
-      "[image: x — /home/box/agent-data/assets/a.png]",
+      "[attached image: x (a.png)]",
     );
     const parsed = parseGrokBotLines([
       JSON.stringify({
@@ -884,7 +891,7 @@ describe("Grok Bot parser", () => {
     ]);
     expect(parsed.turns[0].blocks[0]).toEqual({
       type: "text",
-      text: "See [image: sketch — /home/box/agent-data/attachments/cat.png] and the rest.",
+      text: "See [attached image: sketch (cat.png)] and the rest.",
     });
   });
 
@@ -1050,6 +1057,12 @@ describe("Grok Bot tool mapping", () => {
       new_string: "b",
     });
     expect(
+      grokBotReplayToolName("mcp", {
+        server: "github",
+        toolName: "pull_request_read",
+      }),
+    ).toBe("mcp__github__pull_request_read");
+    expect(
       grokBotReplayToolName("pull_request_read", {
         serverIdentifier: "github",
         toolName: "pull_request_read",
@@ -1065,6 +1078,16 @@ describe("Grok Bot tool mapping", () => {
       server: "github",
       tool: "pull_request_read",
       pullNumber: 544,
+    });
+    expect(
+      mapGrokBotToolArgs("communicate_update", {
+        text: { content: "Checking the badge copy now." },
+      }),
+    ).toMatchObject({
+      update: "Checking the badge copy now.",
+    });
+    expect(mapGrokBotToolArgs("communicate_update", { update: "Scanning inbox…" })).toMatchObject({
+      update: "Scanning inbox…",
     });
   });
 });

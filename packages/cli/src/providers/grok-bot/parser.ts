@@ -1,1 +1,5 @@
-export { parseGrokBotLines, parseGrokBotSession } from "@vibe-replay/provider-grok-bot/parser";
+export {
+  attachGrokBotSubAgents,
+  parseGrokBotLines,
+  parseGrokBotSession,
+} from "@vibe-replay/provider-grok-bot/parser";

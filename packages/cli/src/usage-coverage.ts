@@ -96,7 +96,9 @@ function providerNotes(provider: string): string[] | undefined {
     ];
   }
   if (provider === "grok-bot") {
-    return ["Grok Bot JSONL does not record token usage or thinking blobs in v1."];
+    return [
+      "Grok Bot JSONL does not record token usage in v1; assistant text is private scratch shown as thinking.",
+    ];
   }
   if (provider === "claude-code" || provider === "claude-desktop") {
     return [

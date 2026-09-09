@@ -21,9 +21,12 @@ import {
 } from "./group-merge.js";
 import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
 import {
+  formatAttachedImageMention,
+  grokBotPathBasename,
   mediaPathFromPayload,
   rewriteGrokBotShareableText,
   scrubGrokBotMediaPayload,
+  stripFileUrl,
 } from "./media.js";
 import {
   grokBotMcpAttribution,
@@ -61,7 +64,13 @@ export {
 } from "./group-merge.js";
 export { classifyGrokBotUserWake, parseGrokBotMetaWake, peelGrokBotMetaTag } from "./meta-wake.js";
 export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
-export { rewriteGrokBotShareableText, scrubGrokBotMediaPayload } from "./media.js";
+export {
+  formatAttachedImageMention,
+  grokBotPathBasename,
+  rewriteGrokBotShareableText,
+  scrubGrokBotMediaPayload,
+  stripFileUrl,
+} from "./media.js";
 export { findSandSubagentId } from "./subagent.js";
 
 export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
@@ -355,7 +364,7 @@ export function parseGrokBotLines(
     "sand-subagent transcripts stay discoverable as their own sessions; parent `task` calls attach a child-run card when the result names a sibling id.",
     "Group-chat wakes split into a room context-injection, human user turns, and assistant-side turns for other bots. Sibling transcripts that share the room title merge into one timeline.",
     "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection; background-task wakes are context-injection.",
-    "generate_image / computer_use results keep filePath/screenshotPath and omit embedded imageData. file:// markdown images in send_message are rewritten to a path mention and are not bundled into shareable HTML.",
+    "generate_image / computer_use results keep filePath/screenshotPath and omit embedded imageData. file:// markdown images and send_message attachments become basename mentions and are not bundled into shareable HTML.",
   ];
 
   return {
@@ -396,7 +405,42 @@ export function stripUserDecorators(text: string): string {
 
 export function extractSendMessageText(input: unknown, depth = 0): string {
   const raw = extractSendMessageTextRaw(input, depth);
-  return depth === 0 ? rewriteGrokBotShareableText(raw) : raw;
+  if (depth !== 0) return raw;
+  const rewritten = rewriteGrokBotShareableText(raw);
+  const attachments = formatSendMessageAttachments(input);
+  if (!attachments) return rewritten;
+  if (!rewritten.trim()) return attachments;
+  if (rewritten.includes("[attached image:") || rewritten.includes("[attachment:")) {
+    return rewritten;
+  }
+  return `${rewritten}\n${attachments}`;
+}
+
+function formatSendMessageAttachments(input: unknown): string {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
+  const attachments = (input as Record<string, unknown>).attachments;
+  if (!Array.isArray(attachments) || attachments.length === 0) return "";
+  const mentions: string[] = [];
+  for (const item of attachments) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const obj = item as Record<string, unknown>;
+    const url = firstString(obj.url, obj.path, obj.filePath, obj.file_path, obj.src);
+    const title = firstString(obj.title, obj.name, obj.alt, obj.filename, obj.fileName);
+    if (url && (/^file:/i.test(url) || /^data:image\//i.test(url))) {
+      mentions.push(formatAttachedImageMention(title || "", url));
+      continue;
+    }
+    if (url) {
+      const path = stripFileUrl(url);
+      const base = grokBotPathBasename(path);
+      mentions.push(
+        title && title !== base ? `[attachment: ${title} (${base})]` : `[attachment: ${base}]`,
+      );
+      continue;
+    }
+    if (title) mentions.push(`[attachment: ${title}]`);
+  }
+  return mentions.join("\n");
 }
 
 function extractSendMessageTextRaw(input: unknown, depth = 0): string {
@@ -646,7 +690,7 @@ const SUBAGENT_THINKING_CHARS = 500;
 type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
 type AttachedSubAgent = NonNullable<ToolUseBlock["_subAgent"]>;
 
-async function attachGrokBotSubAgents(
+export async function attachGrokBotSubAgents(
   parsed: ProviderParseResult,
   sourcePath?: string,
 ): Promise<ProviderParseResult> {

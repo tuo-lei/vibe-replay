@@ -7,7 +7,7 @@ import { streamSSE } from "hono/streaming";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { parseClaudeCodeLines } from "../providers/claude-code/parser.js";
 import { parseCodexLines } from "../providers/codex/parser.js";
-import { parseGrokBotLines } from "../providers/grok-bot/parser.js";
+import { attachGrokBotSubAgents, parseGrokBotLines } from "../providers/grok-bot/parser.js";
 import { parsePiLines } from "../providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
@@ -35,7 +35,8 @@ export async function parseJsonlLiveSession(
     return parseCodexLines(lines, sessionInfo, paths);
   }
   if (providerName === "grok-bot") {
-    return parseGrokBotLines(lines, { sourcePath: paths[0], sessionInfo });
+    const parsed = parseGrokBotLines(lines, { sourcePath: paths[0], sessionInfo });
+    return attachGrokBotSubAgents(parsed, paths[0]);
   }
   return parsePiLines(lines, { sourcePath: paths[0], sessionInfo });
 }
