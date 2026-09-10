@@ -99,7 +99,7 @@ export async function loadBundledGrokBotSampleSession(): Promise<SessionInfo | n
     firstPrompt: BUNDLED_GROK_BOT_SAMPLE_FIRST_PROMPT,
     prompts: [BUNDLED_GROK_BOT_SAMPLE_FIRST_PROMPT],
     promptCount: 1,
-    toolCallCount: 1,
+    toolCallCount: 2,
     durationMsEst: 4000,
   };
 }

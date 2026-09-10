@@ -105,11 +105,16 @@ describe("bundled Grok Bot sample", () => {
     expect(sample?.title).toBe("Sample: Grok Bot Eng+GTM");
     expect(sample?.provider).toBe("grok-bot");
     expect(sample?.promptCount).toBe(1);
+    expect(sample?.toolCallCount).toBe(2);
     expect(sample?.firstPrompt).toBe("Show me what a Grok Bot replay looks like.");
+    expect(sample?.timestamp).toBe("2026-09-01T12:00:10.000Z");
     expect(isBundledSampleSession(sample!)).toBe(true);
     const text = await readFile(path!, "utf-8");
     expect(text).not.toMatch(/data:image\/[^;]+;base64,/);
     expect(text.length).toBeLessThan(4_000);
+    expect(text).toContain('"timestamp":"1788264010000"');
+    expect(text).toContain('"timestamp":"1788264014000"');
+    expect(new Date(1_788_264_010_000).toISOString()).toBe("2026-09-01T12:00:10.000Z");
   });
 
   it("discovers the grok sample when transcript roots are empty", async () => {
