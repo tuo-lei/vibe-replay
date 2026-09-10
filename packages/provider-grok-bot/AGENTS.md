@@ -75,8 +75,10 @@ Sand builtins map onto the viewer vocabulary in `tool-mapping.ts`: `read`→`Rea
 `computer_use`→`ComputerUse`, `generate_image`→`GenerateImage`, plus the usual
 web/edit aliases. `get_mcp_tools` is discovery noise and is omitted from scenes.
 `mcp` and dynamic MCP short names (`pull_request_read`, `search_analytics_query`)
-plus `serverIdentifier` / `providerIdentifier` / `toolName` / `args` become
-`mcp__<server>__<tool>` cards with `_mcpServer` / `_mcpTool`.
+plus top-level `serverIdentifier` / `providerIdentifier` / `server` /
+`toolName` / `tool` become `mcp__<server>__<tool>` cards with `_mcpServer` /
+`_mcpTool`. Nested `args` is the tool payload only — identifiers found only
+there (including after flatten) do not attribute a call as MCP.
 
 ## Group chat
 
@@ -91,6 +93,10 @@ Do **not** treat the blob as one human prompt.
 - Other bots are `role: "assistant"` with `speaker` set (Eng, GTM, 艺术家, …).
   Display names (including emoji/CJK) are labels; merge/dedupe keys strip
   punctuation/emoji so `🧭旅游助手` matches `旅游助手`
+- Unknown `Name: text` fallback labels: CJK/emoji/uppercase stay valid; lowercase
+  Latin display names of 2–3 alphabetic words (`john smith`) are speakers;
+  one-word lowercase Latin (`hello: text`), longer phrases, or function-word
+  prose (`one thing to note`) stay in the previous turn
 - Drop procedural cues: `It's your turn…`, `The room is wrapping up…`,
   `The conversation is wrapping up…`, `Waiting for participants…`,
   `No new messages in the room…` (empty wakes are not prompts)
