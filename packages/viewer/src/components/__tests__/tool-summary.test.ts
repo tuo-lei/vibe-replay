@@ -85,6 +85,8 @@ describe("summarizeInput", () => {
       "Scanning inbox…",
     );
     expect(summarizeInput("CommunicateUpdate", { text: { content: "hidden nested" } })).toBe("");
+    const long = `Scanning inbox ${"x".repeat(100)}`;
+    expect(summarizeInput("CommunicateUpdate", { update: long })).toBe(long.slice(0, 80));
   });
 });
 

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  extractSendMessageText,
   formatAttachedImageMention,
   grokBotPathBasename,
   parseGrokBotLines,
@@ -162,6 +163,67 @@ describe("Grok Bot parser edges", () => {
     expect(rewriteGrokBotShareableText("![x](file:///home/box/a.png)")).toBe(
       "[attached image: x (a.png)]",
     );
+  });
+
+  it("strips signed URL query/fragment and data-image payloads from attachment mentions", () => {
+    const signed = "https://cdn.example/assets/image.png?token=SECRET&exp=99#frag";
+    expect(formatAttachedImageMention("sketch", signed)).toBe(
+      "[attached image: sketch (image.png)]",
+    );
+    expect(formatAttachedImageMention("sketch", signed)).not.toContain("SECRET");
+    expect(formatAttachedImageMention("sketch", signed)).not.toContain("token=");
+    expect(extractSendMessageText({ attachments: [{ url: signed, title: "sketch" }] })).toBe(
+      "[attachment: sketch (image.png)]",
+    );
+    expect(
+      extractSendMessageText({ attachments: [{ url: signed, title: "sketch" }] }),
+    ).not.toContain("SECRET");
+
+    const dataUrl = "data:image/png,not-a-base64-payload-that-must-not-leak";
+    expect(formatAttachedImageMention("pic", dataUrl)).toBe("[attached image: pic (embedded)]");
+    expect(formatAttachedImageMention("pic", dataUrl)).not.toContain("not-a-base64");
+    expect(extractSendMessageText({ attachments: [{ url: dataUrl, title: "pic" }] })).not.toContain(
+      "not-a-base64",
+    );
+  });
+
+  it("keeps extra attachments when reply text already has one image mention", () => {
+    const text = extractSendMessageText({
+      text: {
+        content: "See ![sketch](<file:///home/box/agent-data/attachments/cat.png>)",
+      },
+      attachments: [
+        { url: "file:///home/box/agent-data/attachments/cat.png", title: "sketch" },
+        { url: "https://cdn.example/notes.txt", title: "notes" },
+      ],
+    });
+    expect(text).toBe("See [attached image: sketch (cat.png)]\n[attachment: notes (notes.txt)]");
+    expect(text).toContain("[attachment: notes (notes.txt)]");
+    expect(text.match(/\[attached image: sketch \(cat\.png\)\]/g)).toHaveLength(1);
+  });
+
+  it("keeps same-basename attachments from different paths and distinct data images", () => {
+    const text = extractSendMessageText({
+      text: { content: "See ![sketch](<file:///home/box/a/cat.png>)" },
+      attachments: [
+        { url: "file:///home/box/a/cat.png", title: "sketch" },
+        { url: "file:///home/box/b/cat.png", title: "other cat" },
+        { url: "https://cdn.example/dir1/notes.txt", title: "notes" },
+        { url: "https://cdn.example/dir2/notes.txt", title: "other notes" },
+        { url: "data:image/png,payload-one", title: "pic" },
+        { url: "data:image/png,payload-two", title: "diagram" },
+        { url: "file:///home/box/b/cat.png", title: "other cat" },
+      ],
+    });
+    expect(text).toContain("[attached image: sketch (cat.png)]");
+    expect(text).toContain("[attached image: other cat (cat.png)]");
+    expect(text).toContain("[attachment: notes (notes.txt)]");
+    expect(text).toContain("[attachment: other notes (notes.txt)]");
+    expect(text).toContain("[attached image: pic (embedded)]");
+    expect(text).toContain("[attached image: diagram (embedded)]");
+    expect(text.match(/\[attached image: other cat \(cat\.png\)\]/g)).toHaveLength(1);
+    expect(text).not.toContain("payload-one");
+    expect(text).not.toContain("payload-two");
   });
 
   it("promotes attachment-only send_message instead of dropping the turn", () => {

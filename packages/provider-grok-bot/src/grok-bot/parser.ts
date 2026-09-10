@@ -22,7 +22,9 @@ import {
 import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
 import {
   formatAttachedImageMention,
+  grokBotAttachmentIdentity,
   grokBotPathBasename,
+  grokBotShareableMediaIdentities,
   mediaPathFromPayload,
   rewriteGrokBotShareableText,
   scrubGrokBotMediaPayload,
@@ -412,40 +414,46 @@ export function extractSendMessageText(input: unknown, depth = 0): string {
   const raw = extractSendMessageTextRaw(input, depth);
   if (depth !== 0) return raw;
   const rewritten = rewriteGrokBotShareableText(raw);
-  const attachments = formatSendMessageAttachments(input);
-  if (!attachments) return rewritten;
-  if (!rewritten.trim()) return attachments;
-  if (rewritten.includes("[attached image:") || rewritten.includes("[attachment:")) {
-    return rewritten;
+  const attachments = collectSendMessageAttachments(input);
+  if (attachments.length === 0) return rewritten;
+  const seen = grokBotShareableMediaIdentities(raw);
+  const extra: string[] = [];
+  for (const item of attachments) {
+    if (item.identity && seen.has(item.identity)) continue;
+    if (item.identity) seen.add(item.identity);
+    extra.push(item.mention);
   }
-  return `${rewritten}\n${attachments}`;
+  if (extra.length === 0) return rewritten;
+  if (!rewritten.trim()) return extra.join("\n");
+  return `${rewritten}\n${extra.join("\n")}`;
 }
 
-function formatSendMessageAttachments(input: unknown): string {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
+function collectSendMessageAttachments(input: unknown): { mention: string; identity: string }[] {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return [];
   const attachments = (input as Record<string, unknown>).attachments;
-  if (!Array.isArray(attachments) || attachments.length === 0) return "";
-  const mentions: string[] = [];
+  if (!Array.isArray(attachments) || attachments.length === 0) return [];
+  const out: { mention: string; identity: string }[] = [];
   for (const item of attachments) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const obj = item as Record<string, unknown>;
     const url = firstString(obj.url, obj.path, obj.filePath, obj.file_path, obj.src);
     const title = firstString(obj.title, obj.name, obj.alt, obj.filename, obj.fileName);
+    const identity = grokBotAttachmentIdentity(url, title);
     if (url && (/^file:/i.test(url) || /^data:image\//i.test(url))) {
-      mentions.push(formatAttachedImageMention(title || "", url));
+      out.push({ mention: formatAttachedImageMention(title || "", url), identity });
       continue;
     }
     if (url) {
       const path = stripFileUrl(url);
       const base = grokBotPathBasename(path);
-      mentions.push(
-        title && title !== base ? `[attachment: ${title} (${base})]` : `[attachment: ${base}]`,
-      );
+      const mention =
+        title && title !== base ? `[attachment: ${title} (${base})]` : `[attachment: ${base}]`;
+      out.push({ mention, identity });
       continue;
     }
-    if (title) mentions.push(`[attachment: ${title}]`);
+    if (title) out.push({ mention: `[attachment: ${title}]`, identity });
   }
-  return mentions.join("\n");
+  return out;
 }
 
 function extractSendMessageTextRaw(input: unknown, depth = 0): string {

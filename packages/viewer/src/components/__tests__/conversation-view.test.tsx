@@ -286,4 +286,36 @@ describe("ConversationView assistant metrics", () => {
     expect(screen.getByText("You")).toBeTruthy();
     expect(screen.getByText("艺术家")).toBeTruthy();
   });
+
+  it("truncates batched CommunicateUpdate summaries to 80 characters", () => {
+    const update = `Scanning inbox ${"x".repeat(100)}`;
+    const toolScenes: Scene[] = [
+      { type: "user-prompt", content: "go" },
+      {
+        type: "tool-call",
+        toolName: "CommunicateUpdate",
+        input: { update },
+        result: "",
+      },
+      {
+        type: "tool-call",
+        toolName: "CommunicateUpdate",
+        input: { update: "still going" },
+        result: "",
+      },
+    ];
+    render(
+      <ConversationView
+        scenes={toolScenes}
+        visibleCount={toolScenes.length}
+        currentIndex={2}
+        effectivePrefs={prefs(false)}
+      />,
+    );
+
+    expect(screen.getByText("CommunicateUpdate")).toBeTruthy();
+    expect(screen.getByText(/2 calls/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${update.slice(0, 80)}`))).toBeTruthy();
+    expect(screen.queryByText(update)).toBeNull();
+  });
 });

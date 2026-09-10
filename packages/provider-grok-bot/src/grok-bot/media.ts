@@ -32,7 +32,7 @@ const PATH_KEYS = new Set([
 
 const MARKDOWN_FILE_IMAGE_RE =
   /!\[([^\]]*)\]\(\s*<?(file:\/\/[^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/gi;
-const MARKDOWN_DATA_IMAGE_RE = /!\[([^\]]*)\]\(\s*data:image\/[^)]+\)/gi;
+const MARKDOWN_DATA_IMAGE_RE = /!\[([^\]]*)\]\(\s*(data:image\/[^)]+)\)/gi;
 const DATA_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,/i;
 
 export function omittedMediaPlaceholder(label: string, length: number): string {
@@ -115,6 +115,8 @@ export function formatAttachedImageMention(alt: string, urlOrPath: string): stri
  * in shareable HTML. Local files are not inlined.
  */
 export function rewriteGrokBotShareableText(text: string): string {
+  MARKDOWN_FILE_IMAGE_RE.lastIndex = 0;
+  MARKDOWN_DATA_IMAGE_RE.lastIndex = 0;
   return text
     .replace(MARKDOWN_FILE_IMAGE_RE, (_match, alt: string, url: string) =>
       formatAttachedImageMention(alt, url),
@@ -127,7 +129,9 @@ export function rewriteGrokBotShareableText(text: string): string {
 
 export function stripFileUrl(url: string): string {
   const trimmed = url.trim();
-  if (DATA_URL_RE.test(trimmed)) return "embedded";
+  // Any data-image URL (base64 or not) would dump payload into replay text.
+  if (/^data:image\//i.test(trimmed)) return "embedded";
+  if (/^https?:\/\//i.test(trimmed)) return remoteUrlPath(trimmed);
   let path = trimmed;
   // Windows drive: file:///C:/Users/... or file:///C|\Users\...
   path = path.replace(/^file:\/\/\/([A-Za-z]):/i, "$1:");
@@ -139,4 +143,75 @@ export function stripFileUrl(url: string): string {
   } catch {
     return path;
   }
+}
+
+/** Pathname only — signed query/fragment tokens must not enter shareable replays. */
+function remoteUrlPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    try {
+      return decodeURIComponent(parsed.pathname);
+    } catch {
+      return parsed.pathname;
+    }
+  } catch {
+    const cut = trimmedQueryAndFragment(url);
+    try {
+      return decodeURIComponent(cut);
+    } catch {
+      return cut;
+    }
+  }
+}
+
+function trimmedQueryAndFragment(url: string): string {
+  const hash = url.indexOf("#");
+  const query = url.indexOf("?");
+  const end =
+    hash >= 0 && query >= 0 ? Math.min(hash, query) : hash >= 0 ? hash : query >= 0 ? query : -1;
+  return end >= 0 ? url.slice(0, end) : url;
+}
+
+/**
+ * Dedup key for a send_message attachment. Uses the full sanitized path or
+ * origin+pathname (query/fragment stripped), not the display basename, so
+ * `/a/notes.txt` and `/b/notes.txt` stay distinct. Data-image payloads are
+ * keyed by the URL itself and never copied into replay text.
+ */
+export function grokBotAttachmentIdentity(url?: string, title?: string): string {
+  const trimmedUrl = url?.trim() ?? "";
+  const trimmedTitle = title?.trim() ?? "";
+  if (trimmedUrl && /^data:image\//i.test(trimmedUrl)) return `data:${trimmedUrl}`;
+  if (trimmedUrl && /^https?:\/\//i.test(trimmedUrl)) {
+    try {
+      const parsed = new URL(trimmedUrl);
+      return `url:${parsed.origin}${parsed.pathname}`.toLowerCase();
+    } catch {
+      return `url:${stripFileUrl(trimmedUrl).toLowerCase()}`;
+    }
+  }
+  if (trimmedUrl) {
+    return `path:${stripFileUrl(trimmedUrl)
+      .replace(/[\\/]+$/, "")
+      .toLowerCase()}`;
+  }
+  if (trimmedTitle) return `title:${trimmedTitle.toLowerCase()}`;
+  return "";
+}
+
+/** Source identities already present as markdown images in the reply body. */
+export function grokBotShareableMediaIdentities(text: string): Set<string> {
+  MARKDOWN_FILE_IMAGE_RE.lastIndex = 0;
+  MARKDOWN_DATA_IMAGE_RE.lastIndex = 0;
+  const ids = new Set<string>();
+  for (const match of text.matchAll(MARKDOWN_FILE_IMAGE_RE)) {
+    const url = match[2];
+    if (url) ids.add(grokBotAttachmentIdentity(url));
+  }
+  for (const match of text.matchAll(MARKDOWN_DATA_IMAGE_RE)) {
+    const url = match[2];
+    const alt = match[1];
+    if (url) ids.add(grokBotAttachmentIdentity(url, alt));
+  }
+  return ids;
 }
