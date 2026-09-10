@@ -8,6 +8,7 @@ import {
   extractSendMessageText,
   extractStatusUpdateText,
   findSandSubagentId,
+  isSandSubagentSessionId,
   parseGrokBotLines,
   parseGrokBotSession,
   rewriteGrokBotShareableText,
@@ -1017,6 +1018,8 @@ describe("Grok Bot parser", () => {
     );
     try {
       expect(findSandSubagentId({ sessionId: subId })).toBe(subId);
+      expect(isSandSubagentSessionId(subId)).toBe(true);
+      expect(isSandSubagentSessionId(parentId)).toBe(false);
       const parsed = await parseGrokBotSession(join(root, parentId, `${parentId}.jsonl`));
       const agent = parsed.turns
         .flatMap((turn) => turn.blocks)

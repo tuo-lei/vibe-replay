@@ -33,6 +33,15 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
+import {
+  LOCAL_PREVIEW_HINT,
+  SHARE_VISIBILITIES,
+  ShareError,
+  printLocalShareFallback,
+  requireReplayDir,
+  shareReplay,
+  type ShareVisibility,
+} from "./share.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
 import { withBundledSampleIfEmpty } from "./bundled-sample.js";
@@ -736,9 +745,9 @@ program
       return; // startServer blocks until Ctrl+C
     } else if (target === "cloud") {
       if (!isLoggedIn) {
-        console.log();
-        console.log(chalk.yellow("  Login required for cloud sharing."));
-        console.log(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login"));
+        const fallback = await shareReplay(outputDir, { loggedIn: false });
+        if (fallback.mode === "local-fallback") printLocalShareFallback(fallback);
+        return;
       } else {
         const { confirm } = await import("@inquirer/prompts");
         const ok = await confirm({
@@ -1071,22 +1080,20 @@ authCmd
   });
 
 // ---------------------------------------------------------------------------
-// share — upload an existing replay to the cloud
+// share — cloud upload when logged in; local HTML fallback otherwise
 // ---------------------------------------------------------------------------
-
-const VISIBILITIES = ["public", "unlisted", "private"] as const;
-type Visibility = (typeof VISIBILITIES)[number];
 
 program
   .command("share")
-  .description("Share an existing replay via cloud (unlisted link, expires in 7 days)")
+  .description(
+    "Share a replay via cloud (unlisted link, 7 days). Without login, opens the local HTML instead.",
+  )
   .argument("[path]", "Path to replay directory or replay.json")
-  .option("--visibility <type>", `Visibility: ${VISIBILITIES.join(", ")}`, "unlisted")
+  .option("--visibility <type>", `Visibility: ${SHARE_VISIBILITIES.join(", ")}`, "unlisted")
   .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
   .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl?: string }) => {
-    const { existsSync, statSync } = await import("node:fs");
     const { readFile, readdir } = await import("node:fs/promises");
-    const { join, dirname, resolve } = await import("node:path");
+    const { join } = await import("node:path");
     const { homedir } = await import("node:os");
 
     // Honor --api-url whenever the user supplies it, even when the value
@@ -1097,30 +1104,24 @@ program
     }
 
     // Validate raw string before narrowing the type.
-    if (!(VISIBILITIES as readonly string[]).includes(opts.visibility)) {
+    if (!(SHARE_VISIBILITIES as readonly string[]).includes(opts.visibility)) {
       console.error(chalk.red(`\n  ✗ Invalid --visibility: ${opts.visibility}`));
-      console.error(chalk.dim(`  Must be one of: ${VISIBILITIES.join(", ")}\n`));
+      console.error(chalk.dim(`  Must be one of: ${SHARE_VISIBILITIES.join(", ")}\n`));
       process.exit(1);
     }
-    const visibility = opts.visibility as Visibility;
-
-    // Pre-flight auth check — fail fast before any picker / I/O / spinner.
-    if (!loadAuthToken()) {
-      console.error(chalk.red("\n  ✗ Not logged in."));
-      console.error(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login\n"));
-      process.exit(1);
-    }
+    const visibility = opts.visibility as ShareVisibility;
 
     let outputDir: string;
 
     if (pathArg) {
-      const abs = resolve(expandUserPath(pathArg));
-      if (!existsSync(abs)) {
-        console.error(chalk.red(`\n  ✗ Path not found: ${abs}\n`));
+      try {
+        outputDir = requireReplayDir(pathArg);
+      } catch (err: unknown) {
+        const message = err instanceof ShareError ? err.message : String(err);
+        console.error(chalk.red(`\n  ✗ ${message}\n`));
         process.exit(1);
+        return;
       }
-      const s = statSync(abs);
-      outputDir = s.isDirectory() ? abs : dirname(abs);
     } else {
       const replayBaseDir = join(homedir(), ".vibe-replay");
       const entries = await readdir(replayBaseDir).catch(() => [] as string[]);
@@ -1154,7 +1155,9 @@ program
       }
 
       if (replays.length === 0) {
-        console.log(chalk.yellow("\n  No replays found. Generate one first!\n"));
+        console.log(chalk.yellow("\n  No replays found. Generate one first!"));
+        console.log(chalk.dim("  Local preview (no login): ") + chalk.white(LOCAL_PREVIEW_HINT));
+        console.log();
         process.exit(1);
       }
 
@@ -1165,15 +1168,26 @@ program
       });
     }
 
-    const jsonPath = join(outputDir, "replay.json");
-    if (!existsSync(jsonPath)) {
-      console.error(chalk.red(`\n  ✗ No replay.json found in ${outputDir}\n`));
-      process.exit(1);
+    const loggedIn = !!loadAuthToken();
+    if (!loggedIn) {
+      try {
+        const result = await shareReplay(outputDir, { loggedIn: false });
+        if (result.mode === "local-fallback") printLocalShareFallback(result);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`\n  ✗ ${message}\n`));
+        process.exit(1);
+      }
+      return;
     }
 
     const spinner = ora("Uploading to cloud...").start();
     try {
-      const result = await publishCloudWithOverlays(outputDir, { visibility });
+      const result = await shareReplay(outputDir, { loggedIn: true, visibility });
+      if (result.mode !== "cloud") {
+        spinner.fail("Unexpected local fallback while logged in");
+        process.exit(1);
+      }
       spinner.succeed("Uploaded!");
       console.log();
       console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
@@ -1182,7 +1196,19 @@ program
       );
       console.log();
     } catch (err: unknown) {
-      spinner.fail(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      spinner.fail(message);
+      if (/not logged in|session expired/i.test(message)) {
+        try {
+          const fallback = await shareReplay(outputDir, { loggedIn: false });
+          if (fallback.mode === "local-fallback") {
+            printLocalShareFallback(fallback);
+            return;
+          }
+        } catch {
+          // Local fallback failed too — fall through to exit.
+        }
+      }
       process.exit(1);
     }
   });
