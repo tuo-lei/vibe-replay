@@ -7,6 +7,7 @@ import { getGrokBotTranscriptRoots } from "./config.js";
 import { mergeDiscoveredGroupSessions } from "./group-merge.js";
 import { countGrokBotDiscoveryStats } from "./parser.js";
 import { readAgentGroup, readAgentProfile } from "./profiles.js";
+import { isSandSubagentSessionId } from "./subagent.js";
 
 export { readAgentGroup, readAgentProfile } from "./profiles.js";
 export type { AgentGroup, AgentProfile } from "./profiles.js";
@@ -28,6 +29,9 @@ export async function discoverGrokBotSessions(
     }
 
     for (const entry of entries) {
+      // Background workers attach onto the parent `task` card; listing them as
+      // their own sessions floods the picker and dashboard.
+      if (isSandSubagentSessionId(entry)) continue;
       const sessionDir = join(root, entry);
       const dirStat = await stat(sessionDir).catch(() => null);
       if (!dirStat?.isDirectory()) continue;
@@ -65,7 +69,7 @@ async function extractGrokBotSessionInfo(
   includeUnreplayable: boolean,
 ): Promise<SessionInfo | null> {
   const sessionId = basename(filePath, ".jsonl");
-  if (!sessionId) return null;
+  if (!sessionId || isSandSubagentSessionId(sessionId)) return null;
 
   let content: string;
   try {
@@ -106,7 +110,7 @@ async function extractGrokBotSessionInfo(
   const gitRepo = resolveGitRepo && looksLikePath(cwd) ? await readGitRepo(cwd) : profile?.gitRepo;
   const title = groupTitle
     ? `Group: ${groupTitle}`
-    : profile?.name || (sessionId.startsWith("sand-subagent-") ? "Grok Bot subagent" : undefined);
+    : profile?.name || (isSandSubagentSessionId(sessionId) ? "Grok Bot subagent" : undefined);
   const project = groupTitle || cwd;
 
   return {

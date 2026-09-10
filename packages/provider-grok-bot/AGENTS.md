@@ -14,10 +14,12 @@ Defaults (when no env override is set):
 Env (Pi-style, replaces defaults): `GROK_BOT_TRANSCRIPTS_DIR` or
 `VIBE_REPLAY_GROK_BOT_DIR`.
 
-Layout: `<root>/<agentId>/<agentId>.jsonl`. `sand-subagent-<uuid>/` files stay
-in discovery as their own sessions. A parent `task` call attaches a child-run
-card when the result/input names that sibling id (no nested grandchildren). Live
-JSONL parsing attaches the same way when the parent path is on disk.
+Layout: `<root>/<agentId>/<agentId>.jsonl`. `sand-subagent-<uuid>/` files are
+hidden from top-level discovery (picker/dashboard) so they do not spam the
+session list. A parent `task` call attaches a child-run card when the
+result/input names that sibling id (no nested grandchildren). Direct
+`--session` parse and live JSONL attach still work when the parent path is on
+disk.
 Duplicate roots (symlink overlap) are collapsed via `realpath`.
 
 Project/title: sibling `agents/<id>/profile.json` `name` (and `cwd` / `workspace`

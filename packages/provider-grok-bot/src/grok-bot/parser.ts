@@ -37,7 +37,7 @@ import {
   isGrokBotHiddenTool,
   mapGrokBotToolArgs,
 } from "./tool-mapping.js";
-import { findSandSubagentId } from "./subagent.js";
+import { findSandSubagentId, isSandSubagentSessionId } from "./subagent.js";
 
 export {
   extractGroupMentions,
@@ -73,12 +73,11 @@ export {
   scrubGrokBotMediaPayload,
   stripFileUrl,
 } from "./media.js";
-export { findSandSubagentId } from "./subagent.js";
+export { findSandSubagentId, isSandSubagentSessionId } from "./subagent.js";
 
 export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 const USER_TURN_PREFIX_RE = /^\s*\[t\d+u\]\s*/i;
 const SEND_MESSAGE_TOOL = "send_message";
-const SAND_SUBAGENT_PREFIX = "sand-subagent-";
 
 interface GrokBotRecord {
   role?: unknown;
@@ -368,7 +367,7 @@ export function parseGrokBotLines(
     "Grok Bot JSONL does not record token usage or model IDs in v1.",
     "send_message is promoted to assistant text. communicate_update is a status/memory tool scene, not a user-visible reply.",
     "Assistant text blocks are private scratch and map to thinking scenes; they are not the visible reply.",
-    "sand-subagent transcripts stay discoverable as their own sessions; parent `task` calls attach a child-run card when the result names a sibling id.",
+    "sand-subagent transcripts are hidden from top-level discovery; parent `task` calls attach a child-run card when the result names a sibling id.",
     "Group-chat wakes split into a room context-injection, human user turns, and assistant-side turns for other bots. Sibling transcripts that share the room title merge into one timeline.",
     "[routine]/[agent] wakes are context-injection; [inbound] remaining text is a user prompt; answering-question wraps are context-injection; background-task wakes are context-injection.",
     "generate_image / computer_use results keep filePath/screenshotPath and omit embedded imageData. file:// markdown images and send_message attachments become basename mentions and are not bundled into shareable HTML.",
@@ -709,7 +708,7 @@ export async function attachGrokBotSubAgents(
 ): Promise<ProviderParseResult> {
   if (!sourcePath) return parsed;
   const parentId = basename(sourcePath, ".jsonl");
-  if (!parentId || parentId.startsWith(SAND_SUBAGENT_PREFIX)) return parsed;
+  if (!parentId || isSandSubagentSessionId(parentId)) return parsed;
   const transcriptsRoot = dirname(dirname(sourcePath));
   const summaries: NonNullable<ProviderParseResult["subAgentSummary"]> = [
     ...(parsed.subAgentSummary || []),

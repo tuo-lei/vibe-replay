@@ -99,7 +99,7 @@ Options:
 Commands:
   sessions [options]      Search local sessions (agent-friendly)
   auth                    Manage authentication
-  share [options] [path]  Share a replay via cloud
+  share [options] [path]  Share via cloud, or open local HTML if not logged in
   live [options]          Watch a running session live
 ```
 
