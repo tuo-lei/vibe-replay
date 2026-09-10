@@ -29,7 +29,7 @@ describe("CLI Smoke Tests", () => {
   it("share --help documents the no-auth local HTML fallback", async () => {
     const { stdout } = await exec("node", [CLI_PATH, "share", "--help"]);
     const help = stripVTControlCharacters(stdout);
-    expect(help).toMatch(/local HTML/i);
+    expect(help).toMatch(/local\s+HTML/i);
     expect(help).toMatch(/without login/i);
   });
 
