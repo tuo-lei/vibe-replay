@@ -137,6 +137,8 @@ prefer). `sand-subagent-*` never merges into a group room.
 
 Fixtures: `test/fixtures/sample.jsonl` (DM), `dm-session.jsonl`,
 `group-eng.jsonl`, `group-gtm.jsonl`, `subagent.jsonl`, `meta-wake.jsonl`.
+The CLI ships a tiny bundled sample at `packages/cli/assets/samples/grok-bot.jsonl`
+and injects it when grok discovery finds no sessions (empty box/export roots).
 Edge coverage lives in `test/parser-edges.test.ts` (mismatched results,
 hidden-tool leak, Windows file URLs, attachment-only replies, missing
 subagents, nested grandchildren).
