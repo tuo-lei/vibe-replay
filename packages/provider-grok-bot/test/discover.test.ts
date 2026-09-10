@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getGrokBotTranscriptRoots } from "../src/grok-bot/config.js";
@@ -118,7 +118,7 @@ describe("getGrokBotTranscriptRoots", () => {
     const roots = getGrokBotTranscriptRoots();
     expect(roots).toContain("/home/box/agent-data/agent-transcripts");
     expect(roots).toContain("/home/box/sand-data/agent-transcripts");
-    expect(roots.some((root) => root.endsWith("/.grok-bot/agent-transcripts"))).toBe(true);
+    expect(roots).toContain(join(homedir(), ".grok-bot", "agent-transcripts"));
   });
 });
 
@@ -188,7 +188,11 @@ describe("discoverGrokBotSessions", () => {
     const sand = join(root, "sand-data", "agent-transcripts");
     const agentData = join(root, "agent-data");
     await mkdir(sand, { recursive: true });
-    await symlink(join(root, "sand-data"), agentData);
+    await symlink(
+      join(root, "sand-data"),
+      agentData,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     await writeSession(sand, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
 
     const sessions = await discoverGrokBotSessions(
