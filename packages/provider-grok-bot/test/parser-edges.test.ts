@@ -202,6 +202,30 @@ describe("Grok Bot parser edges", () => {
     expect(text.match(/\[attached image: sketch \(cat\.png\)\]/g)).toHaveLength(1);
   });
 
+  it("keeps same-basename attachments from different paths and distinct data images", () => {
+    const text = extractSendMessageText({
+      text: { content: "See ![sketch](<file:///home/box/a/cat.png>)" },
+      attachments: [
+        { url: "file:///home/box/a/cat.png", title: "sketch" },
+        { url: "file:///home/box/b/cat.png", title: "other cat" },
+        { url: "https://cdn.example/dir1/notes.txt", title: "notes" },
+        { url: "https://cdn.example/dir2/notes.txt", title: "other notes" },
+        { url: "data:image/png,payload-one", title: "pic" },
+        { url: "data:image/png,payload-two", title: "diagram" },
+        { url: "file:///home/box/b/cat.png", title: "other cat" },
+      ],
+    });
+    expect(text).toContain("[attached image: sketch (cat.png)]");
+    expect(text).toContain("[attached image: other cat (cat.png)]");
+    expect(text).toContain("[attachment: notes (notes.txt)]");
+    expect(text).toContain("[attachment: other notes (notes.txt)]");
+    expect(text).toContain("[attached image: pic (embedded)]");
+    expect(text).toContain("[attached image: diagram (embedded)]");
+    expect(text.match(/\[attached image: other cat \(cat\.png\)\]/g)).toHaveLength(1);
+    expect(text).not.toContain("payload-one");
+    expect(text).not.toContain("payload-two");
+  });
+
   it("promotes attachment-only send_message instead of dropping the turn", () => {
     const parsed = parseGrokBotLines([
       JSON.stringify({

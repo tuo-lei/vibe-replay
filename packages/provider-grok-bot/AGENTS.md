@@ -53,8 +53,10 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
   shareable HTML. Remote URL query/fragment is discarded before the basename
   (signed tokens must not leak into replays); non-base64 `data:image/...`
   URLs collapse to a fixed placeholder. Distinct attachments still append when
-  the reply already contains one image mention. Windows `file:///C:/...`
-  paths are included.
+  the reply already contains one image mention. Dedup keys are the sanitized
+  path or origin+pathname (query stripped), not the display basename, so
+  same-name files in different folders stay; identical sources still collapse.
+  Windows `file:///C:/...` paths are included.
 - `communicate_update` is a high-volume status/memory side-effect. Keep it as a
   `CommunicateUpdate` tool scene (including success). Do **not** promote it to
   an assistant reply. Flatten the status text onto `update` so the tool card
