@@ -196,6 +196,14 @@ describe("discoverGrokBotSessions", () => {
     expect(sessions).toHaveLength(1);
   });
 
+  it("returns no sessions when transcript roots are missing or empty", async () => {
+    const emptyRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-empty-roots-"));
+    tempDirs.push(emptyRoot);
+    const missingRoot = join(emptyRoot, "does-not-exist");
+    const sessions = await discoverGrokBotSessions([missingRoot, emptyRoot], false);
+    expect(sessions).toHaveLength(0);
+  });
+
   it("can retain a readable transcript with no prompts for status display", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-grok-bot-no-prompts-"));
     tempDirs.push(root);

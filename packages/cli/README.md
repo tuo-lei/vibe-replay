@@ -79,6 +79,7 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 | OpenCode | Supported |
 | Hermes | Supported |
 | Pi | Supported |
+| Grok Bot | Supported |
 
 ## Options
 
