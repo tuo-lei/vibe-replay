@@ -141,10 +141,8 @@ Edge coverage lives in `test/parser-edges.test.ts` (mismatched results,
 hidden-tool leak, Windows file URLs, attachment-only replies, missing
 subagents, nested grandchildren).
 
-Try with (from a main checkout — published `vibe-replay@0.2.9` does not
-include this provider):
+Try with:
 
 ```bash
-# Next npm / install from main — not vibe-replay@0.2.9
-GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay -p grok-bot
+GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay@latest -p grok-bot
 ```
