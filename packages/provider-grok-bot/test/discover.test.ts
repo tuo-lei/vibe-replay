@@ -152,7 +152,7 @@ describe("discoverGrokBotSessions", () => {
     expect(sessions[0].timestamp).toBe(new Date(1788485400095).toISOString());
   });
 
-  it("indexes sand-subagent transcripts as separate sessions", async () => {
+  it("hides sand-subagent transcripts from top-level discovery", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-grok-bot-subagent-"));
     tempDirs.push(root);
     const parentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -174,12 +174,10 @@ describe("discoverGrokBotSessions", () => {
     ]);
 
     const sessions = await discoverGrokBotSessions([root], false);
-    expect(sessions.map((session) => session.sessionId).sort()).toEqual([parentId, subId].sort());
-    const sub = sessions.find((session) => session.sessionId === subId);
-    expect(sub).toMatchObject({
-      title: "Grok Bot subagent",
-      firstPrompt: "explore the UI spec",
-    });
+    expect(sessions.map((session) => session.sessionId)).toEqual([parentId]);
+
+    const includingUnreplayable = await discoverGrokBotSessions([root], false, true);
+    expect(includingUnreplayable.map((session) => session.sessionId)).toEqual([parentId]);
   });
 
   it("dedupes symlink-overlapping roots", async () => {
@@ -527,7 +525,7 @@ It's your turn, ${recipient}.`;
     expect(sessions[0].filePaths).toHaveLength(2);
   });
 
-  it("prefers profile.json name for a non-group DM and labels subagents without a profile", async () => {
+  it("prefers profile.json name for a non-group DM and hides unlabeled sand-subagents", async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-dm-title-"));
     tempDirs.push(dataRoot);
     const transcripts = join(dataRoot, "agent-transcripts");
@@ -554,16 +552,11 @@ It's your turn, ${recipient}.`;
     process.env.GROK_BOT_TRANSCRIPTS_DIR = transcripts;
 
     const sessions = await discoverGrokBotSessions();
-    const dm = sessions.find((session) => session.sessionId === dmId);
-    const sub = sessions.find((session) => session.sessionId === subId);
-    expect(dm).toMatchObject({
+    expect(sessions.map((session) => session.sessionId)).toEqual([dmId]);
+    expect(sessions[0]).toMatchObject({
       title: "Travel Assistant",
       project: "Travel Assistant",
       firstPrompt: "plain English prompt",
-    });
-    expect(sub).toMatchObject({
-      title: "Grok Bot subagent",
-      firstPrompt: "explore the UI spec",
     });
   });
 });

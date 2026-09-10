@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import type { ParsedTurn, ProviderParseResult, SessionInfo } from "@vibe-replay/provider-contract";
 import { readAgentGroup, readAgentProfile } from "./profiles.js";
+import { isSandSubagentSessionId } from "./subagent.js";
 import {
   humanMessageKey,
   normalizeGroupKey,
@@ -11,8 +12,6 @@ import {
 } from "./group-chat.js";
 import { peelGrokBotMetaTag } from "./meta-wake.js";
 
-const SAND_SUBAGENT_PREFIX = "sand-subagent-";
-
 export interface GrokBotParsedMember {
   path: string;
   ownerName?: string;
@@ -20,7 +19,7 @@ export interface GrokBotParsedMember {
 }
 
 export function discoveredGroupKey(session: SessionInfo): string | undefined {
-  if (session.sessionId.startsWith(SAND_SUBAGENT_PREFIX)) return undefined;
+  if (isSandSubagentSessionId(session.sessionId)) return undefined;
   const title = session.title?.trim() ?? "";
   if (!title.toLowerCase().startsWith("group:")) return undefined;
   const room = title.slice(title.indexOf(":") + 1).trim();
@@ -97,7 +96,7 @@ export async function resolveGrokBotParsePaths(
 
 export async function expandGroupTranscriptPaths(filePath: string): Promise<string[]> {
   const sessionId = basename(filePath, ".jsonl");
-  if (!sessionId || sessionId.startsWith(SAND_SUBAGENT_PREFIX)) return [filePath];
+  if (!sessionId || isSandSubagentSessionId(sessionId)) return [filePath];
 
   const content = await readFile(filePath, "utf-8").catch(() => "");
   const transcriptsRoot = dirname(dirname(filePath));
@@ -116,7 +115,7 @@ export async function expandGroupTranscriptPaths(filePath: string): Promise<stri
 
   const paths = [filePath];
   for (const entry of entries) {
-    if (entry === sessionId || entry.startsWith(SAND_SUBAGENT_PREFIX)) continue;
+    if (entry === sessionId || isSandSubagentSessionId(entry)) continue;
     const sibling = join(transcriptsRoot, entry, `${entry}.jsonl`);
     const fileStat = await stat(sibling).catch(() => null);
     if (!fileStat?.isFile()) continue;

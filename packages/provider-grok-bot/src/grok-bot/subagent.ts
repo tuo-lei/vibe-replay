@@ -1,5 +1,12 @@
+export const SAND_SUBAGENT_PREFIX = "sand-subagent-";
+
 const SAND_SUBAGENT_ID_RE =
   /sand-subagent-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/** Top-level picker/dashboard hide these; parent `task` attach is enough. */
+export function isSandSubagentSessionId(sessionId: string): boolean {
+  return sessionId.startsWith(SAND_SUBAGENT_PREFIX);
+}
 
 const ID_KEYS = [
   "sessionId",
