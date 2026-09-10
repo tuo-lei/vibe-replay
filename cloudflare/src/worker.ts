@@ -15,6 +15,7 @@ import {
   replays,
   userFiles,
 } from "./db/schema";
+import { ensureFeaturedExploreReplays, pinFeaturedExploreReplays } from "./explore-seed";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1273,6 +1274,11 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 app.get("/api/replays", async (c) => {
   const db = drizzle(c.env.DB);
+  try {
+    await ensureFeaturedExploreReplays(c.env.DB);
+  } catch (error) {
+    console.error("featured explore seed failed:", error);
+  }
   const url = new URL(c.req.url);
   const sort = url.searchParams.get("sort") || "recent";
   const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 100);
@@ -1297,8 +1303,7 @@ app.get("/api/replays", async (c) => {
       created_at: replays.createdAt,
     })
     .from(replays)
-    .orderBy(orderCol)
-    .limit(limit);
+    .orderBy(orderCol);
 
   // Public cloud replays (not expired)
   const cloudOrderCol =
@@ -1368,7 +1373,7 @@ app.get("/api/replays", async (c) => {
     return (b.created_at || "").localeCompare(a.created_at || "");
   });
 
-  return c.json(deduped.slice(0, limit));
+  return c.json(pinFeaturedExploreReplays(deduped).slice(0, limit));
 });
 
 /** Increment view count for a gist-backed cloud replay (by gist ID, no auth required) */

@@ -458,6 +458,53 @@ describe("Cloud API integration", () => {
     }
   });
 
+  it("seeds and pins public Explore demos on an empty gallery", async () => {
+    const { FEATURED_EXPLORE_GIST_IDS, FEATURED_EXPLORE_GISTS } =
+      await import("../src/explore-seed");
+
+    const empty = await dispatch("/api/replays?sort=recent&limit=50");
+    expect(empty.status).toBe(200);
+    const emptyBody = (await empty.json()) as { gist_id: string; title: string }[];
+    expect(emptyBody.map((row) => row.gist_id)).toEqual([...FEATURED_EXPLORE_GIST_IDS]);
+    expect(emptyBody[1].title).toBe(FEATURED_EXPLORE_GISTS[1].title);
+
+    const communityId = "b".repeat(32);
+    await env.DB.prepare(
+      `INSERT INTO replays (gist_id, title, provider, created_at, view_count)
+       VALUES (?, 'Community replay', 'cursor', datetime('now'), 99)`,
+    )
+      .bind(communityId)
+      .run();
+
+    const recent = await dispatch("/api/replays?sort=recent&limit=50");
+    expect(recent.status).toBe(200);
+    const recentBody = (await recent.json()) as { gist_id: string; title: string }[];
+    expect(recentBody.map((row) => row.gist_id)).toEqual([
+      ...FEATURED_EXPLORE_GIST_IDS,
+      communityId,
+    ]);
+    expect(recentBody[0].title).toBe(FEATURED_EXPLORE_GISTS[0].title);
+    expect(recentBody[1].title).toBe(FEATURED_EXPLORE_GISTS[1].title);
+
+    const popular = await dispatch("/api/replays?sort=popular&limit=50");
+    const popularBody = (await popular.json()) as { gist_id: string }[];
+    expect(popularBody.map((row) => row.gist_id)).toEqual([
+      ...FEATURED_EXPLORE_GIST_IDS,
+      communityId,
+    ]);
+
+    const count = await env.DB.prepare("SELECT count(*) AS count FROM replays").first<{
+      count: number;
+    }>();
+    expect(count?.count).toBe(FEATURED_EXPLORE_GISTS.length + 1);
+
+    await dispatch("/api/replays?sort=recent&limit=50");
+    const countAgain = await env.DB.prepare("SELECT count(*) AS count FROM replays").first<{
+      count: number;
+    }>();
+    expect(countAgain?.count).toBe(FEATURED_EXPLORE_GISTS.length + 1);
+  });
+
   it("rejects malformed JSON bodies with 400 responses", async () => {
     const uploaded = await uploadReplay();
     const invalidJson = {
