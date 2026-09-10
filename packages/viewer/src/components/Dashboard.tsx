@@ -3000,7 +3000,7 @@ function SessionsPanel() {
         <div className="text-center space-y-2">
           <div className="text-terminal-dim font-mono text-sm">No AI sessions found</div>
           <div className="text-terminal-dimmer font-mono text-xs">
-            Start Claude, Cursor, Codex, OpenCode, Hermes, or Pi, then come back here
+            Start Claude, Cursor, Codex, OpenCode, Hermes, Pi, or Grok Bot, then come back here
           </div>
         </div>
       </div>

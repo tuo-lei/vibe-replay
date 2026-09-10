@@ -35,6 +35,7 @@ import {
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
+import { withBundledSampleIfEmpty } from "./bundled-sample.js";
 import { discoverProvidersSafely } from "./provider-discovery.js";
 import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
 import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
@@ -243,7 +244,8 @@ function printParseWarnings(warnings?: ParseWarning[]): void {
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {
   const discovery = await discoverProvidersSafely(getAllProviders());
-  return discovery.sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const sessions = await withBundledSampleIfEmpty(discovery.sessions);
+  return sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 program

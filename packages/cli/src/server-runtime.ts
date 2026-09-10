@@ -14,6 +14,7 @@ import { getAiRuntime } from "./ai-runtime.js";
 import { injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
+import { withBundledSampleIfEmpty } from "./bundled-sample.js";
 import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./provider-discovery.js";
 import { getApiUrl } from "./publishers/cloud.js";
 import { mergeSameSessions } from "./session-merge.js";
@@ -300,9 +301,14 @@ export async function startServer(
 
     if (subscriber) run.subscribers.add(subscriber);
     const activeRun = run;
-    return activeRun.promise.finally(() => {
-      if (subscriber) activeRun.subscribers.delete(subscriber);
-    });
+    return activeRun.promise
+      .then(async (result) => ({
+        ...result,
+        sessions: await withBundledSampleIfEmpty(result.sessions),
+      }))
+      .finally(() => {
+        if (subscriber) activeRun.subscribers.delete(subscriber);
+      });
   };
 
   const enrichCursorStatsInBackground = (
