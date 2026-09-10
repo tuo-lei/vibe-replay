@@ -9,7 +9,7 @@ readTime: "7 min read"
 
 Claude Code keeps sessions under `~/.claude/`. Cursor spreads them across SQLite and JSONL. Grok Bot is different: the durable chat history lives on the **cloud box**, not your Mac — one JSONL per agent, with a twist that user-visible replies are a tool call.
 
-**[Watch the Eng+GTM English demo](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92)** — a playable group-chat replay (834 scenes, GCP/GA4 identifiers redacted). Local Grok Bot CLI (`npx vibe-replay -p grok-bot`) is on `main` and ships in the **next npm release**; published `vibe-replay@0.2.9` does not include that provider. Generic `npx vibe-replay` still works for Claude, Cursor, Codex, and the other published providers. Public Grok Bot sessions also land on [Explore](/explore/) as they are shared.
+**Try it:** `npx vibe-replay@latest -p grok-bot`. **Watch demo:** [Eng+GTM English group-chat replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92) (834 scenes, GCP/GA4 identifiers redacted). Public Grok Bot sessions also land on [Explore](/explore/).
 
 Here's where the files live, how the schema works, and what vibe-replay has to rewrite so a replay matches the chat you actually saw.
 
@@ -50,13 +50,12 @@ Layout rules that matter for tooling:
 
 There is no macOS Application Support path for these sessions. If you copy transcripts off the box, the documented drop spot is `~/.grok-bot/agent-transcripts` with the same `<id>/<id>.jsonl` layout.
 
-Point discovery at a copy with either env var (Pi-style override — replaces the defaults). This requires the Grok Bot provider, which is on `main` and ships in the next npm release — **not** published `vibe-replay@0.2.9`:
+Point discovery at a copy with either env var (Pi-style override — replaces the defaults):
 
 ```bash
-# Next npm / install from main — not vibe-replay@0.2.9
-GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay -p grok-bot
+GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay@latest -p grok-bot
 # or
-VIBE_REPLAY_GROK_BOT_DIR=/path/to/agent-transcripts npx vibe-replay -p grok-bot
+VIBE_REPLAY_GROK_BOT_DIR=/path/to/agent-transcripts npx vibe-replay@latest -p grok-bot
 ```
 
 SSH remote indexing of Grok Bot transcripts is not included yet.
@@ -115,23 +114,17 @@ When any group payload is seen, the session title becomes `Group: <room title>`.
 
 ## Try it
 
-**Watch the demo** — [Eng+GTM English multi-speaker replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92). Public Grok Bot sessions also appear on [Explore](/explore/) as they are shared.
-
-To generate Claude, Cursor, Codex, and other published-provider replays today:
-
 ```bash
-npx vibe-replay
+npx vibe-replay@latest -p grok-bot
 ```
 
 Or open the full dashboard:
 
 ```bash
-npx vibe-replay -d
+npx vibe-replay@latest -d
 ```
 
-Grok Bot local discovery (`-p grok-bot`) is on `main` and ships in the **next npm release**. Published `vibe-replay@0.2.9` does not include that provider — `npx vibe-replay -p grok-bot` currently fails with `Unknown provider: grok-bot`. Until that release, install from main if you need to parse your own transcripts.
-
-**[Watch the Eng+GTM demo](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92)** · **[Explore public replays](/explore/)**
+**Watch demo** — [Eng+GTM English multi-speaker replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92). Public Grok Bot sessions also appear on [Explore](/explore/).
 
 Grok Bot is a good reminder that JSONL does not automatically mean “linear Claude-style chat.” The durable truth is still one cloud-box file per agent, whose visible replies are a tool call. Hidden wakes are filtered out, group rooms are split by speaker, and sibling JSONLs that share a room merge into one multi-speaker timeline. Once you model those rewrites, the replay matches the product instead of the raw log.
 
