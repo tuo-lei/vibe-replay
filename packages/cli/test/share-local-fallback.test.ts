@@ -14,6 +14,7 @@ import {
   requireReplayDir,
   shareReplay,
 } from "../src/share.js";
+import type { ReplaySession } from "../src/types.js";
 
 function writeReplayDir(root: string, slug = "demo"): string {
   const dir = join(root, slug);
@@ -27,6 +28,70 @@ function writeReplayDir(root: string, slug = "demo"): string {
   );
   writeFileSync(join(dir, "index.html"), "<html>local replay</html>");
   return dir;
+}
+
+function writeSshReplayDir(root: string, slug = "demo"): string {
+  const dir = join(root, slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "replay.json"),
+    JSON.stringify({
+      meta: {
+        title: "Demo",
+        slug,
+        sessionId: "s1",
+        provider: "codex",
+        location: { kind: "ssh", id: "remote-dev", label: "Remote dev" },
+        gitRepo: "private-org/private-repo",
+        startTime: "2026-08-25T00:00:00.000Z",
+        cwd: "~/project",
+        project: "~/project",
+        stats: { sceneCount: 1, userPrompts: 1, toolCalls: 0 },
+      },
+      scenes: [{ type: "user-prompt", content: "original prompt" }],
+    }),
+  );
+  writeFileSync(join(dir, "index.html"), "<html>stale gitRepo private-org/private-repo</html>");
+  writeFileSync(
+    join(dir, "overlays.json"),
+    JSON.stringify({
+      version: 1,
+      overlays: [
+        {
+          id: "ov-1",
+          sceneIndex: 0,
+          field: "content",
+          originalValue: "original prompt",
+          modifiedValue: "edited prompt",
+          source: { type: "manual" },
+          createdAt: "2026-09-10T00:00:00.000Z",
+          updatedAt: "2026-09-10T00:00:00.000Z",
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(dir, "annotations.json"),
+    JSON.stringify([
+      {
+        id: "ann-1",
+        sceneIndex: 0,
+        body: "review note",
+        author: "me",
+        createdAt: "2026-09-10T00:00:00.000Z",
+        updatedAt: "2026-09-10T00:00:00.000Z",
+        resolved: false,
+      },
+    ]),
+  );
+  return dir;
+}
+
+async function fakeGenerate(session: ReplaySession, outputDir: string): Promise<string> {
+  const htmlPath = join(outputDir, "index.html");
+  writeFileSync(htmlPath, JSON.stringify(session));
+  writeFileSync(join(outputDir, "replay.json"), JSON.stringify(session));
+  return htmlPath;
 }
 
 describe("share local HTML fallback", () => {
@@ -68,10 +133,47 @@ describe("share local HTML fallback", () => {
   });
 
   describe("ensureLocalReplayHtml", () => {
-    it("returns existing index.html without regenerating", async () => {
-      const dir = writeReplayDir(root);
-      const htmlPath = await ensureLocalReplayHtml(dir);
+    it("rebuilds HTML instead of returning a stale index.html", async () => {
+      const dir = writeSshReplayDir(root);
+      const generate = vi.fn(fakeGenerate);
+
+      const htmlPath = await ensureLocalReplayHtml(dir, generate);
+
+      expect(generate).toHaveBeenCalledTimes(1);
       expect(htmlPath).toBe(join(dir, "index.html"));
+      const html = await readFile(htmlPath, "utf-8");
+      expect(html).not.toContain("stale gitRepo");
+    });
+
+    it("strips SSH gitRepo from the shareable HTML and restores local replay.json", async () => {
+      const dir = writeSshReplayDir(root);
+      await ensureLocalReplayHtml(dir, fakeGenerate);
+
+      const html = await readFile(join(dir, "index.html"), "utf-8");
+      expect(html).not.toContain("private-org/private-repo");
+      const shared = JSON.parse(html) as ReplaySession;
+      expect(shared.meta.gitRepo).toBeUndefined();
+      expect(shared.meta.location).toEqual({
+        kind: "ssh",
+        id: "remote-dev",
+        label: "Remote dev",
+      });
+
+      const local = JSON.parse(await readFile(join(dir, "replay.json"), "utf-8")) as ReplaySession;
+      expect(local.meta.gitRepo).toBe("private-org/private-repo");
+      expect(local.scenes[0]).toMatchObject({ type: "user-prompt", content: "original prompt" });
+    });
+
+    it("applies overlays and annotations before generating fallback HTML", async () => {
+      const dir = writeSshReplayDir(root);
+      await ensureLocalReplayHtml(dir, fakeGenerate);
+
+      const html = await readFile(join(dir, "index.html"), "utf-8");
+      const shared = JSON.parse(html) as ReplaySession;
+      expect(shared.scenes[0]).toMatchObject({ type: "user-prompt", content: "edited prompt" });
+      expect(shared.annotations).toEqual([
+        expect.objectContaining({ id: "ann-1", body: "review note" }),
+      ]);
     });
 
     const viewerHtmlPath = join(
@@ -92,25 +194,6 @@ describe("share local HTML fallback", () => {
         expect(html).toContain("<html");
       },
     );
-
-    it("shareReplay regenerates HTML through ensureHtml when index.html is missing", async () => {
-      const dir = writeReplayDir(root);
-      rmSync(join(dir, "index.html"));
-      const ensureHtml = vi.fn(async (outputDir: string) => {
-        const htmlPath = join(outputDir, "index.html");
-        writeFileSync(htmlPath, "<html>generated</html>");
-        return htmlPath;
-      });
-      const result = await shareReplay(dir, {
-        loggedIn: false,
-        ensureHtml,
-        openHtml: async () => true,
-      });
-      expect(ensureHtml).toHaveBeenCalledWith(dir);
-      expect(result.mode).toBe("local-fallback");
-      if (result.mode !== "local-fallback") throw new Error("expected local fallback");
-      expect(result.htmlPath).toBe(join(dir, "index.html"));
-    });
   });
 
   describe("shareReplay", () => {
@@ -118,8 +201,14 @@ describe("share local HTML fallback", () => {
       const dir = writeReplayDir(root);
       const openHtml = vi.fn(async () => true);
       const publishCloud = vi.fn();
+      const generateHtml = vi.fn(fakeGenerate);
 
-      const result = await shareReplay(dir, { loggedIn: false, openHtml, publishCloud });
+      const result = await shareReplay(dir, {
+        loggedIn: false,
+        openHtml,
+        publishCloud,
+        generateHtml,
+      });
 
       expect(result.mode).toBe("local-fallback");
       if (result.mode !== "local-fallback") throw new Error("expected local fallback");
@@ -129,6 +218,24 @@ describe("share local HTML fallback", () => {
       expect(result.opened).toBe(true);
       expect(openHtml).toHaveBeenCalledWith(result.htmlPath);
       expect(publishCloud).not.toHaveBeenCalled();
+      expect(generateHtml).toHaveBeenCalled();
+    });
+
+    it("sanitizes SSH identity on the no-auth share path", async () => {
+      const dir = writeSshReplayDir(root);
+      const result = await shareReplay(dir, {
+        loggedIn: false,
+        openHtml: async () => true,
+        publishCloud: vi.fn(),
+        generateHtml: fakeGenerate,
+      });
+
+      expect(result.mode).toBe("local-fallback");
+      const html = await readFile(join(dir, "index.html"), "utf-8");
+      expect(html).not.toContain("private-org/private-repo");
+      expect(html).toContain("edited prompt");
+      const local = JSON.parse(await readFile(join(dir, "replay.json"), "utf-8")) as ReplaySession;
+      expect(local.meta.gitRepo).toBe("private-org/private-repo");
     });
 
     it("skips the browser opener when VIBE_REPLAY_NO_AUTO_OPEN=1", async () => {
@@ -136,7 +243,11 @@ describe("share local HTML fallback", () => {
       const dir = writeReplayDir(root);
       const openHtml = vi.fn(async () => true);
 
-      const result = await shareReplay(dir, { loggedIn: false, openHtml });
+      const result = await shareReplay(dir, {
+        loggedIn: false,
+        openHtml,
+        generateHtml: fakeGenerate,
+      });
 
       expect(result.mode).toBe("local-fallback");
       if (result.mode !== "local-fallback") throw new Error("expected local fallback");

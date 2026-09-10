@@ -1,11 +1,13 @@
 import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import chalk from "chalk";
 import { generateOutput } from "./generator.js";
+import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
 import { publishCloudWithOverlays } from "./publishers/cloud.js";
 import { tryPublishLocal } from "./publishers/local.js";
+import { loadAnnotations } from "./server-persistence.js";
 import type { ReplaySession } from "./types.js";
 import { expandUserPath } from "./utils.js";
 
@@ -38,6 +40,7 @@ export type ShareResult = CloudShareResult | LocalShareFallbackResult;
 
 export interface ShareReplayDeps {
   ensureHtml?: (outputDir: string) => Promise<string>;
+  generateHtml?: (session: ReplaySession, outputDir: string) => Promise<string>;
   openHtml?: (htmlPath: string) => Promise<boolean>;
   publishCloud?: (
     outputDir: string,
@@ -72,19 +75,35 @@ export function requireReplayDir(pathArg: string): string {
 }
 
 /**
- * Return the local `index.html`, generating it from `replay.json` when missing.
- * Generation already writes HTML without auth; this covers share-from-json-only dirs.
+ * Build a shareable `index.html` from the current replay, matching cloud/HTML
+ * export: apply editor overlays + annotations, then strip SSH gitRepo.
+ *
+ * Never reuse a stale on-disk HTML. `generateOutput` also writes replay.json,
+ * so the original file is restored afterward.
  */
-export async function ensureLocalReplayHtml(outputDir: string): Promise<string> {
-  const htmlPath = replayHtmlPath(outputDir);
-  if (existsSync(htmlPath)) return htmlPath;
-
+export async function ensureLocalReplayHtml(
+  outputDir: string,
+  generate: (session: ReplaySession, outputDir: string) => Promise<string> = generateOutput,
+): Promise<string> {
   const jsonPath = replayJsonPath(outputDir);
   if (!existsSync(jsonPath)) {
     throw new ShareError(`No replay.json found in ${outputDir}`);
   }
-  const session = JSON.parse(await readFile(jsonPath, "utf-8")) as ReplaySession;
-  return generateOutput(session, outputDir);
+
+  const originalContent = await readFile(jsonPath, "utf-8");
+  const session = JSON.parse(originalContent) as ReplaySession;
+  const slug = basename(outputDir);
+  const baseDir = dirname(outputDir);
+  const overlays = await loadOverlays(baseDir, slug);
+  const annotations = await loadAnnotations(baseDir, slug);
+  if (annotations.length > 0) session.annotations = annotations;
+
+  const shareable = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
+  try {
+    return await generate(shareable, outputDir);
+  } finally {
+    await writeFile(jsonPath, originalContent, "utf-8");
+  }
 }
 
 export function describeLocalShareFallback(
@@ -121,7 +140,9 @@ export async function shareReplay(
     return { mode: "cloud", url: result.url, expiresAt: result.expiresAt };
   }
 
-  const ensureHtml = options.ensureHtml ?? ensureLocalReplayHtml;
+  const ensureHtml =
+    options.ensureHtml ??
+    ((dir) => ensureLocalReplayHtml(dir, options.generateHtml ?? generateOutput));
   const htmlPath = await ensureHtml(outputDir);
   const shouldOpen = options.open !== false && process.env.VIBE_REPLAY_NO_AUTO_OPEN !== "1";
   let opened = false;
