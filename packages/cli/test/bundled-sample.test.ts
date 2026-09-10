@@ -30,7 +30,7 @@ function session(sessionId: string): SessionInfo {
 describe("bundled sample session", () => {
   it("resolves the packaged welcome fixture", async () => {
     const path = await resolveBundledSamplePath();
-    expect(path).toMatch(/assets\/samples\/welcome\.jsonl$/);
+    expect(path?.replaceAll("\\", "/")).toMatch(/assets\/samples\/welcome\.jsonl$/);
     const sample = await loadBundledSampleSession();
     expect(sample?.sessionId).toBe(BUNDLED_SAMPLE_SESSION_ID);
     expect(sample?.title).toBe("Sample: Welcome to vibe-replay");
