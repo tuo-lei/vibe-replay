@@ -197,8 +197,12 @@ jobs:
 
           # Verify the CLI actually runs and ships grok-bot (missing from 0.2.9)
           npx vibe-replay --version
+          if ! grep -q grok-bot /tmp/vibe-replay-pack/package/dist/index.js; then
+            echo "::error::grok-bot missing from bundled CLI dist"
+            exit 1
+          fi
           if ! npx vibe-replay --help | grep -q grok-bot; then
-            echo "::error::grok-bot missing from CLI help — provider not bundled"
+            echo "::error::grok-bot missing from CLI help — provider not advertised"
             npx vibe-replay --help
             exit 1
           fi

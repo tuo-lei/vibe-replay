@@ -253,7 +253,11 @@ program
   .description("AI Coding Session Replay & Sharing Tool")
   .version(CLI_VERSION)
   .option("-s, --session <path>", "Path to a specific JSONL session file")
-  .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
+  .option(
+    "-p, --provider <name>",
+    "Provider name (claude-code, cursor, grok-bot, ...)",
+    "claude-code",
+  )
   .option(
     "-t, --title <name>",
     "Custom title for the replay (shown on landing page & shared links)",
