@@ -788,6 +788,36 @@ describe("Grok Bot parser", () => {
     expect(JSON.stringify(parsed.turns)).not.toContain("GetMcpTools");
   });
 
+  it("does not attribute nested args.toolName as an MCP card", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "run mystery" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "mystery",
+              toolCallId: "x-1",
+              input: { args: { toolName: "foo" } },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tools = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ name: "mystery" });
+    expect(tools[0].type === "tool_use" && tools[0]._mcpServer).toBeUndefined();
+    expect(tools[0].type === "tool_use" && tools[0]._mcpTool).toBeUndefined();
+    expect(JSON.stringify(tools[0])).not.toContain("mcp__");
+  });
+
   it("strips generate_image and computer_use base64 while keeping file paths", () => {
     const imageData = `iVBOR${"A".repeat(120)}`;
     const screenshot = `iVBOR${"B".repeat(120)}`;
@@ -1098,6 +1128,14 @@ describe("Grok Bot tool mapping", () => {
     expect(grokBotMcpAttribution("read", { path: "/tmp/a.ts", name: "readme" })).toBeUndefined();
     expect(grokBotMcpAttribution("mystery", { args: { name: "foo" } })).toBeUndefined();
     expect(grokBotReplayToolName("mystery", { args: { name: "foo" } })).toBe("mystery");
+    expect(grokBotMcpAttribution("mystery", { args: { toolName: "foo" } })).toBeUndefined();
+    expect(grokBotReplayToolName("mystery", { args: { toolName: "foo" } })).toBe("mystery");
+    const flattenedNestedArgs = mapGrokBotToolArgs("mystery", { args: { toolName: "foo" } });
+    expect(flattenedNestedArgs).toMatchObject({ args: { toolName: "foo" }, toolName: "foo" });
+    expect(flattenedNestedArgs.server).toBeUndefined();
+    expect(flattenedNestedArgs.tool).toBeUndefined();
+    expect(grokBotMcpAttribution("mystery", flattenedNestedArgs)).toBeUndefined();
+    expect(grokBotReplayToolName("mystery", flattenedNestedArgs)).toBe("mystery");
     expect(
       grokBotMcpAttribution("mcp", { server: "github", toolName: "pull_request_read" }),
     ).toEqual({

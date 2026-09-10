@@ -73,7 +73,7 @@ export function isGrokBotBuiltinTool(name: string): boolean {
  * Normalize Grok Bot tool input into the field names the transform expects.
  * File tools use `path`; the transform wants `file_path`. Edit replacements
  * map onto `old_string` / `new_string`. Dynamic MCP calls flatten `args` and
- * copy `serverIdentifier` / `toolName` onto `server` / `tool`.
+ * copy top-level `serverIdentifier` / `toolName` onto `server` / `tool`.
  */
 export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<string, unknown> {
   const obj =
@@ -81,6 +81,7 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
       ? { ...(input as Record<string, unknown>) }
       : {};
   const normalized = toolName.toLowerCase();
+  const mcpIdentifiers = topLevelMcpIdentifiers(obj);
 
   flattenToolArgs(obj);
 
@@ -163,7 +164,7 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
   }
 
   if (normalized === "mcp" || !isGrokBotBuiltinTool(toolName)) {
-    const mcp = grokBotMcpFields(obj);
+    const mcp = grokBotMcpFields(mcpIdentifiers);
     if (mcp.server) obj.server = mcp.server;
     if (mcp.tool) {
       obj.tool = mcp.tool;
@@ -178,13 +179,14 @@ export function grokBotMcpAttribution(
   toolName: string,
   input: Record<string, unknown>,
 ): { server?: string; tool?: string } | undefined {
-  const fields = grokBotMcpFields(input);
+  const identifiers = topLevelMcpIdentifiers(input);
+  const fields = grokBotMcpFields(identifiers);
   if (toolName.toLowerCase() === "mcp") {
     if (!fields.server && !fields.tool) return undefined;
     return fields;
   }
   if (isGrokBotBuiltinTool(toolName)) return undefined;
-  if (!hasDynamicMcpIdentifiers(input)) return undefined;
+  if (!hasDynamicMcpIdentifiers(identifiers)) return undefined;
   if (!fields.server && !fields.tool) return undefined;
   return {
     ...(fields.server ? { server: fields.server } : {}),
@@ -217,8 +219,26 @@ function grokBotMcpFields(input: Record<string, unknown>): { server?: string; to
 function hasDynamicMcpIdentifiers(input: Record<string, unknown>): boolean {
   return !!(
     firstString(input.serverIdentifier, input.providerIdentifier, input.server) ||
-    firstString(input.toolName, input.tool_name)
+    firstString(input.toolName, input.tool_name, input.tool)
   );
+}
+
+/**
+ * MCP attribution looks only at explicit top-level identifiers. Nested `args`
+ * fields (including copies `flattenToolArgs` lifts onto the parent) do not
+ * count — `{ args: { toolName: "foo" } }` is not an MCP call.
+ */
+function topLevelMcpIdentifiers(input: Record<string, unknown>): Record<string, unknown> {
+  const args = input.args;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return input;
+  const nested = args as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "args") continue;
+    if (Object.prototype.hasOwnProperty.call(nested, key)) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 function flattenToolArgs(obj: Record<string, unknown>): void {

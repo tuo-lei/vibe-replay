@@ -469,8 +469,8 @@ function looksLikeSpeakerName(name: string): boolean {
 
 /** True for lowercase Latin phrases that are prose, not an unlisted human name. */
 function isLowercaseLatinProse(name: string, words: string[]): boolean {
-  if (words.length <= 1) return false;
   if (!/^[a-z][a-z0-9 .'_-]*$/.test(name)) return false;
+  if (words.length < 2) return true;
   if (words.length > MAX_LOWERCASE_LATIN_SPEAKER_WORDS) return true;
   return words.some((word) => SPEAKER_FUNCTION_WORDS.has(word) || !/^[a-z][a-z'-]*$/.test(word));
 }

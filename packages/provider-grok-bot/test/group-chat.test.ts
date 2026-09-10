@@ -9,6 +9,7 @@ import {
   formatGroupSpeakerMessage,
   isGrokBotGroupChatPayload,
   isHumanGroupSpeaker,
+  mergeGrokBotGroupParses,
   normalizeGroupKey,
   parseGrokBotGroupWake,
   parseGrokBotLines,
@@ -179,11 +180,13 @@ It's your turn, 🧭旅游助手.`);
   it("treats short lowercase names as speakers and keeps function-word prose in the previous turn", () => {
     // Rule: unlisted fallback labels — CJK/emoji/uppercase stay valid; lowercase
     // Latin of 2–3 alphabetic words with no function words (`john smith`) is a
-    // speaker; longer phrases or stop-word prose (`one thing to note`) is not.
+    // speaker; one-word lowercase (`hello: text`), longer phrases, or stop-word
+    // prose (`one thing to note`) stay in the previous turn.
     const wake = parseGrokBotGroupWake(`[Group chat: "Vibe Replay launch" - with Vibe Replay GTM]
 Participants: Vibe Replay Eng (engineer) Vibe Replay GTM (go-to-market)
 New messages in the room (oldest first):
 User: Let's ship the Grok Bot replay provider this week.
+hello: leftover prose
 one thing to note: we should ship
 john smith: hello
 mary jane watson: three-word names are fine
@@ -192,7 +195,7 @@ It's your turn, Vibe Replay Eng.`);
     expect(wake?.messages).toEqual([
       {
         speaker: "User",
-        text: "Let's ship the Grok Bot replay provider this week.\none thing to note: we should ship",
+        text: "Let's ship the Grok Bot replay provider this week.\nhello: leftover prose\none thing to note: we should ship",
         mentions: [],
       },
       {
@@ -476,5 +479,46 @@ It's your turn, Vibe Replay Eng.`,
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("prefers discovery title over the parsed title on a single-member merge", () => {
+    const parsed = mergeGrokBotGroupParses(
+      [
+        {
+          path: "/tmp/eng.jsonl",
+          ownerName: "Vibe Replay Eng",
+          parsed: {
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            slug: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            cwd: "/parsed",
+            title: "Group: parsed room",
+            turns: [
+              {
+                role: "user",
+                blocks: [{ type: "text", text: "Let's ship it." }],
+              },
+            ],
+            dataSource: "jsonl",
+          },
+        },
+      ],
+      {
+        provider: "grok-bot",
+        sessionId: "group-discovery-room",
+        slug: "group-discovery-room",
+        title: "Group: discovery room",
+        project: "discovery room",
+        cwd: "/workspace",
+        version: "1",
+        timestamp: "2026-09-04T00:00:00.000Z",
+        lineCount: 1,
+        fileSize: 10,
+        filePath: "/tmp/eng.jsonl",
+        filePaths: ["/tmp/eng.jsonl"],
+      },
+    );
+    expect(parsed.title).toBe("Group: discovery room");
+    expect(parsed.sessionId).toBe("group-discovery-room");
+    expect(parsed.cwd).toBe("/workspace");
   });
 });

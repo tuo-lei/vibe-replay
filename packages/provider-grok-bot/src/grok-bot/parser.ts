@@ -321,14 +321,18 @@ export function parseGrokBotLines(
 
       if (isGrokBotHiddenTool(rawName)) continue;
 
+      const rawInput =
+        block.input && typeof block.input === "object" && !Array.isArray(block.input)
+          ? (block.input as Record<string, unknown>)
+          : {};
       const mappedInput = mapGrokBotToolArgs(rawName, block.input);
       const childId = result?.subagentId || findSandSubagentId(mappedInput);
       if (childId && !stringField(mappedInput, "sessionId")) {
         mappedInput.sessionId = childId;
       }
-      const mcp = grokBotMcpAttribution(rawName, mappedInput);
+      const mcp = grokBotMcpAttribution(rawName, rawInput);
       const call: ToolCallSite = {
-        name: grokBotReplayToolName(rawName, mappedInput),
+        name: grokBotReplayToolName(rawName, rawInput),
         rawName,
         id,
         input: mappedInput,

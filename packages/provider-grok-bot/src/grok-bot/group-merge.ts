@@ -395,7 +395,7 @@ function applySessionInfo(
     sessionId: sessionInfo.sessionId || parsed.sessionId,
     slug: sessionInfo.slug || parsed.slug,
     cwd: sessionInfo.cwd || sessionInfo.project || parsed.cwd,
-    title: parsed.title || sessionInfo.title,
+    title: sessionInfo.title || parsed.title,
   };
 }
 
