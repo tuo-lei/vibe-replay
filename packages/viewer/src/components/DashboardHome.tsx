@@ -550,7 +550,7 @@ function RecentSessionsList({
       <div className="text-center py-6 ui-caption-muted">
         {isLoading
           ? "Loading recent sessions..."
-          : "No sessions found. Start Claude, Cursor, Codex, OpenCode, Hermes, or Pi."}
+          : "No sessions found. Start Claude, Cursor, Codex, OpenCode, Hermes, Pi, or Grok Bot."}
       </div>
     );
   }

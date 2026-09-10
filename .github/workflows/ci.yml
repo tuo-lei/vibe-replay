@@ -181,7 +181,7 @@ jobs:
           fi
 
           # Verify required files are in the tarball
-          for f in package.json dist/index.js assets/viewer.html; do
+          for f in package.json dist/index.js assets/viewer.html assets/samples/welcome.jsonl; do
             if [ ! -f "/tmp/vibe-replay-pack/package/$f" ]; then
               echo "::error::Required file missing from package: $f"
               ls -R /tmp/vibe-replay-pack/package/
@@ -195,8 +195,17 @@ jobs:
           npm init -y > /dev/null 2>&1
           npm install /tmp/vibe-replay-pack/*.tgz
 
-          # Verify the CLI actually runs
+          # Verify the CLI actually runs and ships grok-bot (missing from 0.2.9)
           npx vibe-replay --version
+          if ! grep -q grok-bot /tmp/vibe-replay-pack/package/dist/index.js; then
+            echo "::error::grok-bot missing from bundled CLI dist"
+            exit 1
+          fi
+          if ! npx vibe-replay --help | grep -q grok-bot; then
+            echo "::error::grok-bot missing from CLI help — provider not advertised"
+            npx vibe-replay --help
+            exit 1
+          fi
           echo "Publish simulation passed — package installs and runs correctly"
 
   # e2e runs on Ubuntu only. Windows-specific concerns (path decoding, CRLF,

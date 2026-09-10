@@ -35,6 +35,7 @@ import {
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
+import { withBundledSampleIfEmpty } from "./bundled-sample.js";
 import { discoverProvidersSafely } from "./provider-discovery.js";
 import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
 import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
@@ -243,7 +244,8 @@ function printParseWarnings(warnings?: ParseWarning[]): void {
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {
   const discovery = await discoverProvidersSafely(getAllProviders());
-  return discovery.sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const sessions = await withBundledSampleIfEmpty(discovery.sessions);
+  return sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 program
@@ -251,7 +253,11 @@ program
   .description("AI Coding Session Replay & Sharing Tool")
   .version(CLI_VERSION)
   .option("-s, --session <path>", "Path to a specific JSONL session file")
-  .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
+  .option(
+    "-p, --provider <name>",
+    "Provider name (claude-code, cursor, grok-bot, ...)",
+    "claude-code",
+  )
   .option(
     "-t, --title <name>",
     "Custom title for the replay (shown on landing page & shared links)",

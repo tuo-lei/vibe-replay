@@ -88,7 +88,7 @@ Usage: vibe-replay [options] [command]
 Options:
   -V, --version           Output the version number
   -s, --session <path>    Path to a specific JSONL session file
-  -p, --provider <name>   Provider name (default: claude-code)
+  -p, --provider <name>   Provider name (claude-code, cursor, grok-bot, ...)
   -t, --title <name>      Custom title for the replay
   -d, --dashboard         Open dashboard directly (skip picker)
   --open                  After generation, open in browser and exit
