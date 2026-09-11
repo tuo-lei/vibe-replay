@@ -1,5 +1,5 @@
 import type { ReplaySession } from "@vibe-replay/types";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { generateGitHubGif } from "../src/formatters/gif.js";
 import { buildSvgFrames, extractPhases, renderStaticFrameSvg } from "../src/formatters/github.js";
 
@@ -105,10 +105,17 @@ describe("renderStaticFrameSvg", () => {
 // ─── GIF generation tests ──────────────────────────────────
 
 describe("generateGitHubGif", () => {
-  it("generates a valid GIF with correct magic bytes", async () => {
-    const session = makeSession();
-    const gif = await generateGitHubGif(session);
+  let gif!: Buffer;
 
+  // First @resvg/resvg-js call plus Windows system-font load can exceed 70s on
+  // windows-smoke (observed 72s). Later generates in the same process are
+  // sub-second. Share the multi-frame GIF across the two assertions so we only
+  // pay that cold start once, and keep a timeout well above the observed cost.
+  beforeAll(async () => {
+    gif = await generateGitHubGif(makeSession());
+  }, 180_000);
+
+  it("generates a valid GIF with correct magic bytes", () => {
     // GIF magic bytes: "GIF89a"
     expect(gif[0]).toBe(0x47); // G
     expect(gif[1]).toBe(0x49); // I
@@ -118,10 +125,7 @@ describe("generateGitHubGif", () => {
     expect(gif[5]).toBe(0x61); // a
   });
 
-  it("produces reasonable file size (under 2MB)", async () => {
-    const session = makeSession();
-    const gif = await generateGitHubGif(session);
-
+  it("produces reasonable file size (under 2MB)", () => {
     // A few frames of 840-wide dark-themed SVG should be well under 2MB
     expect(gif.length).toBeGreaterThan(100);
     expect(gif.length).toBeLessThan(2 * 1024 * 1024);
@@ -136,11 +140,8 @@ describe("generateGitHubGif", () => {
       },
     });
 
-    const gif = await generateGitHubGif(session);
-    expect(gif[0]).toBe(0x47); // G
-    expect(gif.length).toBeGreaterThan(100);
+    const singlePromptGif = await generateGitHubGif(session);
+    expect(singlePromptGif[0]).toBe(0x47); // G
+    expect(singlePromptGif.length).toBeGreaterThan(100);
   });
-  // GIF generation rasterizes several SVG frames and is CPU-heavy; it can take
-  // ~35s on slower Windows CI runners. Keep the timeout generous so these tests
-  // don't flake there.
-}, 60_000);
+}, 180_000);
