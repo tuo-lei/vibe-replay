@@ -3698,8 +3698,19 @@ function SessionsPanel() {
               Fetching sessions...
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              {hasActiveFilters ? "No sessions match the current filters" : "No sessions found"}
+            <div className="text-center py-12 text-terminal-dim font-mono text-sm space-y-3">
+              <div>
+                {hasActiveFilters ? "No sessions match the current filters" : "No sessions found"}
+              </div>
+              {filter && (
+                <button
+                  type="button"
+                  onClick={() => handleFilterChange("")}
+                  className="rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-1.5 text-xs text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text"
+                >
+                  Clear search
+                </button>
+              )}
             </div>
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
