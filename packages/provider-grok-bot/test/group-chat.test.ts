@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   extractGroupMentions,
+  expandGroupTranscriptPaths,
   formatGroupHeader,
   formatGroupSpeakerMessage,
   isGrokBotGroupChatPayload,
@@ -451,6 +452,50 @@ It's your turn, Vibe Replay Eng.`,
 
     expect(liveParsed.turns).toEqual(staticParsed.turns);
     expect(liveParsed.subAgentSummary).toEqual(staticParsed.subAgentSummary);
+  });
+
+  it("bridges an ID-less sibling when expanding an ID-bearing group transcript", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-replay-grok-bot-partial-group-"));
+    const transcriptsRoot = join(root, "agent-transcripts");
+    const firstId = "first-agent";
+    const secondId = "second-agent";
+    const wake = `[Group chat: "Partially labeled room"]\nNew messages in the room (oldest first):\nUser: hello\nIt's your turn, Agent.`;
+    try {
+      const firstDir = join(transcriptsRoot, firstId);
+      const secondDir = join(transcriptsRoot, secondId);
+      await mkdir(firstDir, { recursive: true });
+      await mkdir(secondDir, { recursive: true });
+      const firstPath = join(firstDir, `${firstId}.jsonl`);
+      const secondPath = join(secondDir, `${secondId}.jsonl`);
+      await writeFile(
+        firstPath,
+        `${JSON.stringify({ role: "user", message: { content: [{ type: "text", text: wake }] } })}\n`,
+      );
+      await writeFile(
+        secondPath,
+        `${JSON.stringify({ role: "user", message: { content: [{ type: "text", text: wake }] } })}\n`,
+      );
+      await mkdir(join(root, "agents", firstId), { recursive: true });
+      await mkdir(join(root, "agents", secondId), { recursive: true });
+      await writeFile(
+        join(root, "agents", firstId, "profile.json"),
+        JSON.stringify({
+          name: "Agent",
+          groupTitle: "Partially labeled room",
+          groupId: "room-one",
+        }),
+      );
+      await writeFile(
+        join(root, "agents", secondId, "profile.json"),
+        JSON.stringify({ name: "Agent", groupTitle: "Partially labeled room" }),
+      );
+
+      await expect(expandGroupTranscriptPaths(firstPath)).resolves.toEqual(
+        expect.arrayContaining([firstPath, secondPath]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps discovery session metadata when one group sibling has zero turns", async () => {

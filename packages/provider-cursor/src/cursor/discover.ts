@@ -622,6 +622,7 @@ export function findTopLevelSubagentSessionIds(
   sessions: SessionInfo[],
   promptsByPath: ReadonlyMap<string, string[]> = transcriptDelegatedPrompts,
 ): Set<string> {
+  const sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   const delegated = new Map<string, string[]>();
   for (const session of sessions) {
     const prompts = session.filePaths.flatMap((path) => promptsByPath.get(path) || []);
@@ -634,6 +635,8 @@ export function findTopLevelSubagentSessionIds(
     if (firstPrompt.length < 32) continue;
     for (const [parentId, prompts] of delegated) {
       if (parentId === child.sessionId) continue;
+      const parent = sessionsById.get(parentId);
+      if (!parent || cursorWorkspaceIdentity(parent) !== cursorWorkspaceIdentity(child)) continue;
       if (
         prompts.some(
           (prompt) =>
@@ -647,6 +650,10 @@ export function findTopLevelSubagentSessionIds(
     }
   }
   return hidden;
+}
+
+function cursorWorkspaceIdentity(session: SessionInfo): string {
+  return session.projectIdentity?.key || session.workspacePath || session.project || session.cwd;
 }
 
 function normalizePromptForMatch(value: unknown): string {

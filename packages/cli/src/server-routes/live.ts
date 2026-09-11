@@ -110,7 +110,9 @@ export function registerLiveRoutes(app: Hono): void {
 
       const resolveSessionInfo = async () => {
         const all = await provider.discover();
-        const seed = all.find((s) => s.sessionId === sessionId);
+        const seed = all.find(
+          (s) => s.sessionId === sessionId || s.sessionIds?.includes(sessionId),
+        );
         if (!seed) return undefined;
         const merged = mergeSameSessions(all);
         return merged.find((s) => s.project === seed.project && s.slug === seed.slug);

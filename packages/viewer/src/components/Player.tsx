@@ -179,7 +179,7 @@ export default function Player({
   const [selectionAnnotatePrompt, setSelectionAnnotatePrompt] =
     useState<SelectionAnnotatePrompt | null>(null);
   const [isOutlineOpen, setIsOutlineOpen] = useState(true);
-  const annotationActions = useAnnotations(session, effectiveViewerMode);
+  const annotationActions = useAnnotations(session, effectiveViewerMode, isLive);
   const overlayActions = useOverlays(session, effectiveViewerMode);
   const { effectiveSession } = overlayActions;
   const { annotations } = annotationActions;

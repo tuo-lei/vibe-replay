@@ -81,7 +81,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
 
     try {
       const target = await loadSession(slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, slug);
+      const targetDir = await resolveReplayDir(baseDir, slug, targetId);
       target.meta.title = normalizeTitle(body.title);
 
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
@@ -105,7 +105,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     try {
       await loadSession(slug, targetId);
-      await rm(await resolveReplayDir(baseDir, slug), { recursive: true });
+      await rm(await resolveReplayDir(baseDir, slug, targetId), { recursive: true });
       const updatedReplays = await refreshReplaysCache();
       if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
       return c.json({ ok: true });

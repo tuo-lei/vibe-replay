@@ -225,10 +225,18 @@ describe("Cursor transcript metadata discovery", () => {
       "Inspect the parser and verify the delegated result thoroughly.",
       "/child.jsonl",
     );
+    const unrelatedChild = {
+      ...child,
+      sessionId: "unrelated-child",
+      filePath: "/other-project/child.jsonl",
+      filePaths: ["/other-project/child.jsonl"],
+      project: "/other-project",
+      cwd: "/other-project",
+    };
 
     expect(
       __testables.findTopLevelSubagentSessionIds(
-        [parent, child],
+        [parent, child, unrelatedChild],
         new Map([
           ["/parent.jsonl", ["Inspect the parser and verify the delegated result thoroughly."]],
         ]),

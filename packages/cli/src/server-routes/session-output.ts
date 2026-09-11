@@ -36,7 +36,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
-      targetDir = await resolveReplayDir(baseDir, result.slug);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
@@ -54,7 +54,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
-      targetDir = await resolveReplayDir(baseDir, result.slug);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
@@ -72,7 +72,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
-      targetDir = await resolveReplayDir(baseDir, result.slug);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
@@ -90,7 +90,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
-      targetDir = await resolveReplayDir(baseDir, result.slug);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
@@ -123,7 +123,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
-      targetDir = await resolveReplayDir(baseDir, result.slug);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
@@ -141,7 +141,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, result.slug);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),
@@ -177,7 +177,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
 
     try {
       await loadSession(result.slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, result.slug);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const body = await c.req.json().catch(() => ({}));
       const cloudResult = await publishCloudWithOverlays(targetDir, {
         visibility: body.visibility || "unlisted",
@@ -198,7 +198,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, result.slug);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),
@@ -226,7 +226,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     try {
       await loadSession(result.slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, result.slug);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const svgPath = join(targetDir, "session-preview.svg");
       const mdPath = join(targetDir, "github-summary.md");
       const gifPath = join(targetDir, "session-preview.gif");
@@ -277,7 +277,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
-      const targetDir = await resolveReplayDir(baseDir, result.slug);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),

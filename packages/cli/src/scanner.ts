@@ -1236,6 +1236,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
         for (const block of saMsg.content as SubAgentBlock[]) {
           if (block.type !== "tool_use") continue;
+          toolCallCount++;
           const event = toolUsageEvent(block.name || "Unknown", {
             input: block.input,
             parentAgentId: subagentPath.replace(/^.*[/\\]/, "").replace(/\.jsonl$/, ""),
