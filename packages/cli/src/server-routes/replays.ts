@@ -5,6 +5,7 @@ import { readFileCache, writeFileCache } from "../cache.js";
 import { generateOutput } from "../generator.js";
 import { sessionForExternalOutput } from "../overlays.js";
 import { getErrorMessage, requireSlug, safeSlug, safeTargetId } from "../server-core.js";
+import { resolveReplayDir } from "../server-replay-catalog.js";
 import type { ReplaySummary } from "../server-types.js";
 import type { ReplaySession } from "../types.js";
 import { normalizeTitle } from "../utils.js";
@@ -80,9 +81,9 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
 
     try {
       const target = await loadSession(slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, slug);
       target.meta.title = normalizeTitle(body.title);
 
-      const targetDir = join(baseDir, slug);
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
       const updatedReplays = await refreshReplaysCache();
@@ -104,7 +105,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     try {
       await loadSession(slug, targetId);
-      await rm(join(baseDir, slug), { recursive: true });
+      await rm(await resolveReplayDir(baseDir, slug), { recursive: true });
       const updatedReplays = await refreshReplaysCache();
       if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
       return c.json({ ok: true });

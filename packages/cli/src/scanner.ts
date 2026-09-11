@@ -1211,53 +1211,47 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   // Count subagent files and extract their file modifications
   let subAgentCount = 0;
   if (input.filePaths.length > 0) {
-    const mainFile = input.filePaths[0];
-    const sessionDir = mainFile.replace(/\.jsonl$/, "");
-    const subagentsDir = join(sessionDir, "subagents");
-    try {
-      const files = await readdir(subagentsDir);
-      const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
-      subAgentCount = jsonlFiles.length;
+    const subagentPaths = (await relatedSubagentPaths(input.filePaths)).filter((path) =>
+      path.endsWith(".jsonl"),
+    );
+    subAgentCount = subagentPaths.length;
 
-      // Scan sub-agent JSONL files for file modifications
-      for (const saFile of jsonlFiles) {
-        let saContent: string;
+    // Scan sub-agent JSONL files for file modifications
+    for (const subagentPath of subagentPaths) {
+      let saContent: string;
+      try {
+        saContent = await readFile(subagentPath, "utf-8");
+      } catch {
+        continue;
+      }
+      for (const saLine of saContent.split("\n")) {
+        if (!saLine.trim()) continue;
+        let saObj: SubAgentLine;
         try {
-          saContent = await readFile(join(subagentsDir, saFile), "utf-8");
+          saObj = JSON.parse(saLine);
         } catch {
           continue;
         }
-        for (const saLine of saContent.split("\n")) {
-          if (!saLine.trim()) continue;
-          let saObj: SubAgentLine;
-          try {
-            saObj = JSON.parse(saLine);
-          } catch {
-            continue;
-          }
-          const saMsg = saObj?.message;
-          if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
-          for (const block of saMsg.content as SubAgentBlock[]) {
-            if (block.type !== "tool_use") continue;
-            const event = toolUsageEvent(block.name || "Unknown", {
-              input: block.input,
-              parentAgentId: saFile.replace(/\.jsonl$/, ""),
-            });
-            usageEvents.push(event);
-            if (event.mcpServer) mcpServersUsed.add(event.mcpServer);
-            if (block.name && FILE_EDIT_TOOLS.has(block.name)) {
-              const fp = extractToolFilePath(block.input);
-              if (fp) {
-                editCount++;
-                const short = shortenSessionPath(fp, input);
-                fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
-              }
+        const saMsg = saObj?.message;
+        if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
+        for (const block of saMsg.content as SubAgentBlock[]) {
+          if (block.type !== "tool_use") continue;
+          const event = toolUsageEvent(block.name || "Unknown", {
+            input: block.input,
+            parentAgentId: subagentPath.replace(/^.*[/\\]/, "").replace(/\.jsonl$/, ""),
+          });
+          usageEvents.push(event);
+          if (event.mcpServer) mcpServersUsed.add(event.mcpServer);
+          if (block.name && FILE_EDIT_TOOLS.has(block.name)) {
+            const fp = extractToolFilePath(block.input);
+            if (fp) {
+              editCount++;
+              const short = shortenSessionPath(fp, input);
+              fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
             }
           }
         }
       }
-    } catch {
-      // No subagents directory
     }
   }
 
@@ -2157,6 +2151,20 @@ async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; file
   return { mtimeMs: maxMtime, fileSize: totalSize };
 }
 
+async function relatedSubagentPaths(filePaths: string[]): Promise<string[]> {
+  const paths: string[] = [];
+  for (const mainFilePath of filePaths) {
+    const subagentsDir = join(mainFilePath.replace(/\.jsonl$/, ""), "subagents");
+    const entries = await readdir(subagentsDir).catch(() => []);
+    for (const entry of entries) {
+      if (entry.endsWith(".jsonl") || entry.endsWith(".meta.json")) {
+        paths.push(join(subagentsDir, entry));
+      }
+    }
+  }
+  return [...new Set(paths)];
+}
+
 async function getScanCacheMeta(session: ScanInput): Promise<{
   mtimeMs: number;
   fileSize: number;
@@ -2167,6 +2175,7 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
   if (sourceFilePath && !sourceFilePath.includes("#") && !paths.includes(sourceFilePath)) {
     paths.push(sourceFilePath);
   }
+  paths.push(...(await relatedSubagentPaths(session.filePaths)));
 
   const meta = await getFileMeta([...new Set(paths)]);
   if (session.hasSqlite) {

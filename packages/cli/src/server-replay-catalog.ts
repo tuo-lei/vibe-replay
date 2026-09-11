@@ -170,14 +170,8 @@ export async function loadSessionFromDisk(
   slug: string,
   targetId?: string,
 ): Promise<ReplaySession> {
-  let replayPath = join(baseDir, slug, "replay.json");
-  try {
-    await stat(replayPath);
-  } catch {
-    const fallback = resolve("./vibe-replay", slug, "replay.json");
-    await stat(fallback);
-    replayPath = fallback;
-  }
+  const replayDir = await resolveReplayDir(baseDir, slug);
+  const replayPath = join(replayDir, "replay.json");
   const raw = await readFile(replayPath, "utf-8");
   const session = JSON.parse(raw) as ReplaySession;
   const sessionTargetId =
@@ -188,6 +182,20 @@ export async function loadSessionFromDisk(
   const annotations = await loadAnnotations(baseDir, slug, targetId);
   if (annotations.length > 0) session.annotations = annotations;
   return session;
+}
+
+/** Resolve the directory containing a replay, including the legacy CWD fallback. */
+export async function resolveReplayDir(baseDir: string, slug: string): Promise<string> {
+  const candidates = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const candidate of candidates) {
+    try {
+      await stat(join(candidate, "replay.json"));
+      return candidate;
+    } catch {
+      // Try the next compatible replay location.
+    }
+  }
+  throw new Error(`Session not found: ${slug}`);
 }
 
 export function normalizeSessionProjectsForHome(

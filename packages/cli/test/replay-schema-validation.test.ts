@@ -27,7 +27,7 @@ function validateReplaySchema(replay: any): string | null {
   if (!Array.isArray(replay.scenes)) {
     return "Missing scenes array";
   }
-  for (let i = 0; i < Math.min(replay.scenes.length, 5); i++) {
+  for (let i = 0; i < replay.scenes.length; i++) {
     const scene = replay.scenes[i];
     if (!scene || typeof scene.type !== "string") {
       return `Invalid scene at index ${i}: missing type`;
@@ -135,13 +135,12 @@ describe("replay schema validation", () => {
     expect(validateReplaySchema(replay)).toBe("Invalid scene at index 0: missing type");
   });
 
-  it("only validates first 5 scenes (performance)", () => {
+  it("rejects malformed scenes after the first five", () => {
     const scenes = Array.from({ length: 10 }, (_, i) =>
       i < 6 ? { type: "text-response", content: `scene ${i}` } : { content: "no type" },
     );
-    // Scene at index 6+ has no type, but validation only checks first 5
     const replay = { meta: { sessionId: "abc", provider: "claude-code" }, scenes };
-    expect(validateReplaySchema(replay)).toBeNull();
+    expect(validateReplaySchema(replay)).toBe("Invalid scene at index 6: missing type");
   });
 
   it("catches invalid scene within first 5", () => {

@@ -154,6 +154,36 @@ export async function parseGrokBotSession(
   return mergeGrokBotGroupParses(members, sessionInfo);
 }
 
+export async function parseGrokBotLiveSession(
+  members: Array<{ path: string; lines: string[] }>,
+  sessionInfo?: SessionInfo,
+): Promise<ProviderParseResult> {
+  if (members.length === 0) {
+    return parseGrokBotLines([], { sessionInfo });
+  }
+
+  const parsedMembers = await Promise.all(
+    members.map(async ({ path, lines }) => {
+      const ownerName = await resolveOwnerName(path, sessionInfo);
+      const parsed = await attachGrokBotSubAgents(
+        parseGrokBotLines(lines, {
+          sourcePath: path,
+          sessionInfo,
+          ownerName,
+        }),
+        path,
+      );
+      return {
+        path,
+        ownerName: ownerName || parsed.agentName,
+        parsed,
+      };
+    }),
+  );
+  if (parsedMembers.length === 1) return parsedMembers[0].parsed;
+  return mergeGrokBotGroupParses(parsedMembers, sessionInfo);
+}
+
 interface ParseGrokBotLinesOptions {
   sourcePath?: string;
   sessionInfo?: SessionInfo;

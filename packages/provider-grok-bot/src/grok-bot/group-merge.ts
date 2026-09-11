@@ -18,12 +18,19 @@ export interface GrokBotParsedMember {
   parsed: ProviderParseResult;
 }
 
+interface GrokBotGroupIdentity {
+  key: string;
+  titleKey: string;
+  groupId?: string;
+}
+
 export function discoveredGroupKey(session: SessionInfo): string | undefined {
   if (isSandSubagentSessionId(session.sessionId)) return undefined;
   const title = session.title?.trim() ?? "";
   if (!title.toLowerCase().startsWith("group:")) return undefined;
   const room = title.slice(title.indexOf(":") + 1).trim();
-  return room ? normalizeGroupKey(room) : undefined;
+  if (!room) return undefined;
+  return groupIdentityKey(room, session.groupId).key;
 }
 
 export function mergeDiscoveredGroupSessions(sessions: SessionInfo[]): SessionInfo[] {
@@ -53,19 +60,36 @@ export function mergeDiscoveredGroupSessions(sessions: SessionInfo[]): SessionIn
 function mergeGroupSessionInfos(key: string, members: SessionInfo[]): SessionInfo {
   const chronological = [...members].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   const latest = [...members].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+  const roomTitle =
+    latest.title?.replace(/^Group:\s*/i, "").trim() ||
+    chronological
+      .find((member) => member.title)
+      ?.title?.replace(/^Group:\s*/i, "")
+      .trim() ||
+    key;
+  const groupId = uniqueStrings(members.map((member) => member.groupId || "").filter(Boolean))[0];
+  const identity = groupIdentityKey(roomTitle, groupId);
+  const canonicalSessionId = groupSessionId(identity);
   const filePaths = uniqueStrings(chronological.flatMap((member) => member.filePaths));
   const uniquePrompts = uniqueStrings(
     chronological.flatMap(
       (member) => member.prompts || (member.firstPrompt ? [member.firstPrompt] : []),
     ),
   );
-  const roomTitle = latest.title?.replace(/^Group:\s*/i, "").trim() || key;
+  const legacySessionId = `group-${identity.titleKey}`;
+  const sessionIds = uniqueStrings([
+    canonicalSessionId,
+    legacySessionId,
+    ...members.flatMap((member) => [member.sessionId, ...(member.sessionIds || [])]),
+  ]);
   return {
     ...latest,
-    sessionId: `group-${key}`,
-    slug: `group-${key}`,
+    sessionId: canonicalSessionId,
+    sessionIds,
+    slug: canonicalSessionId,
     title: `Group: ${roomTitle}`,
     project: roomTitle,
+    ...(groupId ? { groupId } : {}),
     filePath: filePaths[0] || latest.filePath,
     filePaths,
     fileSize: members.reduce((sum, member) => sum + member.fileSize, 0),
@@ -104,7 +128,7 @@ export async function expandGroupTranscriptPaths(filePath: string): Promise<stri
   const group = await readAgentGroup(transcriptsRoot, sessionId, profile);
   const title = groupTitleFromContent(content) || group?.title || profile?.groupTitle;
   if (!title) return [filePath];
-  const key = normalizeGroupKey(title);
+  const identity = groupIdentityKey(title, group?.id || profile?.groupId);
 
   let entries: string[];
   try {
@@ -119,7 +143,7 @@ export async function expandGroupTranscriptPaths(filePath: string): Promise<stri
     const sibling = join(transcriptsRoot, entry, `${entry}.jsonl`);
     const fileStat = await stat(sibling).catch(() => null);
     if (!fileStat?.isFile()) continue;
-    if (await siblingSharesGroup(sibling, entry, transcriptsRoot, key)) {
+    if (await siblingSharesGroup(sibling, entry, transcriptsRoot, identity)) {
       paths.push(sibling);
     }
   }
@@ -130,13 +154,16 @@ async function siblingSharesGroup(
   siblingPath: string,
   agentId: string,
   transcriptsRoot: string,
-  key: string,
+  identity: GrokBotGroupIdentity,
 ): Promise<boolean> {
   const content = await readFile(siblingPath, "utf-8").catch(() => "");
   const profile = await readAgentProfile(transcriptsRoot, agentId);
   const group = await readAgentGroup(transcriptsRoot, agentId, profile);
   const title = groupTitleFromContent(content) || group?.title || profile?.groupTitle;
-  return !!title && normalizeGroupKey(title) === key;
+  if (!title) return false;
+  const siblingGroupId = group?.id || profile?.groupId;
+  if (identity.groupId) return siblingGroupId === identity.groupId;
+  return normalizeGroupKey(title) === identity.titleKey && !siblingGroupId;
 }
 
 export async function resolveOwnerName(
@@ -382,6 +409,22 @@ function uniqueStrings(values: string[]): string[] {
     out.push(trimmed);
   }
   return out;
+}
+
+function groupIdentityKey(title: string, groupId?: string): GrokBotGroupIdentity {
+  const titleKey = normalizeGroupKey(title);
+  const normalizedId = groupId?.trim();
+  return {
+    key: normalizedId ? `id:${normalizedId}` : `title:${titleKey}`,
+    titleKey,
+    ...(normalizedId ? { groupId: normalizedId } : {}),
+  };
+}
+
+function groupSessionId(identity: GrokBotGroupIdentity): string {
+  return identity.groupId
+    ? `group-${identity.titleKey}-${normalizeGroupKey(identity.groupId)}`
+    : `group-${identity.titleKey}`;
 }
 
 function applySessionInfo(

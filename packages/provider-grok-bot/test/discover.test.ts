@@ -372,6 +372,43 @@ It's your turn, Vibe Replay GTM.`,
     expect(sessions[0].filePaths.some((path) => path.includes(gtmId))).toBe(true);
   });
 
+  it("keeps same-title rooms with different group IDs separate and preserves member IDs", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-group-id-"));
+    tempDirs.push(dataRoot);
+    const transcripts = join(dataRoot, "agent-transcripts");
+    const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const writeRoom = async (agentId: string, groupId: string, prompt: string) => {
+      await writeSession(transcripts, agentId, [
+        {
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `[Group chat: "Same room title"]\nNew messages in the room (oldest first):\nUser: ${prompt}\nIt's your turn, Agent.`,
+              },
+            ],
+          },
+        },
+      ]);
+      await mkdir(join(dataRoot, "agents", agentId), { recursive: true });
+      await writeFile(
+        join(dataRoot, "agents", agentId, "profile.json"),
+        JSON.stringify({ name: "Agent", groupTitle: "Same room title", groupId }),
+        "utf-8",
+      );
+    };
+    await writeRoom(firstId, "room-one", "first room prompt");
+    await writeRoom(secondId, "room-two", "second room prompt");
+
+    const sessions = await discoverGrokBotSessions([transcripts], false);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.groupId).sort()).toEqual(["room-one", "room-two"]);
+    expect(sessions.map((session) => session.sessionId).sort()).toEqual([firstId, secondId].sort());
+  });
+
   it("uses group.json / profile groupTitle when the transcript has not named the room yet", async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-group-profile-"));
     tempDirs.push(dataRoot);

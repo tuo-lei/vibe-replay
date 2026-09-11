@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   isHumanGroupSpeaker,
   mergeGrokBotGroupParses,
   normalizeGroupKey,
+  parseGrokBotLiveSession,
   parseGrokBotGroupWake,
   parseGrokBotLines,
   parseGrokBotSession,
@@ -418,6 +419,38 @@ It's your turn, Vibe Replay Eng.`,
         JSON.stringify(scene).includes("can you confirm the dashboard badge copy"),
       ),
     ).toBe(false);
+  });
+
+  it("keeps live multi-file parsing aligned with static group parsing", async () => {
+    const paths = [join(fixtures, "group-eng.jsonl"), join(fixtures, "group-gtm.jsonl")];
+    const sessionInfo = {
+      provider: "grok-bot",
+      sessionId: "group-vibe-replay-launch",
+      slug: "group-vibe-replay-launch",
+      title: "Group: Vibe Replay launch",
+      project: "Vibe Replay launch",
+      cwd: "/workspace",
+      version: "1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      lineCount: 0,
+      fileSize: 0,
+      filePath: paths[0],
+      filePaths: paths,
+      firstPrompt: "Let's ship it.",
+    } as const;
+    const staticParsed = await parseGrokBotSession(paths, sessionInfo);
+    const liveParsed = await parseGrokBotLiveSession(
+      await Promise.all(
+        paths.map(async (path) => ({
+          path,
+          lines: (await readFile(path, "utf-8")).split("\n"),
+        })),
+      ),
+      sessionInfo,
+    );
+
+    expect(liveParsed.turns).toEqual(staticParsed.turns);
+    expect(liveParsed.subAgentSummary).toEqual(staticParsed.subAgentSummary);
   });
 
   it("keeps discovery session metadata when one group sibling has zero turns", async () => {

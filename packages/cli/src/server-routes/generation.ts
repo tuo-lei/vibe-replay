@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Hono } from "hono";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
@@ -9,6 +9,7 @@ import { discoverProvidersSafely } from "../provider-discovery.js";
 import { getRemoteHome } from "../remote.js";
 import { scanForSecrets } from "../scan.js";
 import { mergeSameSessions } from "../session-merge.js";
+import { scanSessions } from "../server-replay-catalog.js";
 import {
   getErrorMessage,
   hasReplayableContent,
@@ -130,17 +131,16 @@ export function registerGenerationRoutes(app: Hono, deps: GenerationRouteDeps): 
     const allProviders = getAllProviders();
     const allSessions = mergeSameSessions((await discoverAllProviders()).sessions);
 
-    let entries: string[];
-    try {
-      entries = await readdir(replaysDir);
-    } catch {
+    const replaySummaries = await scanSessions(replaysDir);
+    if (replaySummaries.length === 0) {
       return c.json({ error: "No replays directory" }, 404);
     }
 
-    for (const slug of entries) {
-      if (slug.startsWith(".") || slug === "cache") continue;
+    for (const replaySummary of replaySummaries) {
+      const { slug } = replaySummary;
       try {
-        const replayPath = join(replaysDir, slug, "replay.json");
+        const outputDir = join(replaySummary.baseDir, slug);
+        const replayPath = join(outputDir, "replay.json");
         const raw = await readFile(replayPath, "utf-8").catch(() => null);
         if (!raw) continue;
 
@@ -160,17 +160,12 @@ export function registerGenerationRoutes(app: Hono, deps: GenerationRouteDeps): 
           const sessionTargetId = s.location?.kind === "ssh" ? s.location.id : undefined;
           return (
             s.provider === providerName &&
-            s.sessionId === sessionId &&
+            (s.sessionId === sessionId || s.sessionIds?.includes(sessionId)) &&
             sessionTargetId === replayTargetId
           );
         });
-        if (!sessionInfo || sessionInfo.filePaths.length === 0) {
-          results.push({
-            slug,
-            status: sessionInfo?.transcriptStatus
-              ? `skipped: ${sessionInfo.transcriptStatus}`
-              : "skipped: source not found",
-          });
+        if (!sessionInfo) {
+          results.push({ slug, status: "skipped: source not found" });
           continue;
         }
         if (sessionInfo.transcriptStatus) {
@@ -209,7 +204,6 @@ export function registerGenerationRoutes(app: Hono, deps: GenerationRouteDeps): 
 
         if (oldReplay.meta?.title) replay.meta.title = oldReplay.meta.title;
 
-        const outputDir = join(replaysDir, slug);
         await generateOutput(replay, outputDir);
         results.push({ slug, status: "regenerated", scenes: replay.scenes.length });
       } catch (err) {

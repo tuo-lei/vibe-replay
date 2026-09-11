@@ -67,14 +67,20 @@ function targetIdOf(value: { location?: SessionLocation } | undefined): string |
 }
 
 export function pickSourceRecordForSession<T extends EnrichmentSourceRecord>(
-  session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug" | "location">,
+  session: Pick<
+    SessionInfo,
+    "provider" | "sessionId" | "sessionIds" | "project" | "slug" | "location"
+  >,
   bySessionId: Map<string, T>,
   byKey: Map<string, T>,
 ): T | undefined {
   const targetId = targetIdOf(session);
   const byIdMatch =
-    bySessionId.get(providerSessionKey(session.provider, session.sessionId, targetId)) ??
-    (targetId ? undefined : bySessionId.get(session.sessionId));
+    [session.sessionId, ...(session.sessionIds || [])]
+      .map((sessionId) =>
+        bySessionId.get(providerSessionKey(session.provider, sessionId, targetId)),
+      )
+      .find(Boolean) ?? (targetId ? undefined : bySessionId.get(session.sessionId));
   return (
     (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
     byKey.get(sourceSessionKey(session.provider, session.project, session.slug, targetId))

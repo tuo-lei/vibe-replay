@@ -122,6 +122,62 @@ describe("Codex parser", () => {
     ).toHaveLength(1);
   });
 
+  it("preserves JSONL order when timestamps move backwards across resumed data", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-order", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T10:00:10.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "later timestamp, earlier source" }],
+          },
+        },
+        {
+          timestamp: "2026-04-26T09:00:00.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "source-order prompt" },
+        },
+        {
+          timestamp: "2026-04-26T08:00:00.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            call_id: "order-tool",
+            arguments: JSON.stringify({ cmd: "printf ok" }),
+          },
+        },
+        {
+          timestamp: "2026-04-26T08:01:00.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "order-tool",
+            output: "ok",
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turns.map((turn) => turn.role)).toEqual(["assistant", "user", "assistant"]);
+    expect(result.turns[0]?.blocks[0]).toMatchObject({
+      type: "text",
+      text: "later timestamp, earlier source",
+    });
+    expect(result.turns[1]?.blocks[0]).toMatchObject({
+      type: "text",
+      text: "source-order prompt",
+    });
+    expect(result.turns[2]?.blocks[0]).toMatchObject({ type: "tool_use", name: "Bash" });
+  });
+
   it("parses Codex rollout JSONL into replay turns", () => {
     const result = parseCodexLines(lines);
 

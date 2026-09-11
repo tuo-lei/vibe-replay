@@ -19,6 +19,7 @@ const TRANSCRIPT_INFO_CONCURRENCY = 6;
 const ENTRY_STAT_CONCURRENCY = 32;
 const decodedProjectDirCache = new Map<string, Promise<string>>();
 const sdkWorkspaceRepoCache = new Map<string, Promise<string | undefined>>();
+const transcriptDelegatedPrompts = new Map<string, string[]>();
 let cursorDiscoveryInFlight: Promise<SessionInfo[]> | null = null;
 
 /** Coalesce dashboard/source scans that request the same local catalog concurrently. */
@@ -52,11 +53,16 @@ async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
     sessions.push(...projectSessionList);
   }
   const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
+  const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
   sessions.length = 0;
-  sessions.push(...mergedTranscriptSessions);
+  sessions.push(
+    ...mergedTranscriptSessions.filter(
+      (session) => !hiddenTranscriptSessionIds.has(session.sessionId),
+    ),
+  );
 
   // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
-  const transcriptSessions = sessions.slice();
+  const transcriptSessions = mergedTranscriptSessions;
   const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
   const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
   const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
@@ -384,6 +390,7 @@ async function extractSessionInfo(
 ): Promise<SessionInfo | null> {
   try {
     const content = await readFile(filePath, "utf-8");
+    transcriptDelegatedPrompts.set(filePath, extractDelegatedPrompts(content));
 
     const sessionId = basename(filePath, ".jsonl");
     let firstPrompt = "";
@@ -573,5 +580,76 @@ async function mapLimit<T, R>(
 export const __testables = {
   decodeProjectDir,
   extractSessionInfo,
+  findTopLevelSubagentSessionIds,
   mergeDuplicateTranscriptSessions,
 };
+
+function extractDelegatedPrompts(content: string): string[] {
+  const prompts: string[] = [];
+  for (const rawLine of content.split("\n")) {
+    if (!rawLine.trim()) continue;
+    let record: any;
+    try {
+      record = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    const blocks = Array.isArray(record?.message?.content) ? record.message.content : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== "object") continue;
+      const name = typeof block.name === "string" ? block.name.toLowerCase() : "";
+      if (!["agent", "subagent", "task", "task_v2"].includes(name)) continue;
+      const input =
+        block.input && typeof block.input === "object"
+          ? block.input
+          : block.arguments && typeof block.arguments === "object"
+            ? block.arguments
+            : undefined;
+      const prompt =
+        typeof input?.prompt === "string"
+          ? input.prompt
+          : typeof input?.task === "string"
+            ? input.task
+            : "";
+      const normalized = normalizePromptForMatch(prompt);
+      if (normalized && !prompts.includes(normalized)) prompts.push(normalized);
+    }
+  }
+  return prompts;
+}
+
+export function findTopLevelSubagentSessionIds(
+  sessions: SessionInfo[],
+  promptsByPath: ReadonlyMap<string, string[]> = transcriptDelegatedPrompts,
+): Set<string> {
+  const delegated = new Map<string, string[]>();
+  for (const session of sessions) {
+    const prompts = session.filePaths.flatMap((path) => promptsByPath.get(path) || []);
+    if (prompts.length > 0) delegated.set(session.sessionId, prompts);
+  }
+
+  const hidden = new Set<string>();
+  for (const child of sessions) {
+    const firstPrompt = normalizePromptForMatch(child.firstPrompt);
+    if (firstPrompt.length < 32) continue;
+    for (const [parentId, prompts] of delegated) {
+      if (parentId === child.sessionId) continue;
+      if (
+        prompts.some(
+          (prompt) =>
+            prompt === firstPrompt ||
+            (prompt.length >= 32 && (prompt.includes(firstPrompt) || firstPrompt.includes(prompt))),
+        )
+      ) {
+        hidden.add(child.sessionId);
+        break;
+      }
+    }
+  }
+  return hidden;
+}
+
+function normalizePromptForMatch(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return sanitizeCursorUserText(value).replace(/\s+/g, " ").trim();
+}

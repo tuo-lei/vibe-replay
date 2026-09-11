@@ -54,6 +54,8 @@ export function normalizeSubAgentType(agentType: string): string {
 export interface SessionInfo {
   provider: string;
   sessionId: string;
+  /** Additional provider-native IDs that resolve to this logical session. */
+  sessionIds?: string[];
   slug: string;
   title?: string;
   project: string; // decoded project path (e.g. "~/Code/my-project")
@@ -77,6 +79,8 @@ export interface SessionInfo {
   hasSdk?: boolean; // true if a Cursor SDK agent record exists in sdk-agent-store/index.db
   /** Canonical project/workspace identity for dashboard aggregation. */
   projectIdentity?: ProjectIdentity;
+  /** Provider-native group/room identity when a display title is not unique. */
+  groupId?: string;
   firstPrompt: string;
   prompts?: string[]; // first N meaningful user prompts (cleaned)
   promptCount?: number; // total user prompts (counted via lightweight scan)

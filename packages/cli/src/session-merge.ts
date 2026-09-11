@@ -27,14 +27,8 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
 
     group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     const latest = group[0];
-    const filePaths = [
-      ...new Set(
-        group
-          .slice()
-          .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-          .flatMap((session) => session.filePaths),
-      ),
-    ];
+    const chronological = group.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const filePaths = [...new Set(chronological.flatMap((session) => session.filePaths))];
     const promptCount = group.some((session) => session.promptCount != null)
       ? group.reduce((sum, session) => sum + (session.promptCount || 0), 0)
       : undefined;
@@ -52,6 +46,14 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
 
     result.push({
       ...latest,
+      sessionIds: [
+        ...new Set(group.flatMap((session) => [session.sessionId, ...(session.sessionIds || [])])),
+      ],
+      title: latest.title || chronological.find((session) => session.title)?.title,
+      model: latest.model || chronological.find((session) => session.model)?.model,
+      firstPrompt:
+        chronological.find((session) => session.firstPrompt.trim())?.firstPrompt ||
+        latest.firstPrompt,
       lineCount: group.reduce((sum, session) => sum + session.lineCount, 0),
       fileSize: group.reduce((sum, session) => sum + session.fileSize, 0),
       filePaths,
