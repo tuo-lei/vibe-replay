@@ -213,6 +213,18 @@ export interface SessionScanIndex {
   bySlug: Map<string, SessionScanData[]>;
 }
 
+export function sessionExplorerCountLabel(
+  isLoading: boolean,
+  hasActiveFilters: boolean,
+  matchingCount: number,
+  totalCount: number,
+): string {
+  if (isLoading) return "Loading…";
+  return hasActiveFilters
+    ? `${matchingCount.toLocaleString()} matching`
+    : `${totalCount.toLocaleString()} sessions`;
+}
+
 function scanLookupKey(provider: string, value: string, location?: SessionLocation): string {
   const targetId = location?.kind === "ssh" ? `${location.id}\0` : "";
   return `${targetId}${provider}\0${value}`;
@@ -3056,7 +3068,7 @@ function SessionsPanel() {
                   : "bg-terminal-surface text-terminal-dimmer"
               }`}
             >
-              {projectFacetSources.length}
+              {showInitialLoading ? "…" : projectFacetSources.length}
             </span>
           </button>
 
@@ -3358,15 +3370,20 @@ function SessionsPanel() {
                     Sessions
                   </h2>
                   <span className="text-xs font-mono text-terminal-dimmer shrink-0">
-                    {hasActiveFilters
-                      ? `${filtered.length.toLocaleString()} matching`
-                      : `${baseSourceCount.toLocaleString()} sessions`}
+                    {sessionExplorerCountLabel(
+                      showInitialLoading,
+                      hasActiveFilters,
+                      filtered.length,
+                      baseSourceCount,
+                    )}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
-                  {hasActiveFilters
-                    ? `Filtered from ${baseSourceCount.toLocaleString()} sessions`
-                    : "Use sidebar facets or search to narrow the list"}
+                  {showInitialLoading
+                    ? "Discovering local providers and cached sessions"
+                    : hasActiveFilters
+                      ? `Filtered from ${baseSourceCount.toLocaleString()} sessions`
+                      : "Use sidebar facets or search to narrow the list"}
                   {showArchived && " · including archived"}
                 </div>
               </div>
