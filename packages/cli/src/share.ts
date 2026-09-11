@@ -48,10 +48,6 @@ export interface ShareReplayDeps {
   ) => Promise<{ url: string; expiresAt: string }>;
 }
 
-export function replayHtmlPath(outputDir: string): string {
-  return join(outputDir, "index.html");
-}
-
 export function replayJsonPath(outputDir: string): string {
   return join(outputDir, "replay.json");
 }
