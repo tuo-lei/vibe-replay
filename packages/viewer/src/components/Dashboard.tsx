@@ -4230,6 +4230,13 @@ function SessionsPanel() {
                               e.stopPropagation();
                               selectSession(s);
                             }}
+                            aria-label={
+                              generatingSessionKey === sessionIdentityKey(s)
+                                ? `Generating replay for ${sourceSuggestedTitle(s)}`
+                                : transcriptStatus
+                                  ? `Replay unavailable for ${sourceSuggestedTitle(s)}`
+                                  : `Generate replay for ${sourceSuggestedTitle(s)}`
+                            }
                             disabled={generatingSessionKey !== null || !!transcriptStatus}
                             title={
                               generatingSessionKey !== null
