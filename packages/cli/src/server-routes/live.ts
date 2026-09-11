@@ -7,7 +7,11 @@ import { streamSSE } from "hono/streaming";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { parseClaudeCodeLines } from "../providers/claude-code/parser.js";
 import { parseCodexLines } from "../providers/codex/parser.js";
-import { attachGrokBotSubAgents, parseGrokBotLines } from "../providers/grok-bot/parser.js";
+import {
+  attachGrokBotSubAgents,
+  parseGrokBotLines,
+  parseGrokBotLiveSession,
+} from "../providers/grok-bot/parser.js";
 import { parsePiLines } from "../providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
@@ -29,7 +33,7 @@ export async function parseJsonlLiveSession(
   paths: string[],
 ) {
   if (providerName === "claude-code") {
-    return parseClaudeCodeLines(lines, { subagentsSourcePath: paths[0] });
+    return parseClaudeCodeLines(lines, { subagentsSourcePaths: paths });
   }
   if (providerName === "codex") {
     return parseCodexLines(lines, sessionInfo, paths);
@@ -106,7 +110,9 @@ export function registerLiveRoutes(app: Hono): void {
 
       const resolveSessionInfo = async () => {
         const all = await provider.discover();
-        const seed = all.find((s) => s.sessionId === sessionId);
+        const seed = all.find(
+          (s) => s.sessionId === sessionId || s.sessionIds?.includes(sessionId),
+        );
         if (!seed) return undefined;
         const merged = mergeSameSessions(all);
         return merged.find((s) => s.project === seed.project && s.slug === seed.slug);
@@ -266,11 +272,15 @@ export function registerLiveRoutes(app: Hono): void {
           let parsed;
           if (isJsonlLiveProvider) {
             const allLines: string[] = [];
+            const grokMembers: Array<{ path: string; lines: string[] }> = [];
             for (const fp of paths) {
               const lines = await tailReadJsonl(fp);
               allLines.push(...lines);
+              if (isGrokBotProvider) grokMembers.push({ path: fp, lines });
             }
-            parsed = await parseJsonlLiveSession(providerName, allLines, info, paths);
+            parsed = isGrokBotProvider
+              ? await parseGrokBotLiveSession(grokMembers, info)
+              : await parseJsonlLiveSession(providerName, allLines, info, paths);
           } else {
             parsed = await provider.parse(paths, info);
           }

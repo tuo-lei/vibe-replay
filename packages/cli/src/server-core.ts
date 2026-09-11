@@ -164,11 +164,12 @@ export function resolveGenerateInputs(
     }
   }
   // Fallback: match by sessionId (covers old JSONL files where slug differs from replay slug)
-  if (!sessionInfo && typeof body.sessionId === "string" && body.sessionId) {
+  const requestedSessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
+  if (!sessionInfo && requestedSessionId) {
     sessionInfo = discoveredSessions.find(
       (s) =>
         s.provider === body.provider &&
-        s.sessionId === body.sessionId &&
+        (s.sessionId === requestedSessionId || s.sessionIds?.includes(requestedSessionId)) &&
         matchesRequestedLocation(s),
     );
   }

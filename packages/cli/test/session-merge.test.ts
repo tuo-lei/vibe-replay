@@ -47,6 +47,36 @@ describe("mergeSameSessions", () => {
     });
   });
 
+  it("preserves shard IDs and metadata when the newest shard is sparse", () => {
+    const merged = mergeSameSessions([
+      session({
+        sessionId: "session-old",
+        title: "Original title",
+        model: "claude-sonnet",
+        firstPrompt: "Start from the original shard",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      }),
+      session({
+        sessionId: "session-new",
+        title: undefined,
+        model: undefined,
+        firstPrompt: "",
+        timestamp: "2026-01-01T01:00:00.000Z",
+        filePath: "/sessions/two.jsonl",
+        filePaths: ["/sessions/two.jsonl"],
+      }),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      sessionId: "session-new",
+      sessionIds: ["session-new", "session-old"],
+      title: "Original title",
+      model: "claude-sonnet",
+      firstPrompt: "Start from the original shard",
+    });
+  });
+
   it("does not merge independent non-resumable sessions with the same slug and project", () => {
     const merged = mergeSameSessions([
       session({ provider: "opencode", sessionId: "ses_one" }),

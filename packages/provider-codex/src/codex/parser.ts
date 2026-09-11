@@ -101,6 +101,17 @@ export function parseCodexLines(
   const seenUserMessages = new Map<string, number[]>();
   const seenAssistantMessages = new Map<string, number[]>();
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
+  let currentLineIndex = 0;
+  const turnOrder = new Map<ParsedTurn, number>();
+  const toolOrder = new Map<string, number>();
+  const pushTurn = (turn: ParsedTurn, order = currentLineIndex): void => {
+    turns.push(turn);
+    turnOrder.set(turn, order);
+  };
+  const registerTool = (id: string, tool: PendingTool): void => {
+    if (!toolOrder.has(id)) toolOrder.set(id, currentLineIndex);
+    tools.set(id, tool);
+  };
 
   // Codex JSONL now carries a sequential `ordinal` envelope field. Sampled
   // rollouts match file order, so we keep JSONL order rather than sorting:
@@ -108,6 +119,7 @@ export function parseCodexLines(
   // would scramble them.
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    currentLineIndex = lineIndex;
     const line = lines[lineIndex];
     if (!line.trim()) continue;
     let obj: any;
@@ -171,7 +183,7 @@ export function parseCodexLines(
         const blocks = userMessageBlocks(p);
         const text = textFromBlocks(blocks);
         if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
-          turns.push({
+          pushTurn({
             role: "user",
             ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
             timestamp: obj.timestamp,
@@ -187,7 +199,7 @@ export function parseCodexLines(
       ) {
         const blocks: ContentBlock[] = [{ type: "text", text: p.message }];
         if (!shouldRecordMessage(seenAssistantMessages, obj.timestamp, blocks)) continue;
-        turns.push({
+        pushTurn({
           role: "assistant",
           timestamp: obj.timestamp,
           blocks,
@@ -195,7 +207,7 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "agent_reasoning" && typeof p.text === "string" && p.text.trim()) {
-        turns.push({
+        pushTurn({
           role: "assistant",
           timestamp: obj.timestamp,
           blocks: [{ type: "thinking", thinking: p.text }],
@@ -210,7 +222,7 @@ export function parseCodexLines(
             ? durationBetweenTimestamps(existingTool.timestamp, obj.timestamp)
             : undefined;
         if (!tools.has(p.call_id)) {
-          tools.set(p.call_id, {
+          registerTool(p.call_id, {
             id: p.call_id,
             name: "exec_command",
             input: p.command || p.action || {},
@@ -260,7 +272,7 @@ export function parseCodexLines(
             input: {},
             timestamp: obj.timestamp,
           };
-          tools.set(p.call_id, tool);
+          registerTool(p.call_id, tool);
         }
         if (tool && changedFiles.length > 0) {
           tool.input = mergeToolFilePaths(tool.input, changedFiles);
@@ -279,7 +291,7 @@ export function parseCodexLines(
           p.call_id ||
           `web_search:${obj.timestamp}`;
         if (!tools.has(callId)) {
-          tools.set(callId, {
+          registerTool(callId, {
             id: callId,
             name: "web_search",
             input: p.action || { query: p.query },
@@ -321,7 +333,7 @@ export function parseCodexLines(
               mcpServer: server,
               ...(toolName ? { mcpTool: toolName } : {}),
             };
-            tools.set(p.call_id, tool);
+            registerTool(p.call_id, tool);
           } else {
             tool.mcpServer = server;
             if (toolName) {
@@ -332,7 +344,7 @@ export function parseCodexLines(
         } else if (!tool) {
           // The completion event itself proves that Codex attempted an MCP
           // invocation, even when the start payload omitted server metadata.
-          tools.set(p.call_id, {
+          registerTool(p.call_id, {
             id: p.call_id,
             name: "mcp",
             input: {},
@@ -356,7 +368,7 @@ export function parseCodexLines(
       recordCompaction(compactions, obj.timestamp || "", "codex");
       const text = compactedSummaryText(obj.payload);
       if (text) {
-        turns.push({
+        pushTurn({
           role: "user",
           subtype: "compaction-summary",
           timestamp: obj.timestamp,
@@ -382,7 +394,7 @@ export function parseCodexLines(
       if (text.trim()) {
         developerContextBytes += utf8ByteLength(text);
         developerContextCount++;
-        turns.push({
+        pushTurn({
           role: "user",
           subtype: "context-injection",
           timestamp: obj.timestamp,
@@ -396,7 +408,7 @@ export function parseCodexLines(
       const blocks = userMessageBlocksFromContent(p.content);
       const text = textFromBlocks(blocks);
       if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
-        turns.push({
+        pushTurn({
           role: "user",
           ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
           timestamp: obj.timestamp,
@@ -411,7 +423,7 @@ export function parseCodexLines(
       if (text.trim()) {
         const blocks: ContentBlock[] = [{ type: "text", text }];
         if (!shouldRecordMessage(seenAssistantMessages, obj.timestamp, blocks)) continue;
-        turns.push({
+        pushTurn({
           role: "assistant",
           timestamp: obj.timestamp,
           blocks,
@@ -428,7 +440,7 @@ export function parseCodexLines(
     if (p.type === "reasoning") {
       const thinking = reasoningText(p);
       if (thinking.trim()) {
-        turns.push({
+        pushTurn({
           role: "assistant",
           timestamp: obj.timestamp,
           blocks: [{ type: "thinking", thinking }],
@@ -446,7 +458,7 @@ export function parseCodexLines(
         p.call_id || p.id || existingWebSearchId || `${p.type}:${obj.timestamp}:${tools.size}`;
       const name = p.name || normalizeCodexToolName(p.type);
       const input = inputForResponseItem(p);
-      tools.set(callId, { id: callId, name, input, timestamp: obj.timestamp });
+      registerTool(callId, { id: callId, name, input, timestamp: obj.timestamp });
       if (name.startsWith("mcp__")) {
         const server = name.split("__")[1];
         if (server) mcpServersUsed.add(server);
@@ -468,7 +480,7 @@ export function parseCodexLines(
         if (!tools.has(p.call_id)) {
           // Preserve orphan completions as an unknown ordinary tool rather
           // than silently losing a concrete provider event.
-          tools.set(p.call_id, {
+          registerTool(p.call_id, {
             id: p.call_id,
             name: "Unknown",
             input: {},
@@ -494,29 +506,32 @@ export function parseCodexLines(
 
   for (const tool of tools.values()) {
     const tr = toolResults.get(tool.id);
-    turns.push({
-      role: "assistant",
-      timestamp: tool.timestamp,
-      blocks: [
-        {
-          type: "tool_use",
-          id: tool.id,
-          name: normalizeToolName(tool.name),
-          input: normalizeToolInput(tool.name, tool.input),
-          _hasResult: toolResults.has(tool.id),
-          ...(tr ? { _result: tr.result } : {}),
-          ...(tr?.isError ? { _isError: true } : {}),
-          ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
-          ...(tr?.durationSource ? { _durationSource: tr.durationSource } : {}),
-          ...(tool.durationAnchor ? { _durationAnchor: tool.durationAnchor } : {}),
-          ...(tool.mcpServer ? { _mcpServer: tool.mcpServer } : {}),
-          ...(tool.mcpTool ? { _mcpTool: tool.mcpTool } : {}),
-        },
-      ],
-    });
+    pushTurn(
+      {
+        role: "assistant",
+        timestamp: tool.timestamp,
+        blocks: [
+          {
+            type: "tool_use",
+            id: tool.id,
+            name: normalizeToolName(tool.name),
+            input: normalizeToolInput(tool.name, tool.input),
+            _hasResult: toolResults.has(tool.id),
+            ...(tr ? { _result: tr.result } : {}),
+            ...(tr?.isError ? { _isError: true } : {}),
+            ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
+            ...(tr?.durationSource ? { _durationSource: tr.durationSource } : {}),
+            ...(tool.durationAnchor ? { _durationAnchor: tool.durationAnchor } : {}),
+            ...(tool.mcpServer ? { _mcpServer: tool.mcpServer } : {}),
+            ...(tool.mcpTool ? { _mcpTool: tool.mcpTool } : {}),
+          },
+        ],
+      },
+      toolOrder.get(tool.id) ?? lines.length + toolOrder.size,
+    );
   }
 
-  turns.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+  turns.sort((a, b) => (turnOrder.get(a) || 0) - (turnOrder.get(b) || 0));
 
   const tokenUsage = tokenUsageFromSnapshots(tokenSnapshots);
   const contextLimit = [...tokenSnapshots].toReversed().find((s) => s.contextLimit)?.contextLimit;

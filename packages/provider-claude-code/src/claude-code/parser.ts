@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { PrLink, SubAgent, TurnStat, UsageEvent } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import { estimateActiveDuration, getTimestampBounds } from "@vibe-replay/provider-core/duration";
@@ -19,7 +19,7 @@ export async function parseClaudeCodeSession(
     allLines.push(...content.split("\n"));
   }
 
-  return parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
+  return parseClaudeCodeLines(allLines, { subagentsSourcePaths: paths });
 }
 
 /** Options for parseClaudeCodeLines. */
@@ -30,6 +30,8 @@ export interface ParseClaudeCodeLinesOptions {
    * omit it for sources (e.g. Cowork audit.jsonl) that don't have subagent files.
    */
   subagentsSourcePath?: string;
+  /** All JSONL shards whose sibling subagent directories should be scanned. */
+  subagentsSourcePaths?: string[];
   /**
    * Derive session bounds from all event timestamps. Cowork disables this so
    * its sibling metadata timestamp keeps the existing overlay semantics.
@@ -529,9 +531,13 @@ export async function parseClaudeCodeLines(
 
   // Read subagent JSONL files: extract full conversations + token usage.
   // Must happen before enrichment so subAgentData is available.
-  const subAgentData = options.subagentsSourcePath
-    ? await readSubagents(options.subagentsSourcePath, usageByMsgId, parseWarnings)
-    : new Map<string, SubAgentParsed>();
+  const subagentSources =
+    options.subagentsSourcePaths ||
+    (options.subagentsSourcePath ? [options.subagentsSourcePath] : []);
+  const subAgentData =
+    subagentSources.length > 0
+      ? await readSubagents(subagentSources, usageByMsgId, parseWarnings)
+      : new Map<string, SubAgentParsed>();
 
   // Build assistant turns with enriched blocks
   const assistantTurns: { turn: ParsedTurn; timestamp: string }[] = [];
@@ -989,7 +995,7 @@ interface SubAgentParsed {
  * Returns Map<agentId, SubAgentParsed> keyed by the agent identifier from the filename.
  */
 async function readSubagents(
-  mainFilePath: string,
+  mainFilePaths: string[],
   usageByMsgId: Map<
     string,
     {
@@ -1003,28 +1009,38 @@ async function readSubagents(
   parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]>,
 ): Promise<Map<string, SubAgentParsed>> {
   const result = new Map<string, SubAgentParsed>();
-  const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
-  const subagentsDir = join(sessionDir, "subagents");
-
-  let files: string[];
-  try {
-    files = await readdir(subagentsDir);
-  } catch {
-    return result; // No subagents directory
+  const subagentFiles: Array<{ path: string; agentId: string }> = [];
+  const seenPaths = new Set<string>();
+  for (const mainFilePath of mainFilePaths) {
+    const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
+    const subagentsDir = join(sessionDir, "subagents");
+    let files: string[];
+    try {
+      files = await readdir(subagentsDir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      const path = join(subagentsDir, file);
+      if (seenPaths.has(path)) continue;
+      seenPaths.add(path);
+      subagentFiles.push({
+        path,
+        agentId: file.replace(/\.jsonl$/, "").replace(/^agent-/, ""),
+      });
+    }
   }
 
-  for (const file of files) {
-    if (!file.endsWith(".jsonl")) continue;
+  for (const { path, agentId } of subagentFiles) {
     // Agent ID derived from filename must match data.agentId in progress messages.
     // Convention: filename is "agent-<id>.jsonl", progress has data.agentId = "<id>".
     // If Claude Code changes this convention, subagent data won't be linked (silent miss).
-    const agentId = file.replace(/\.jsonl$/, "").replace(/^agent-/, "");
-
     // Read meta.json for agent type
     let agentType = "unknown";
     let description: string | undefined;
     try {
-      const metaPath = join(subagentsDir, file.replace(/\.jsonl$/, ".meta.json"));
+      const metaPath = join(dirname(path), `${basename(path, ".jsonl")}.meta.json`);
       const metaContent = await readFile(metaPath, "utf-8");
       const meta = JSON.parse(metaContent);
       agentType = meta.agentType || "unknown";
@@ -1033,7 +1049,7 @@ async function readSubagents(
 
     let content: string;
     try {
-      content = await readFile(join(subagentsDir, file), "utf-8");
+      content = await readFile(path, "utf-8");
     } catch {
       continue;
     }

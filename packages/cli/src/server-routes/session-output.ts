@@ -12,6 +12,7 @@ import {
 import { loadSavedCloudInfo, publishCloudWithOverlays } from "../publishers/cloud.js";
 import { checkPublishStatus, loadSavedGistInfo, publishGist } from "../publishers/gist.js";
 import { getErrorMessage, requireSlug, safeTargetId } from "../server-core.js";
+import { resolveReplayDir } from "../server-replay-catalog.js";
 import { scanForSecrets } from "../scan.js";
 import type { ReplaySession } from "../types.js";
 
@@ -32,12 +33,13 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
-    const targetDir = join(baseDir, result.slug);
     const gist = await loadSavedGistInfo(targetDir);
     if (!gist) return c.json({ gist: null });
     return c.json({ gist });
@@ -49,12 +51,14 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
-    const metaPath = join(baseDir, result.slug, ".vibe-replay-gist.json");
+    const metaPath = join(targetDir, ".vibe-replay-gist.json");
     await unlink(metaPath).catch(() => {});
     return c.json({ ok: true });
   });
@@ -65,12 +69,13 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
-    const targetDir = join(baseDir, result.slug);
     const cloud = await loadSavedCloudInfo(targetDir);
     if (!cloud) return c.json({ cloud: null });
     return c.json({ cloud });
@@ -82,12 +87,13 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
-    const targetDir = join(baseDir, result.slug);
     const body = await c.req.json();
     if (!body.id || !body.url) return c.json({ error: "Missing id/url" }, 400);
     const metaPath = join(targetDir, ".vibe-replay-cloud.json");
@@ -114,12 +120,14 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
+      targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
     } catch {
       return c.json({ error: "session not found" }, 404);
     }
-    const metaPath = join(baseDir, result.slug, ".vibe-replay-cloud.json");
+    const metaPath = join(targetDir, ".vibe-replay-cloud.json");
     await unlink(metaPath).catch(() => {});
     return c.json({ ok: true });
   });
@@ -130,10 +138,10 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    const targetDir = join(baseDir, result.slug);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),
@@ -166,10 +174,10 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    const targetDir = join(baseDir, result.slug);
 
     try {
       await loadSession(result.slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const body = await c.req.json().catch(() => ({}));
       const cloudResult = await publishCloudWithOverlays(targetDir, {
         visibility: body.visibility || "unlisted",
@@ -187,10 +195,10 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    const targetDir = join(baseDir, result.slug);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),
@@ -216,9 +224,9 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    const targetDir = join(baseDir, result.slug);
     try {
       await loadSession(result.slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const svgPath = join(targetDir, "session-preview.svg");
       const mdPath = join(targetDir, "github-summary.md");
       const gifPath = join(targetDir, "session-preview.gif");
@@ -266,10 +274,10 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    const targetDir = join(baseDir, result.slug);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
+      const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
       const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
       const targetSession = sessionForExternalOutput(
         sessionWithEffectiveContent(rawSession, overlaysData),

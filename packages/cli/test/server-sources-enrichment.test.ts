@@ -682,6 +682,36 @@ describe("sources enrichment helpers", () => {
     ).toBeUndefined();
   });
 
+  it("links a replay through a logical session's native ID aliases", () => {
+    type Replay = Parameters<typeof __testables.buildReplayMaps>[0][number];
+    const replay: Replay = {
+      slug: "group-launch-room",
+      baseDir: "/tmp/replays",
+      sessionId: "member-agent-id",
+      provider: "grok-bot",
+      project: "launch room",
+      startTime: "2026-01-01T00:00:00.000Z",
+      stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+      replaySize: 100,
+      replayOutdated: false,
+      hasAnnotations: false,
+      annotationCount: 0,
+    };
+
+    expect(
+      __testables.findReplayForSource(
+        {
+          provider: "grok-bot",
+          sessionId: "group-launch-room",
+          sessionIds: ["group-launch-room", "member-agent-id"],
+          slug: "group-launch-room",
+        },
+        __testables.buildReplayMaps([replay]),
+        new Map([[providerSlugKey("grok-bot", "group-launch-room"), 1]]),
+      ),
+    ).toBe(replay);
+  });
+
   it("does not use a slug when multiple source sessions share it", () => {
     type Replay = Parameters<typeof __testables.buildReplayMaps>[0][number];
     const replay: Replay = {

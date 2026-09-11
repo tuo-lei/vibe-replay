@@ -193,6 +193,73 @@ describe("parser — per-model token usage breakdown", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("reads subagents from every Claude resume shard", async () => {
+    const tempDir = await mkdtemp(resolve(tmpdir(), "vibe-replay-subagent-shards-"));
+    const shard = async (name: string, toolId: string, agentId: string) => {
+      const mainPath = resolve(tempDir, `${name}.jsonl`);
+      const subagentsDir = resolve(tempDir, name, "subagents");
+      await mkdir(subagentsDir, { recursive: true });
+      await writeFile(
+        mainPath,
+        [
+          {
+            type: "assistant",
+            message: {
+              role: "assistant",
+              id: `${name}-parent`,
+              content: [
+                {
+                  type: "tool_use",
+                  id: toolId,
+                  name: "Agent",
+                  input: { prompt: `Inspect ${name}`, subagent_type: "Explore" },
+                },
+              ],
+            },
+          },
+          {
+            type: "progress",
+            parentToolUseID: toolId,
+            data: { type: "agent_progress", agentId },
+          },
+        ]
+          .map((line) => JSON.stringify(line))
+          .join("\n"),
+      );
+      await writeFile(
+        resolve(subagentsDir, `agent-${agentId}.jsonl`),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            id: `${agentId}-message`,
+            model: "claude-haiku-4-5-20251001",
+            content: [{ type: "text", text: `Result from ${name}` }],
+          },
+        }),
+      );
+      return mainPath;
+    };
+
+    const firstPath = await shard("first", "tool-first", "agent-first");
+    const secondPath = await shard("second", "tool-second", "agent-second");
+
+    try {
+      const result = await parseClaudeCodeSession([firstPath, secondPath]);
+      expect(result.subAgentSummary?.map((summary) => summary.agentId)).toEqual([
+        "agent-first",
+        "agent-second",
+      ]);
+      expect(
+        result.turns
+          .flatMap((turn) => turn.blocks)
+          .filter((block) => block.type === "tool_use" && block._subAgent),
+      ).toHaveLength(2);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

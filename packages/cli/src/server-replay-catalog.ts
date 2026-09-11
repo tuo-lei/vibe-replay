@@ -170,14 +170,8 @@ export async function loadSessionFromDisk(
   slug: string,
   targetId?: string,
 ): Promise<ReplaySession> {
-  let replayPath = join(baseDir, slug, "replay.json");
-  try {
-    await stat(replayPath);
-  } catch {
-    const fallback = resolve("./vibe-replay", slug, "replay.json");
-    await stat(fallback);
-    replayPath = fallback;
-  }
+  const replayDir = await resolveReplayDir(baseDir, slug, targetId);
+  const replayPath = join(replayDir, "replay.json");
   const raw = await readFile(replayPath, "utf-8");
   const session = JSON.parse(raw) as ReplaySession;
   const sessionTargetId =
@@ -185,9 +179,35 @@ export async function loadSessionFromDisk(
   if (sessionTargetId !== targetId) {
     throw new Error("Session does not belong to the requested SSH source");
   }
-  const annotations = await loadAnnotations(baseDir, slug, targetId);
+  const annotations = await loadAnnotations(resolveReplayBaseDir(replayDir), slug, targetId);
   if (annotations.length > 0) session.annotations = annotations;
   return session;
+}
+
+/** Resolve the directory containing a replay, including the legacy CWD fallback. */
+export async function resolveReplayDir(
+  baseDir: string,
+  slug: string,
+  targetId?: string,
+): Promise<string> {
+  const candidates = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const candidate of candidates) {
+    try {
+      const raw = await readFile(join(candidate, "replay.json"), "utf-8");
+      const session = JSON.parse(raw) as ReplaySession;
+      const candidateTargetId =
+        session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
+      if (candidateTargetId !== targetId) continue;
+      return candidate;
+    } catch {
+      // Try the next compatible replay location.
+    }
+  }
+  throw new Error(`Session not found: ${slug}`);
+}
+
+function resolveReplayBaseDir(replayDir: string): string {
+  return resolve(replayDir, "..");
 }
 
 export function normalizeSessionProjectsForHome(

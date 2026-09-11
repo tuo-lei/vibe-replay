@@ -136,8 +136,12 @@ export default function Player({
   returnToLandingRef,
   live,
 }: Props) {
-  const isReadOnly = viewerMode === "readonly";
   const isLive = !!live;
+  // Live payloads are editor-streamed, but they have no stable replay slug
+  // for annotation/overlay/export APIs. Keep the stream usable without
+  // presenting controls that would silently target an invalid session.
+  const effectiveViewerMode: ViewerMode = isLive ? "readonly" : viewerMode;
+  const isReadOnly = effectiveViewerMode === "readonly";
   // In live mode, skip the landing hero — the user explicitly asked to tail
   // a running session, so we should drop them straight into the conversation.
   const [landed, setLanded] = useState(isLive);
@@ -168,15 +172,15 @@ export default function Player({
     () => playerDrawerFromUrl() === "comments",
   );
   const [studioDrawerOpen, setStudioDrawerOpen] = useState(
-    () => viewerMode === "editor" && playerDrawerFromUrl() === "ai",
+    () => effectiveViewerMode === "editor" && playerDrawerFromUrl() === "ai",
   );
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
   const [selectionAnnotatePrompt, setSelectionAnnotatePrompt] =
     useState<SelectionAnnotatePrompt | null>(null);
   const [isOutlineOpen, setIsOutlineOpen] = useState(true);
-  const annotationActions = useAnnotations(session, viewerMode);
-  const overlayActions = useOverlays(session, viewerMode);
+  const annotationActions = useAnnotations(session, effectiveViewerMode, isLive);
+  const overlayActions = useOverlays(session, effectiveViewerMode);
   const { effectiveSession } = overlayActions;
   const { annotations } = annotationActions;
 
@@ -209,11 +213,11 @@ export default function Player({
     const handlePopState = () => {
       const drawer = playerDrawerFromUrl();
       setCommentDrawerOpen(drawer === "comments");
-      setStudioDrawerOpen(viewerMode === "editor" && drawer === "ai");
+      setStudioDrawerOpen(effectiveViewerMode === "editor" && drawer === "ai");
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [viewerMode]);
+  }, [effectiveViewerMode]);
 
   // Force "all" display mode in live — compact hides thinking and collapses
   // tools, which makes a streaming session look like nothing is happening
@@ -747,7 +751,7 @@ export default function Player({
     seekTo(curr - 1);
   }, [isLive, session.scenes.length, seekTo]);
 
-  const hasAiStudio = viewerMode === "editor";
+  const hasAiStudio = effectiveViewerMode === "editor";
   const hasAiFeedback = useMemo(
     () => annotations.some((a) => a.author === "vibe-feedback"),
     [annotations],
@@ -1130,7 +1134,7 @@ export default function Player({
           {activeView === "export" && (
             <ExportView
               actions={annotationActions}
-              viewerMode={viewerMode}
+              viewerMode={effectiveViewerMode}
               readOnly={isReadOnly}
               session={effectiveSession}
             />
@@ -1160,7 +1164,7 @@ export default function Player({
               onOpenSearch={() => setSearchOpen(true)}
               onOpenOutline={() => setMobileDrawerOpen(true)}
               onShowHelp={() => setShowHelp(true)}
-              reserveAssistantSpace={viewerMode === "editor"}
+              reserveAssistantSpace={effectiveViewerMode === "editor"}
             />
           </div>
         )}

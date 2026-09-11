@@ -42,6 +42,7 @@ export function findReplayForSource(
   source: {
     provider: string;
     sessionId?: string;
+    sessionIds?: string[];
     slug: string;
     location?: SessionInfo["location"];
   },
@@ -49,9 +50,10 @@ export function findReplayForSource(
   sourceSlugCounts: ReadonlyMap<string, number>,
 ): ReplaySummary | undefined {
   const targetId = source.location?.kind === "ssh" ? source.location.id : undefined;
-  if (source.sessionId) {
+  for (const sessionId of [source.sessionId, ...(source.sessionIds || [])]) {
+    if (!sessionId) continue;
     const bySessionId = maps.bySessionId.get(
-      providerSessionKey(source.provider, source.sessionId, targetId),
+      providerSessionKey(source.provider, sessionId, targetId),
     );
     if (bySessionId) return bySessionId;
   }

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { __testables } from "../src/cursor/discover.js";
 
 const tempDirs: string[] = [];
@@ -200,5 +201,46 @@ describe("Cursor transcript metadata discovery", () => {
       firstPrompt: "Count this prompt",
       promptCount: 1,
     });
+  });
+
+  it("hides a top-level transcript whose prompt is delegated by another session", () => {
+    const session = (sessionId: string, firstPrompt: string, filePath: string) =>
+      ({
+        provider: "cursor",
+        sessionId,
+        slug: sessionId,
+        project: "/repo",
+        cwd: "/repo",
+        version: "",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        lineCount: 2,
+        fileSize: 100,
+        filePath,
+        filePaths: [filePath],
+        firstPrompt,
+      }) as SessionInfo;
+    const parent = session("parent", "main request", "/parent.jsonl");
+    const child = session(
+      "child",
+      "Inspect the parser and verify the delegated result thoroughly.",
+      "/child.jsonl",
+    );
+    const unrelatedChild = {
+      ...child,
+      sessionId: "unrelated-child",
+      filePath: "/other-project/child.jsonl",
+      filePaths: ["/other-project/child.jsonl"],
+      project: "/other-project",
+      cwd: "/other-project",
+    };
+
+    expect(
+      __testables.findTopLevelSubagentSessionIds(
+        [parent, child, unrelatedChild],
+        new Map([
+          ["/parent.jsonl", ["Inspect the parser and verify the delegated result thoroughly."]],
+        ]),
+      ),
+    ).toEqual(new Set(["child"]));
   });
 });

@@ -106,6 +106,7 @@ async function extractGrokBotSessionInfo(
   const profile = await readAgentProfile(transcriptsRoot, sessionId);
   const group = await readAgentGroup(transcriptsRoot, sessionId, profile);
   const groupTitle = stats.groupTitle || group?.title || profile?.groupTitle;
+  const groupId = group?.id || profile?.groupId;
   const cwd = profile?.cwd || profile?.name || groupTitle || sessionId;
   const gitRepo = resolveGitRepo && looksLikePath(cwd) ? await readGitRepo(cwd) : profile?.gitRepo;
   const title = groupTitle
@@ -121,6 +122,7 @@ async function extractGrokBotSessionInfo(
     project,
     cwd,
     version: "1",
+    ...(groupId ? { groupId } : {}),
     ...(profile?.gitBranch ? { gitBranch: profile.gitBranch } : {}),
     ...(gitRepo ? { gitRepo } : {}),
     timestamp: stats.timestamp || fileMtime,

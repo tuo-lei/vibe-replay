@@ -98,6 +98,33 @@ describe("useAnnotations storage identity", () => {
     expect(result.current.annotations).toEqual([]);
   });
 
+  it("skips local drafts while live and restores embedded annotations afterward", async () => {
+    const draft = [{ ...annotation, body: "Local draft" }];
+    localStorage.setItem(
+      annotationStorageKey("claude-code", "shared-session"),
+      JSON.stringify(draft),
+    );
+    const liveSession = { ...session("claude-code"), annotations: [] };
+    const replaySession = { ...session("claude-code"), annotations: [annotation] };
+
+    const { result, rerender } = renderHook(
+      ({ live }: { live: boolean }) =>
+        useAnnotations(live ? liveSession : replaySession, "readonly", live),
+      { initialProps: { live: true } },
+    );
+
+    expect(result.current.annotations).toEqual([]);
+    expect(localStorage.getItem(annotationStorageKey("claude-code", "shared-session"))).toBe(
+      JSON.stringify(draft),
+    );
+
+    rerender({ live: false });
+    await waitFor(() => expect(result.current.annotations).toEqual([annotation]));
+    expect(localStorage.getItem(annotationStorageKey("claude-code", "shared-session"))).toBe(
+      JSON.stringify(draft),
+    );
+  });
+
   it("does not load local drafts into an SSH session with the same provider and ID", async () => {
     const remote = {
       kind: "ssh" as const,

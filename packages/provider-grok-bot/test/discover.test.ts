@@ -2,8 +2,10 @@ import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { getGrokBotTranscriptRoots } from "../src/grok-bot/config.js";
 import { discoverGrokBotSessions } from "../src/grok-bot/discover.js";
+import { mergeDiscoveredGroupSessions } from "../src/grok-bot/parser.js";
 
 const originalTranscriptsDir = process.env.GROK_BOT_TRANSCRIPTS_DIR;
 const originalVibeDir = process.env.VIBE_REPLAY_GROK_BOT_DIR;
@@ -370,6 +372,109 @@ It's your turn, Vibe Replay GTM.`,
     expect(sessions[0].filePaths).toHaveLength(2);
     expect(sessions[0].filePaths.some((path) => path.includes(engId))).toBe(true);
     expect(sessions[0].filePaths.some((path) => path.includes(gtmId))).toBe(true);
+  });
+
+  it("keeps same-title rooms with different group IDs separate and preserves member IDs", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "vibe-grok-bot-group-id-"));
+    tempDirs.push(dataRoot);
+    const transcripts = join(dataRoot, "agent-transcripts");
+    const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const writeRoom = async (agentId: string, groupId: string, prompt: string) => {
+      await writeSession(transcripts, agentId, [
+        {
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `[Group chat: "Same room title"]\nNew messages in the room (oldest first):\nUser: ${prompt}\nIt's your turn, Agent.`,
+              },
+            ],
+          },
+        },
+      ]);
+      await mkdir(join(dataRoot, "agents", agentId), { recursive: true });
+      await writeFile(
+        join(dataRoot, "agents", agentId, "profile.json"),
+        JSON.stringify({ name: "Agent", groupTitle: "Same room title", groupId }),
+        "utf-8",
+      );
+    };
+    await writeRoom(firstId, "agent_a", "first room prompt");
+    await writeRoom(secondId, "agent-a", "second room prompt");
+
+    const sessions = await discoverGrokBotSessions([transcripts], false);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.groupId).sort()).toEqual(["agent-a", "agent_a"]);
+    expect(sessions.map((session) => session.sessionId).sort()).toEqual([firstId, secondId].sort());
+  });
+
+  it("keeps normalized group ID collisions distinct in merged session IDs", () => {
+    const member = (sessionId: string, groupId: string): SessionInfo =>
+      ({
+        provider: "grok-bot",
+        sessionId,
+        slug: sessionId,
+        title: "Group: Same room title",
+        project: "Same room title",
+        cwd: "Same room title",
+        version: "1",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        lineCount: 1,
+        fileSize: 1,
+        filePath: `/tmp/${sessionId}.jsonl`,
+        filePaths: [`/tmp/${sessionId}.jsonl`],
+        firstPrompt: "prompt",
+        groupId,
+      }) as SessionInfo;
+
+    const merged = mergeDiscoveredGroupSessions([
+      member("agent-a-1", "agent_a"),
+      member("agent-a-2", "agent_a"),
+      member("agent-b-1", "agent-a"),
+      member("agent-b-2", "agent-a"),
+    ]);
+
+    expect(merged).toHaveLength(2);
+    expect(new Set(merged.map((session) => session.sessionId)).size).toBe(2);
+    expect(merged.every((session) => session.sessionId !== "group-same-room-title")).toBe(true);
+    expect(merged.some((session) => session.sessionIds?.includes("agent-a-1"))).toBe(true);
+    expect(merged.some((session) => session.sessionIds?.includes("agent-b-1"))).toBe(true);
+  });
+
+  it("bridges an ID-less member when one room ID is known", () => {
+    const member = (sessionId: string, groupId?: string): SessionInfo =>
+      ({
+        provider: "grok-bot",
+        sessionId,
+        slug: sessionId,
+        title: "Group: Partially labeled room",
+        project: "Partially labeled room",
+        cwd: "Partially labeled room",
+        version: "1",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        lineCount: 1,
+        fileSize: 1,
+        filePath: `/tmp/${sessionId}.jsonl`,
+        filePaths: [`/tmp/${sessionId}.jsonl`],
+        firstPrompt: "prompt",
+        ...(groupId ? { groupId } : {}),
+      }) as SessionInfo;
+
+    const merged = mergeDiscoveredGroupSessions([
+      member("labeled-member", "room-one"),
+      member("unlabeled-member"),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.groupId).toBe("room-one");
+    expect(merged[0]?.sessionId).toBe("group-partially-labeled-room-cm9vbS1vbmU");
+    expect(merged[0]?.filePaths).toHaveLength(2);
+    expect(merged[0]?.sessionIds).toEqual(
+      expect.arrayContaining(["labeled-member", "unlabeled-member"]),
+    );
   });
 
   it("uses group.json / profile groupTitle when the transcript has not named the room yet", async () => {
