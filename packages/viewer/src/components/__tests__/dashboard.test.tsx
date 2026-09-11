@@ -9,6 +9,7 @@ import Dashboard, {
   contextFootprintSummary,
   findSessionScanData,
   getSessionRangeTimestamp,
+  sessionExplorerCountLabel,
   type SessionScanData,
   shouldIncludeSessionForFacets,
   shouldIncludeSessionForProject,
@@ -45,6 +46,12 @@ describe("Dashboard (smoke)", () => {
     // Sidebar facet headers.
     expect(screen.getByText(/Provider/)).toBeTruthy();
     expect(screen.getByText(/Project path/)).toBeTruthy();
+  });
+
+  it("uses an explicit loading count before session data arrives", () => {
+    expect(sessionExplorerCountLabel(true, false, 0, 0)).toBe("Loading…");
+    expect(sessionExplorerCountLabel(false, false, 0, 0)).toBe("0 sessions");
+    expect(sessionExplorerCountLabel(false, true, 12, 40)).toBe("12 matching");
   });
 
   it("kicks off a data fetch on mount", async () => {
