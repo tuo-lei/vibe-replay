@@ -111,6 +111,13 @@ function dateKey(d: Date): string {
   return localDayKey(d)!;
 }
 
+/** Move by calendar days in the viewer's local timezone, across DST safely. */
+export function localDayOffset(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
 function rangeDays(range: TimeRange): number {
   if (range === "7d") return 7;
   if (range === "30d") return 30;
@@ -227,13 +234,13 @@ function computeWeeklyTrend(sessionsPerDay: Record<string, number>, weeks: numbe
   // Find start of current week (Monday)
   const dayOfWeek = today.getDay();
   const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const currentMonday = new Date(today.getTime() - mondayOffset * DAY_MS);
+  const currentMonday = localDayOffset(today, -mondayOffset);
 
   for (let w = weeks - 1; w >= 0; w--) {
-    const weekStart = new Date(currentMonday.getTime() - w * 7 * DAY_MS);
+    const weekStart = localDayOffset(currentMonday, -w * 7);
     let sessions = 0;
     for (let d = 0; d < 7; d++) {
-      const day = new Date(weekStart.getTime() + d * DAY_MS);
+      const day = localDayOffset(weekStart, d);
       const key = dateKey(day);
       sessions += sessionsPerDay[key] || 0;
     }
@@ -532,9 +539,9 @@ export function ContributionHeatmap({
 
     // End on Saturday of current week
     const dow = today.getDay();
-    const endDate = new Date(today.getTime() + (6 - dow) * DAY_MS);
+    const endDate = localDayOffset(today, 6 - dow);
     const totalDays = weeks * 7;
-    const startDate = new Date(endDate.getTime() - (totalDays - 1) * DAY_MS);
+    const startDate = localDayOffset(endDate, -(totalDays - 1));
 
     let max = 0;
     const cols: Array<Array<{ date: string; count: number }>> = [];
@@ -542,7 +549,7 @@ export function ContributionHeatmap({
     let lastMonth = -1;
 
     for (let i = 0; i < totalDays; i++) {
-      const d = new Date(startDate.getTime() + i * DAY_MS);
+      const d = localDayOffset(startDate, i);
       const key = dateKey(d);
       const count = sessionsPerDay[key] || 0;
       const wi = Math.floor(i / 7);
@@ -651,7 +658,7 @@ function MiniHeatmap({ sessionsPerDay }: { sessionsPerDay: Record<string, number
     const result: Array<{ key: string; count: number }> = [];
     let max = 0;
     for (let i = totalDays - 1; i >= 0; i--) {
-      const d = new Date(today.getTime() - i * DAY_MS);
+      const d = localDayOffset(today, -i);
       const key = dateKey(d);
       const count = sessionsPerDay[key] || 0;
       if (count > max) max = count;
