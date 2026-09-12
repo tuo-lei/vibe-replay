@@ -759,7 +759,10 @@ export default function LocalChatAssistant({ context }: Props) {
                 ...current.slice(0, -1),
                 { ...last, content: errorMessage, streaming: false, error: true },
               ]
-            : [...current, { role: "assistant", content: errorMessage, error: true }].slice(-40);
+            : [
+                ...current,
+                { role: "assistant" as const, content: errorMessage, error: true },
+              ].slice(-40);
         });
         setError(err instanceof Error ? err.message : "Assistant request failed");
       }
