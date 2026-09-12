@@ -71,6 +71,9 @@ describe("Dashboard (smoke)", () => {
     const mobileNavigation = await waitFor(() =>
       screen.getByRole("navigation", { name: "Dashboard navigation" }),
     );
+    expect(document.activeElement).toBe(
+      within(mobileNavigation).getByRole("button", { name: "Home" }),
+    );
     expect(within(mobileNavigation).getByRole("button", { name: "Projects" })).toBeTruthy();
     expect(within(mobileNavigation).getByRole("button", { name: "Insights" })).toBeTruthy();
     expect(within(mobileNavigation).getByRole("button", { name: "Settings" })).toBeTruthy();

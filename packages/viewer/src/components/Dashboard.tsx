@@ -5666,6 +5666,7 @@ export default function Dashboard({
 
   useEffect(() => {
     if (!mobileNavOpen) return;
+    document.querySelector<HTMLButtonElement>("#dashboard-mobile-navigation button")?.focus();
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileNavOpen(false);
     };
