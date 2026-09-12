@@ -287,13 +287,21 @@ export default function App() {
   useOutsideClick(customRef, closeCustom, customOpen);
 
   if (loadState.status === "loading") {
+    const loadingParams = new URLSearchParams(window.location.search);
+    const liveRequested =
+      loadingParams.get("live") === "1" &&
+      loadingParams.get("view") !== "dashboard" &&
+      !loadingParams.get("session") &&
+      Boolean(loadingParams.get("provider") && loadingParams.get("sessionId"));
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
         <div className="text-center space-y-2">
           <div className="text-terminal-green font-sans font-bold text-sm animate-pulse">
-            LOADING SESSION...
+            {liveRequested ? "CONNECTING TO LIVE SESSION..." : "LOADING SESSION..."}
           </div>
-          <div className="text-terminal-dimmer font-mono text-xs">Preparing replay data</div>
+          <div className="text-terminal-dimmer font-mono text-xs">
+            {liveRequested ? "Waiting for the first live snapshot" : "Preparing replay data"}
+          </div>
         </div>
       </div>
     );
