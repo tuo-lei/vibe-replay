@@ -320,6 +320,7 @@ export default function App() {
                   gist: null,
                   cloud: null,
                   url: null,
+                  file: null,
                   live: null,
                   provider: null,
                   sessionId: null,
