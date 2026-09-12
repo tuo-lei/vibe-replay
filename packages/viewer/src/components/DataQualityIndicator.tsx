@@ -148,7 +148,7 @@ export function DataQualityIndicator({
       <button
         type="button"
         aria-expanded={open}
-        aria-label="Show data quality details"
+        aria-label={`Show data quality details${lines[0] ? `: ${lines[0]}` : ""}`}
         className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-terminal-orange/40 bg-terminal-orange/10 px-1 text-[10px] font-sans font-bold leading-none text-terminal-orange transition-colors hover:border-terminal-orange/70 hover:bg-terminal-orange/15 focus:outline-none focus:ring-2 focus:ring-terminal-orange/30"
         onClick={() => setOpen((value) => !value)}
         onFocus={() => setHovered(true)}
