@@ -1035,7 +1035,28 @@ export async function startServer(
     loadSession: (slug, targetId) => loadSessionFromDisk(baseDir, slug, targetId),
   });
 
-  registerLiveRoutes(app);
+  registerLiveRoutes(app, {
+    resolveSessionInfo: async (providerName, sessionId) => {
+      const cached = lastDiscoveredMergedSessions.find(
+        (session) =>
+          session.provider === providerName &&
+          (session.sessionId === sessionId || session.sessionIds?.includes(sessionId)),
+      );
+      if (cached) return cached;
+
+      const provider = getProvider(providerName);
+      if (!provider) return undefined;
+      const all = await provider.discover();
+      const seed = all.find(
+        (session) => session.sessionId === sessionId || session.sessionIds?.includes(sessionId),
+      );
+      if (!seed) return undefined;
+      const merged = mergeSameSessions(all);
+      return merged.find(
+        (session) => session.project === seed.project && session.slug === seed.slug,
+      );
+    },
+  });
 
   registerArchiveRoutes(app, { baseDir });
   registerSourceRoutes(app, {

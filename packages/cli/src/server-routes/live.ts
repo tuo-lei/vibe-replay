@@ -26,6 +26,13 @@ import { CLI_VERSION } from "../version.js";
 
 type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
 
+interface LiveRouteDeps {
+  resolveSessionInfo?: (
+    providerName: string,
+    sessionId: string,
+  ) => Promise<SessionInfo | undefined>;
+}
+
 export async function parseJsonlLiveSession(
   providerName: string,
   lines: string[],
@@ -78,7 +85,7 @@ async function readClaudeSessionState(sessionId: string): Promise<LiveSessionSta
 }
 
 /** Stream a provider session while its source files are changing. */
-export function registerLiveRoutes(app: Hono): void {
+export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
   app.get("/api/live", (c) => {
     const providerName = c.req.query("provider") || "";
     const sessionId = c.req.query("sessionId") || "";
@@ -108,7 +115,9 @@ export function registerLiveRoutes(app: Hono): void {
         return;
       }
 
-      const resolveSessionInfo = async () => {
+      const resolveLiveSessionInfo = async () => {
+        const cached = await deps.resolveSessionInfo?.(providerName, sessionId);
+        if (cached) return cached;
         const all = await provider.discover();
         const seed = all.find(
           (s) => s.sessionId === sessionId || s.sessionIds?.includes(sessionId),
@@ -118,7 +127,7 @@ export function registerLiveRoutes(app: Hono): void {
         return merged.find((s) => s.project === seed.project && s.slug === seed.slug);
       };
 
-      let sessionInfo = await resolveSessionInfo();
+      let sessionInfo = await resolveLiveSessionInfo();
       if (!sessionInfo) {
         await sendError(`Session not found: ${sessionId}`);
         return;
@@ -243,7 +252,7 @@ export function registerLiveRoutes(app: Hono): void {
         inFlight = true;
         try {
           if (Date.now() - lastResolvedAt >= RESOLVE_REFRESH_INTERVAL_MS) {
-            const fresh = await resolveSessionInfo();
+            const fresh = await resolveLiveSessionInfo();
             if (fresh) sessionInfo = fresh;
             lastResolvedAt = Date.now();
           }
