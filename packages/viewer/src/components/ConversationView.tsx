@@ -851,6 +851,11 @@ const GroupCard = memo(function GroupCard({
             ? `${userCommentCount} comment${userCommentCount > 1 ? "s" : ""}`
             : "Add comment"
         }
+        aria-label={
+          userCommentCount > 0
+            ? `${userCommentCount} comment${userCommentCount > 1 ? "s" : ""}`
+            : "Add comment"
+        }
       >
         {"\uD83D\uDCAC"}
         {userCommentCount > 0 && <span>{userCommentCount}</span>}
@@ -1364,6 +1369,11 @@ function CompactAssistantGroup({
               ? `${groupCommentCount} comment${groupCommentCount > 1 ? "s" : ""}`
               : "Add comment"
           }
+          aria-label={
+            groupCommentCount > 0
+              ? `${groupCommentCount} comment${groupCommentCount > 1 ? "s" : ""}`
+              : "Add comment"
+          }
         >
           {"\uD83D\uDCAC"}
           {groupCommentCount > 0 && <span>{groupCommentCount}</span>}
@@ -1490,6 +1500,9 @@ function CompactAssistantGroup({
                         : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
                     }`}
                     title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                    aria-label={
+                      count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"
+                    }
                   >
                     {"\uD83D\uDCAC"}
                     {count > 0 && <span>{count}</span>}
@@ -1632,6 +1645,7 @@ function BatchedScenes({
                       : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
                   }`}
                   title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                  aria-label={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
                 >
                   {"\uD83D\uDCAC"}
                   {count > 0 && <span>{count}</span>}
@@ -1803,6 +1817,9 @@ function ToolBatch({
                         : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
                     }`}
                     title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                    aria-label={
+                      count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"
+                    }
                   >
                     {"\uD83D\uDCAC"}
                     {count > 0 && <span>{count}</span>}
