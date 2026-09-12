@@ -789,8 +789,8 @@ export default function Player({
                     className="ui-caption hidden md:flex items-center gap-2"
                     aria-label={
                       overlayActions.showAllOriginals
-                        ? "Show modified replay content"
-                        : "Show original replay content"
+                        ? "Original; show modified replay content"
+                        : "Modified; show original replay content"
                     }
                     title={
                       overlayActions.showAllOriginals
@@ -853,7 +853,11 @@ export default function Player({
                     openCommentDrawer();
                   }}
                   className="md:hidden flex items-center gap-1 text-terminal-dim hover:text-terminal-text transition-colors"
-                  aria-label="Open comments"
+                  aria-label={`Open comments${
+                    annotationActions.annotations.length > 0
+                      ? `, ${annotationActions.annotations.length} annotation${annotationActions.annotations.length === 1 ? "" : "s"}`
+                      : ""
+                  }`}
                   title="Comments"
                 >
                   <svg
