@@ -2273,6 +2273,7 @@ function SessionsPanel() {
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
   const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
   const [rawSourceTarget, setRawSourceTarget] = useState<{
@@ -2635,13 +2636,18 @@ function SessionsPanel() {
   };
 
   const handleDeleteReplay = async (slug: string, location?: SessionLocation) => {
+    setDeleteError(null);
     try {
       const targetId = location?.kind === "ssh" ? location.id : undefined;
       const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
       const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
         method: "DELETE",
       });
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        setDeleteError(data.error || "Failed to delete replay");
+        return;
+      }
       // Remove the replay from the source so the card switches to "Generate"
       setSources((prev) =>
         prev.map((s) =>
@@ -2652,7 +2658,7 @@ function SessionsPanel() {
         ),
       );
     } catch {
-      // ignore
+      setDeleteError("Failed to delete replay");
     }
   };
 
@@ -3664,6 +3670,19 @@ function SessionsPanel() {
             <button
               onClick={() => setGenerateError(null)}
               className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+        {deleteError && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
+            <span>{deleteError}</span>
+            <button
+              type="button"
+              onClick={() => setDeleteError(null)}
+              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
+              aria-label="Dismiss delete error"
             >
               &times;
             </button>
