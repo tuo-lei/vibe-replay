@@ -321,12 +321,13 @@ export function SessionLoadingBanner(props: {
   description: string;
 }) {
   return (
-    <output
+    <div
       aria-live="polite"
+      aria-atomic="true"
       className="mb-3 w-full animate-in fade-in slide-in-from-top-2 duration-300"
     >
       <SessionLoadingRibbon {...props} />
-    </output>
+    </div>
   );
 }
 
