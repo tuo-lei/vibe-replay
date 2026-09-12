@@ -1020,6 +1020,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             href={`${cloudApiUrl}/r/${cloudInfo.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
+                            referrerPolicy="no-referrer"
                             className="flex-1 text-xs font-mono text-terminal-purple hover:text-terminal-text transition-colors truncate"
                           >
                             {`${cloudApiUrl}/r/${cloudInfo.id}`}
@@ -1116,6 +1117,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                               href={gistInfo.viewerUrl}
                               target="_blank"
                               rel="noopener noreferrer"
+                              referrerPolicy="no-referrer"
                               className="flex-1 text-xs font-mono text-terminal-blue hover:text-terminal-text transition-colors truncate"
                             >
                               {gistInfo.viewerUrl}
@@ -1159,6 +1161,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             href={gistInfo.gistUrl}
                             target="_blank"
                             rel="noopener noreferrer"
+                            referrerPolicy="no-referrer"
                             className="text-[11px] font-mono text-terminal-blue hover:text-terminal-text transition-colors"
                           >
                             Open on GitHub
@@ -1358,6 +1361,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                               href={ghExportResult.replayUrl}
                               target="_blank"
                               rel="noopener noreferrer"
+                              referrerPolicy="no-referrer"
                               className="text-terminal-blue hover:text-terminal-text transition-colors truncate"
                             >
                               {ghExportResult.replayUrl}
