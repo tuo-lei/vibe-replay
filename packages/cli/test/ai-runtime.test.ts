@@ -17,6 +17,7 @@ import {
   createSensitiveTextStreamRedactor,
   createAiRuntime,
   createBrowserAuthInteraction,
+  customToolCompatibilityMessage,
   FileCredentialStore,
   PiAiRuntime,
 } from "../src/ai-runtime.js";
@@ -24,6 +25,20 @@ import {
 const temporaryRoots: string[] = [];
 const POSIX_FILE_MODES = process.platform !== "win32";
 const CREDENTIAL_WORKER_TEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 5_000;
+
+describe("custom AI compatibility errors", () => {
+  it("explains unsupported Chat Completions tools without exposing gateway details", () => {
+    expect(
+      customToolCompatibilityMessage(
+        "custom-openai",
+        "Function tools are not supported for this model in /v1/chat/completions",
+      ),
+    ).toContain("Responses-compatible gateway");
+    expect(customToolCompatibilityMessage("openai", "Function tools are not supported")).toBe(
+      undefined,
+    );
+  });
+});
 
 const credentialWorkerSource = `
 import { FileCredentialStore } from ${JSON.stringify(new URL("../src/ai-runtime.ts", import.meta.url).href)};

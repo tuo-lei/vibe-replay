@@ -861,6 +861,24 @@ function requireToolPayload(payload: unknown, required: boolean): unknown {
   return required ? { ...payload, tool_choice: "required" } : payload;
 }
 
+function normalizeCustomOpenAiPayload(payload: unknown): unknown {
+  if (!isRecord(payload) || !("reasoning_effort" in payload)) return payload;
+  return { ...payload, reasoning_effort: "none" };
+}
+
+export function customToolCompatibilityMessage(
+  providerId: string,
+  message: string,
+): string | undefined {
+  if (
+    providerId !== CUSTOM_OPENAI_PROVIDER_ID ||
+    !/function tools.+(?:not supported|unsupported).+chat\/completions/i.test(message)
+  ) {
+    return undefined;
+  }
+  return "This model does not support tool calling on the configured Chat Completions endpoint. Choose a model with Chat Completions tool support or configure a Responses-compatible gateway.";
+}
+
 function customEndpointUrl(baseUrl: string, endpoint: "models" | "model"): string {
   return `${baseUrl.replace(/\/+$/, "")}/${endpoint}`;
 }
@@ -902,10 +920,14 @@ function customModelFromDiscovery(
     raw.max_output_tokens ?? raw.max_tokens ?? raw.max_completion_tokens,
     Math.min(contextWindow, 32_768),
   );
-  const reasoning =
-    raw.reasoning === true ||
-    raw.supports_reasoning === true ||
-    (isRecord(raw.capabilities) && raw.capabilities.reasoning === true);
+  // Custom gateways frequently advertise reasoning models but reject
+  // reasoning_effort when function tools are present. AI Studio always uses a
+  // result tool, so leave this optional hint off for the interoperable path.
+  const reasoning = false;
+  const maxTokensField =
+    typeof raw.max_completion_tokens === "number" || /^(?:gpt-[56]|o[134])/i.test(id)
+      ? "max_completion_tokens"
+      : "max_tokens";
 
   return {
     id,
@@ -919,13 +941,14 @@ function customModelFromDiscovery(
     contextWindow,
     maxTokens,
     // Unknown OpenAI-compatible proxies are more interoperable when Pi sends
-    // the legacy system role, max_tokens, and ordinary JSON-schema tools.
+    // the legacy system role and ordinary JSON-schema tools. Newer OpenAI model
+    // families use max_completion_tokens instead of max_tokens.
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,
       supportsReasoningEffort: false,
       supportsUsageInStreaming: false,
-      maxTokensField: "max_tokens",
+      maxTokensField,
       supportsStrictMode: false,
     },
   };
@@ -1493,7 +1516,9 @@ export class PiAiRuntime implements AiRuntime {
                     const replaced = streamOptions?.onPayload
                       ? await streamOptions.onPayload(payload, payloadModel)
                       : payload;
-                    return requireToolPayload(replaced ?? payload, !!options.resultTool);
+                    return normalizeCustomOpenAiPayload(
+                      requireToolPayload(replaced ?? payload, !!options.resultTool),
+                    );
                   },
                 }
               : {}),
@@ -1561,6 +1586,9 @@ export class PiAiRuntime implements AiRuntime {
       if (cancelled || options.signal?.aborted) {
         throw new Error("AI Studio operation cancelled", { cause: error });
       }
+      const message = error instanceof Error ? error.message : String(error);
+      const compatibilityMessage = customToolCompatibilityMessage(options.providerId, message);
+      if (compatibilityMessage) throw new Error(compatibilityMessage, { cause: error });
       throw error;
     } finally {
       if (deadline) clearTimeout(deadline);
