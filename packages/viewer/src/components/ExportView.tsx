@@ -49,19 +49,34 @@ function SectionHeader({ title, color }: { title: string; color: string }) {
   );
 }
 
+export function copyButtonLabel(copied: boolean, failed: boolean, label = "Copy"): string {
+  if (copied) return "Copied!";
+  if (failed) return "Copy failed";
+  return label;
+}
+
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   return (
     <button
       onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        try {
+          await navigator.clipboard.writeText(text);
+          setFailed(false);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          setCopied(false);
+          setFailed(true);
+          setTimeout(() => setFailed(false), 2000);
+        }
       }}
       className="ui-pill-compact text-terminal-dim hover:text-terminal-text transition-colors rounded bg-terminal-surface hover:bg-terminal-surface-hover border border-terminal-border-subtle"
       title="Copy to clipboard"
+      aria-live="polite"
     >
-      {copied ? "Copied!" : label || "Copy"}
+      {copyButtonLabel(copied, failed, label)}
     </button>
   );
 }
