@@ -654,7 +654,7 @@ export default function LocalChatAssistant({ context }: Props) {
       const params = new URLSearchParams(window.location.search);
       const body = {
         messages: nextMessages
-          .filter((message) => remoteDataEnabled || !message.remoteDataUsed)
+          .filter((message) => !message.error && (remoteDataEnabled || !message.remoteDataUsed))
           .map(({ role, content: messageContent }) => ({
             role,
             content: messageContent,
@@ -753,9 +753,21 @@ export default function LocalChatAssistant({ context }: Props) {
       } else {
         setMessages((current) => {
           const last = current[current.length - 1];
+          const errorMessage = err instanceof Error ? err.message : "Assistant request failed";
           return last?.role === "assistant" && last.streaming
-            ? [...current.slice(0, -1), { ...last, streaming: false, error: true }]
-            : current;
+            ? [
+                ...current.slice(0, -1),
+                {
+                  ...last,
+                  content: last.content ? `${last.content}\n\n${errorMessage}` : errorMessage,
+                  streaming: false,
+                  error: true,
+                },
+              ]
+            : [
+                ...current,
+                { role: "assistant" as const, content: errorMessage, error: true },
+              ].slice(-40);
         });
         setError(err instanceof Error ? err.message : "Assistant request failed");
       }
