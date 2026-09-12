@@ -987,6 +987,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
   const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
   const [generateErrorSessionKey, setGenerateErrorSessionKey] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
@@ -1210,13 +1211,18 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   };
 
   const handleDeleteReplay = async (slug: string, location?: SessionLocation) => {
+    setDeleteError(null);
     try {
       const targetId = location?.kind === "ssh" ? location.id : undefined;
       const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
       const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
         method: "DELETE",
       });
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        setDeleteError(data.error || "Failed to delete replay");
+        return;
+      }
       setSources((prev) =>
         prev.map((s) =>
           (s.slug === slug || s.existingReplay === slug || s.replay?.slug === slug) &&
@@ -1226,7 +1232,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         ),
       );
     } catch {
-      // ignore
+      setDeleteError("Failed to delete replay");
     }
   };
 
@@ -1440,6 +1446,22 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-5 space-y-5">
         <RemoteSourceFailureNotice failures={failedRemoteSources} />
+        {deleteError && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-lg bg-terminal-red-subtle px-3 py-2.5 text-xs font-mono text-terminal-red shadow-layer-sm"
+          >
+            <span>{deleteError}</span>
+            <button
+              type="button"
+              onClick={() => setDeleteError(null)}
+              className="ml-auto text-terminal-red/60 transition-colors hover:text-terminal-red"
+              aria-label="Dismiss delete error"
+            >
+              &times;
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] lg:items-stretch">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
