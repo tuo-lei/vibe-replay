@@ -287,7 +287,12 @@ export default function App() {
   useOutsideClick(customRef, closeCustom, customOpen);
 
   if (loadState.status === "loading") {
-    const liveRequested = new URLSearchParams(window.location.search).get("live") === "1";
+    const loadingParams = new URLSearchParams(window.location.search);
+    const liveRequested =
+      loadingParams.get("live") === "1" &&
+      loadingParams.get("view") !== "dashboard" &&
+      !loadingParams.get("session") &&
+      Boolean(loadingParams.get("provider") && loadingParams.get("sessionId"));
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
         <div className="text-center space-y-2">
