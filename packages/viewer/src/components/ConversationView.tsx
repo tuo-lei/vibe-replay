@@ -1783,6 +1783,11 @@ function ToolBatch({
               ? `${batchCommentCount} comment${batchCommentCount > 1 ? "s" : ""}`
               : "Add comment"
           }
+          aria-label={
+            batchCommentCount > 0
+              ? `${batchCommentCount} comment${batchCommentCount > 1 ? "s" : ""}`
+              : "Add comment"
+          }
         >
           {"\uD83D\uDCAC"}
           {batchCommentCount > 0 && <span>{batchCommentCount}</span>}
