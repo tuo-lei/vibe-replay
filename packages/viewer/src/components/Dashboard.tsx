@@ -1210,6 +1210,14 @@ export function SessionDetailPopup({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {s.location?.kind === "ssh" && s.sessionId && (
+              <span
+                className="max-w-40 text-[10px] font-mono text-terminal-dimmer"
+                title="Live mode is unavailable for SSH sources"
+              >
+                Live unavailable for SSH
+              </span>
+            )}
             {s.sessionId && s.location?.kind !== "ssh" && (
               <button
                 onClick={() => navigateToLive(s.provider, s.sessionId!)}
