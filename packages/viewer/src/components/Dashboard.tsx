@@ -5657,6 +5657,7 @@ export default function Dashboard({
 
   const [tab, setTab] = useState<Tab>(getTabFromUrl());
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const handler = () => setTab(getTabFromUrl());
@@ -5668,7 +5669,10 @@ export default function Dashboard({
     if (!mobileNavOpen) return;
     document.querySelector<HTMLButtonElement>("#dashboard-mobile-navigation button")?.focus();
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileNavOpen(false);
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        mobileNavTriggerRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -5793,6 +5797,7 @@ export default function Dashboard({
             <div className="hidden md:block">{headerRight}</div>
             <button
               type="button"
+              ref={mobileNavTriggerRef}
               aria-label={
                 mobileNavOpen ? "Close dashboard navigation" : "Open dashboard navigation"
               }

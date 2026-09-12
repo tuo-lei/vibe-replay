@@ -78,7 +78,20 @@ describe("Dashboard (smoke)", () => {
     expect(within(mobileNavigation).getByRole("button", { name: "Insights" })).toBeTruthy();
     expect(within(mobileNavigation).getByRole("button", { name: "Settings" })).toBeTruthy();
 
-    within(mobileNavigation).getByRole("button", { name: "Settings" }).click();
+    const closeButton = screen.getByRole("button", { name: "Close dashboard navigation" });
+    closeButton.focus();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Open dashboard navigation" }),
+      ),
+    );
+    screen.getByRole("button", { name: "Open dashboard navigation" }).click();
+    const reopenedNavigation = await waitFor(() =>
+      screen.getByRole("navigation", { name: "Dashboard navigation" }),
+    );
+
+    within(reopenedNavigation).getByRole("button", { name: "Settings" }).click();
     expect(window.location.search).toContain("tab=settings");
     await waitFor(() =>
       expect(screen.queryByRole("navigation", { name: "Dashboard navigation" })).toBeNull(),
