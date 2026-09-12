@@ -1449,7 +1449,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         {deleteError && (
           <div
             role="alert"
-            className="flex items-center gap-2 rounded-lg bg-terminal-red-subtle px-3 py-2.5 text-xs font-mono text-terminal-red shadow-layer-sm"
+            className="fixed bottom-4 right-4 z-50 flex max-w-[min(32rem,calc(100vw-2rem))] items-center gap-2 rounded-lg bg-terminal-red-subtle px-3 py-2.5 text-xs font-mono text-terminal-red shadow-layer-xl"
           >
             <span>{deleteError}</span>
             <button
