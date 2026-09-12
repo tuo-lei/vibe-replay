@@ -307,6 +307,30 @@ export default function App() {
           <div className="text-terminal-dim font-mono text-xs">
             Use ?gist=&lt;id&gt; or ?url=&lt;replay-json-url&gt; or embed via CLI
           </div>
+          {(isEditor ||
+            window.location.hostname === "localhost" ||
+            window.location.hostname === "127.0.0.1" ||
+            window.location.hostname === "::1") && (
+            <button
+              type="button"
+              onClick={() =>
+                navigateTo({
+                  view: "dashboard",
+                  session: null,
+                  gist: null,
+                  cloud: null,
+                  url: null,
+                  file: null,
+                  live: null,
+                  provider: null,
+                  sessionId: null,
+                })
+              }
+              className="mt-4 rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-1.5 text-xs font-mono text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text"
+            >
+              Back to dashboard
+            </button>
+          )}
         </div>
       </div>
     );
