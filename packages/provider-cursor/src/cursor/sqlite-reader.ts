@@ -1203,7 +1203,7 @@ function hashWorkspacePaths(paths: string[]): string {
 function normalizeComposerPath(pathValue: string): string {
   return pathValue
     .replaceAll("\\", "/")
-    .replace(/\/{2,}/g, (slashes, offset) => (offset === 0 ? "//" : "/"))
+    .replace(/\/{2,}/g, (_slashes, offset) => (offset === 0 ? "//" : "/"))
     .replace(/[)"',]+$/g, "");
 }
 
