@@ -5746,6 +5746,7 @@ export default function Dashboard({
       key={id}
       type="button"
       onClick={() => handleTabChange(id)}
+      aria-current={tab === id ? "page" : undefined}
       className={`px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
         tab === id
           ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
