@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { PrLink, SubAgent, TurnStat, UsageEvent } from "@vibe-replay/types";
+import type { PrLink, Scene, TurnStat, UsageEvent } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import { estimateActiveDuration, getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, RawMessage } from "@vibe-replay/provider-contract";
@@ -570,9 +570,7 @@ export async function parseClaudeCodeLines(
           _result: result,
           _images: images,
           ...(isError ? { _isError: true } : {}),
-          // SubAgentParsed.scenes widens Scene.type to string during parsing;
-          // the final attached shape matches SubAgent after scanSubAgent post-processing.
-          ...(subAgent ? { _subAgent: subAgent as unknown as SubAgent } : {}),
+          ...(subAgent ? { _subAgent: subAgent } : {}),
           ...(toolDurationMs ? { _durationMs: toolDurationMs } : {}),
         };
       }
@@ -978,16 +976,7 @@ interface SubAgentParsed {
     cacheReadTokens: number;
   };
   model?: string;
-  scenes: Array<{
-    type: string;
-    content?: string;
-    toolName?: string;
-    input?: Record<string, any>;
-    result?: string;
-    hasResult?: boolean;
-    isError?: boolean;
-    timestamp?: string;
-  }>;
+  scenes: Scene[];
 }
 
 /**
