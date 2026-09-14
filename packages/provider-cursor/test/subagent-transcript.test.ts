@@ -482,6 +482,54 @@ describe("Cursor subagent transcript ingestion", () => {
     expect(exactBlock?.type === "tool_use" && exactBlock._subAgent?.agentId).toBe(exactAgentId);
   });
 
+  it("skips turn_ended records in subagent transcripts", async () => {
+    const prompt = "Inspect turn_ended handling.";
+    const leaked = "TURN_ENDED_SUBAGENT_MUST_NOT_LEAK";
+    const { transcript } = await writeNestedSession(
+      [delegationBlock(prompt)],
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: `Delegated task: ${prompt}` }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/real.ts" } }],
+          },
+        },
+        { type: "turn_ended", status: "success" },
+        {
+          type: "turn_ended",
+          status: "error",
+          role: "assistant",
+          message: {
+            content: [
+              { type: "text", text: leaked },
+              { type: "tool_use", name: "ReadFile", input: { path: "/repo/fake.ts" } },
+            ],
+          },
+        },
+      ],
+    );
+
+    const parsed = await parseCursorSession(transcript);
+    expect(parsed.parseWarnings).toBeUndefined();
+    const agent = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use" && block.name === "Agent");
+    expect(agent?.type === "tool_use" && agent._subAgent?.toolCalls).toBe(1);
+    expect(agent?.type === "tool_use" && agent._subAgent?.textResponses).toBe(0);
+    expect(agent?.type === "tool_use" && agent._subAgent?.scenes).toEqual([
+      expect.objectContaining({ type: "tool-call", input: { file_path: "/repo/real.ts" } }),
+    ]);
+    expect(JSON.stringify(agent)).not.toContain(leaked);
+    expect(JSON.stringify(agent)).not.toContain("/repo/fake.ts");
+
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    expect(JSON.stringify(replay.scenes)).not.toContain(leaked);
+  });
+
   it("skips progress records in subagent transcripts", async () => {
     const prompt = "Inspect progress handling.";
     const { transcript } = await writeNestedSession(
