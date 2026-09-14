@@ -268,6 +268,88 @@ describe("extractCodexSessionInfo transcript status", () => {
     expect(JSON.stringify(result)).not.toContain(secret);
   });
 
+  it("treats token_usage_record envelope records as known Codex metadata", async () => {
+    const filePath = await writeRollout(
+      [
+        JSON.stringify({
+          type: "session_meta",
+          ordinal: 0,
+          timestamp: "2026-09-08T09:00:00.000Z",
+          payload: { id: "codex-session", cwd: "/tmp/project" },
+        }),
+        JSON.stringify({
+          type: "token_usage_record",
+          ordinal: 1,
+          timestamp: "2026-09-08T09:00:01.000Z",
+          payload: {
+            turn_id: "turn-1",
+            thread_token_usage: {
+              input_tokens: 9999,
+              cached_input_tokens: 1111,
+              output_tokens: 888,
+              total_tokens: 10887,
+            },
+            usage: {
+              input_tokens: 5000,
+              cached_input_tokens: 200,
+              output_tokens: 100,
+            },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const result = await extractCodexSessionInfo(filePath, 2);
+
+    expect(result).toMatchObject({
+      sessionId: "codex-session",
+      firstPrompt: "",
+      promptCount: 0,
+      transcriptStatus: "no-prompts",
+    });
+  });
+
+  it("still discovers prompts when token_usage_record records are present", async () => {
+    const filePath = await writeRollout(
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-09-08T09:00:00.000Z",
+          payload: { id: "codex-session", cwd: "/tmp/project" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-09-08T09:00:01.000Z",
+          payload: { type: "user_message", message: "fix token usage drift" },
+        }),
+        JSON.stringify({
+          type: "token_usage_record",
+          timestamp: "2026-09-08T09:00:02.000Z",
+          payload: {
+            turn_id: "turn-1",
+            usage: { input_tokens: 5000, output_tokens: 100 },
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-09-08T09:00:03.000Z",
+          metadata: { namespace: "codex" },
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "second prompt" }],
+          },
+        }),
+      ].join("\n"),
+    );
+
+    expect(await extractCodexSessionInfo(filePath, 4)).toMatchObject({
+      firstPrompt: "fix token usage drift",
+      promptCount: 2,
+      transcriptStatus: undefined,
+    });
+  });
+
   it("keeps short human prompts replayable", async () => {
     const filePath = await writeRollout(
       [

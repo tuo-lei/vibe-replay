@@ -386,6 +386,13 @@ export function parseCodexLines(
       continue;
     }
 
+    if (obj.type === "token_usage_record") {
+      // Per-turn/thread billing snapshots. event_msg token_count already
+      // supplies session tokenUsage; keep this envelope metadata-only so we
+      // do not double-count or emit empty turns.
+      continue;
+    }
+
     if (obj.type !== "response_item") continue;
     const p = obj.payload || {};
 
