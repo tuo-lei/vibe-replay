@@ -2,9 +2,19 @@
  * Shared display-formatting helpers used across panels.
  */
 
+/** Normalize filesystem separators for consistent display across platforms. */
+export function normalizePathForDisplay(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+/** Return the meaningful path segments from either POSIX or Windows paths. */
+export function pathSegments(path: string): string[] {
+  return normalizePathForDisplay(path).split("/").filter(Boolean);
+}
+
 /** Last path segment of a project path (e.g. "/Users/x/Code/foo" → "foo"). */
 export function shortName(project: string): string {
-  return project.split("/").pop() || project;
+  return pathSegments(project).pop() || project;
 }
 
 /** Returns `singular` for count === 1, otherwise `pluralForm` (defaults to `${singular}s`). */

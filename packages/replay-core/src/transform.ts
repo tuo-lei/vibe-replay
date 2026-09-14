@@ -674,7 +674,7 @@ function buildMinimalCursorSubAgent(
 function classifyInjection(content: string): string {
   if (content.startsWith("Base directory for this skill:")) {
     const skillPath = content.split("\n")[0].replace("Base directory for this skill: ", "").trim();
-    const name = skillPath.split("/").pop() || "unknown";
+    const name = skillPath.split(/[\\/]/).pop() || "unknown";
     return `skill:${name}`;
   }
   if (content.startsWith("The user just ran /")) {

@@ -398,7 +398,7 @@ function skillNameFromCommand(command: string): string | undefined {
   const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|([^\s]+)/g)].map(
     (match) => match[1] ?? match[2] ?? match[3] ?? "",
   );
-  const executable = tokens[0]?.split("/").pop()?.toLowerCase();
+  const executable = tokens[0]?.split(/[\\/]/).pop()?.toLowerCase();
   if (!executable || !SKILL_READ_COMMANDS.has(executable)) return undefined;
 
   for (const token of tokens.slice(1)) {
@@ -1039,7 +1039,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       if (obj.isMeta) {
         const text = extractMetaText(obj.message?.content);
         if (text.startsWith("Base directory for this skill:")) {
-          const name = text.split("\n")[0].split("/").pop()?.trim();
+          const name = text.split("\n")[0].split(/[\\/]/).pop()?.trim();
           if (name) {
             skillsUsed.add(name);
             usageEvents.push({

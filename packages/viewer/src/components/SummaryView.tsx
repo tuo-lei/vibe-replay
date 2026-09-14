@@ -10,7 +10,7 @@ import {
 } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
-import { formatReplaySourceLabel } from "../utils/format";
+import { formatReplaySourceLabel, normalizePathForDisplay, shortName } from "../utils/format";
 import {
   DataQualityIndicator,
   getSessionDataQualityNotes,
@@ -1665,7 +1665,7 @@ function FileActivityHeatmap({
           ))}
           {/* File rows */}
           {topFiles.map((f) => {
-            const basename = f.path.split("/").pop() || f.path;
+            const basename = shortName(f.path);
             return [
               <div
                 key={`label-${f.path}`}
@@ -1970,7 +1970,10 @@ function FileTable({
           </thead>
           <tbody>
             {visibleFiles.map((f) => {
-              const filename = f.path.split("/").pop() || f.path;
+              const normalizedPath = normalizePathForDisplay(f.path);
+              const filename = shortName(normalizedPath);
+              const separatorIndex = normalizedPath.lastIndexOf("/");
+              const parentPath = separatorIndex >= 0 ? normalizedPath.slice(0, separatorIndex) : "";
               const isEdited = f.editCount > 0;
               return (
                 <tr
@@ -1980,7 +1983,7 @@ function FileTable({
                   <td className="px-2 py-1 max-w-0">
                     <div
                       className={`truncate ${isEdited ? "text-terminal-text" : "text-terminal-dimmer"}`}
-                      title={f.path}
+                      title={normalizedPath}
                     >
                       {filename}
                       {f.editCount >= 10 && (
@@ -1991,9 +1994,7 @@ function FileTable({
                           ⚠
                         </span>
                       )}
-                      <span className="text-terminal-dimmer ml-1">
-                        {f.path.slice(0, f.path.length - filename.length - 1)}
-                      </span>
+                      <span className="text-terminal-dimmer ml-1">{parentPath}</span>
                     </div>
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums">
