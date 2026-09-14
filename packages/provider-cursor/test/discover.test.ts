@@ -181,6 +181,65 @@ describe("Cursor transcript metadata discovery", () => {
     expect(session?.firstPrompt).toBe("Inspect the delayed prompt");
   });
 
+  it("ignores progress and turn_ended records when counting prompts and tools", async () => {
+    const root = await makeTempRoot();
+    const transcript = join(root, "session.jsonl");
+    await writeFile(
+      transcript,
+      [
+        JSON.stringify({
+          role: "user",
+          message: { content: [{ type: "text", text: "Ship the parser change" }] },
+        }),
+        JSON.stringify({
+          type: "progress",
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/streamed.ts" } }],
+          },
+        }),
+        JSON.stringify({
+          type: "turn_ended",
+          status: "success",
+          role: "user",
+          message: { content: [{ type: "text", text: "LIFECYCLE_PROMPT_MUST_NOT_COUNT" }] },
+        }),
+        JSON.stringify({
+          type: "turn_ended",
+          status: "error",
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "edit_file", input: { path: "/repo/fake.ts" } }],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/real.ts" } }],
+          },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+    const fileStat = await stat(transcript);
+
+    const session = await __testables.extractSessionInfo(
+      transcript,
+      fileStat.size,
+      Date.now(),
+      root,
+      [],
+    );
+
+    expect(session).toMatchObject({
+      firstPrompt: "Ship the parser change",
+      promptCount: 1,
+      toolCallCount: 1,
+    });
+    expect(session?.editCountEst).toBeUndefined();
+    expect(session?.firstPrompt).not.toContain("LIFECYCLE_PROMPT_MUST_NOT_COUNT");
+  });
+
   it("counts user prompts regardless of JSON whitespace", async () => {
     const root = await makeTempRoot();
     const transcript = join(root, "session.jsonl");

@@ -415,6 +415,7 @@ async function extractSessionInfo(
       const line = rawLine.trim();
       if (!line) continue;
       lineCount++;
+      if (isCursorJsonlLifecycleLine(line)) continue;
 
       // Cursor may prepend many metadata/assistant records before the first
       // user turn. Bound the expensive JSON parsing by user candidates rather
@@ -584,6 +585,16 @@ export const __testables = {
   mergeDuplicateTranscriptSessions,
 };
 
+function isCursorJsonlLifecycleLine(line: string): boolean {
+  if (!/"type"\s*:\s*"(?:progress|turn_ended)"/.test(line)) return false;
+  try {
+    const obj = JSON.parse(line) as { type?: unknown };
+    return obj.type === "progress" || obj.type === "turn_ended";
+  } catch {
+    return false;
+  }
+}
+
 function extractDelegatedPrompts(content: string): string[] {
   const prompts: string[] = [];
   for (const rawLine of content.split("\n")) {
@@ -594,6 +605,7 @@ function extractDelegatedPrompts(content: string): string[] {
     } catch {
       continue;
     }
+    if (record.type === "progress" || record.type === "turn_ended") continue;
     const blocks = Array.isArray(record?.message?.content) ? record.message.content : [];
     for (const block of blocks) {
       if (!block || typeof block !== "object") continue;
