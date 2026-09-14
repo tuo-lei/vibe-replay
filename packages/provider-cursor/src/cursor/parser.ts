@@ -466,6 +466,9 @@ async function parseCursorJsonl(
         continue;
       }
 
+      // progress = streaming artifact; turn_ended = lifecycle/status only.
+      if (obj.type === "progress" || obj.type === "turn_ended") continue;
+
       const role = obj.role as "user" | "assistant";
       const contentBlocks = obj.message?.content;
       if (!Array.isArray(contentBlocks)) continue;
@@ -867,7 +870,7 @@ async function parseCursorSubagentTranscript(
       continue;
     }
 
-    if (obj.type === "progress") continue;
+    if (obj.type === "progress" || obj.type === "turn_ended") continue;
 
     const role = obj.role as "user" | "assistant" | undefined;
     const contentBlocks = obj.message?.content;
