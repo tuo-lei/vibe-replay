@@ -235,9 +235,37 @@ describe("Cursor transcript metadata discovery", () => {
       firstPrompt: "Ship the parser change",
       promptCount: 1,
       toolCallCount: 1,
+      lineCount: 2,
     });
     expect(session?.editCountEst).toBeUndefined();
     expect(session?.firstPrompt).not.toContain("LIFECYCLE_PROMPT_MUST_NOT_COUNT");
+  });
+
+  it("does not let turn_ended records satisfy the two-line threshold", async () => {
+    const root = await makeTempRoot();
+    const transcript = join(root, "session.jsonl");
+    await writeFile(
+      transcript,
+      [
+        JSON.stringify({
+          role: "user",
+          message: { content: [{ type: "text", text: "Only one content record" }] },
+        }),
+        JSON.stringify({ type: "turn_ended", status: "success" }),
+      ].join("\n"),
+      "utf8",
+    );
+    const fileStat = await stat(transcript);
+
+    const session = await __testables.extractSessionInfo(
+      transcript,
+      fileStat.size,
+      Date.now(),
+      root,
+      [],
+    );
+
+    expect(session).toBeNull();
   });
 
   it("counts user prompts regardless of JSON whitespace", async () => {

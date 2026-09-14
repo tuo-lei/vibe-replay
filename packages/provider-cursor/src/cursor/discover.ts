@@ -414,8 +414,8 @@ async function extractSessionInfo(
     for (const rawLine of content.split("\n")) {
       const line = rawLine.trim();
       if (!line) continue;
-      lineCount++;
       if (isCursorJsonlLifecycleLine(line)) continue;
+      lineCount++;
 
       // Cursor may prepend many metadata/assistant records before the first
       // user turn. Bound the expensive JSON parsing by user candidates rather
