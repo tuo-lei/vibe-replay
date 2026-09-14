@@ -1,6 +1,6 @@
 ---
-title: "Find Cursor Chat History: state.vscdb, agent-transcripts"
-excerpt: "Where Cursor keeps chat history: state.vscdb, ~/.cursor/chats, agent-transcripts, and globalStorage — a practical map of the layers, and how to recover sessions."
+title: "Where Does Cursor Store Chat History? state.vscdb Explained"
+excerpt: "Find Cursor chat history on disk: state.vscdb, agent-transcripts, ~/.cursor/chats, and globalStorage — paths, how to recover sessions, and what each layer stores."
 date: 2026-03-27
 updated: 2026-09-06
 readTime: "9 min read"
