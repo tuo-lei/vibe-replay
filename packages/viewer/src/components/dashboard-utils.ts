@@ -10,6 +10,7 @@ import {
 import type { ProjectIdentity, SessionLocation, SessionTranscriptStatus } from "@vibe-replay/types";
 import type { SessionSummary, SourceSession } from "../types";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe-storage";
+import { normalizePathForDisplay, shortName } from "../utils/format";
 
 // ─── Shared types ────────────────────────────────────────────────────
 
@@ -246,9 +247,7 @@ export function timeAgo(iso: string): string {
 
 export function projectName(project: string): string {
   const special = specialProjectLabel(project);
-  if (special) return special;
-  const parts = project.replace(/\/$/, "").split("/");
-  return parts[parts.length - 1] || project;
+  return special || shortName(project);
 }
 
 export function normalizeMcpServerName(server: string): string {
@@ -888,12 +887,13 @@ export async function fetchWithRetry(
 
 /** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
 export function shortenPath(path: string): string {
-  const special = specialProjectLabel(path);
+  const normalizedPath = normalizePathForDisplay(path);
+  const special = specialProjectLabel(normalizedPath);
   if (special) return special;
   const MAX = 26;
-  if (path.length <= MAX) return path;
-  const parts = path.split("/");
-  if (parts.length <= 2) return path;
+  if (normalizedPath.length <= MAX) return normalizedPath;
+  const parts = normalizedPath.split("/");
+  if (parts.length <= 2) return normalizedPath;
   const first = parts[0];
   const lastTwo = parts.slice(-2).join("/");
   const candidate = `${first}/\u2026/${lastTwo}`;
@@ -906,7 +906,7 @@ export function computeProjectLabels(projects: string[]): Map<string, string> {
   const labels = new Map<string, string>();
   const projectsByLabel = new Map<string, string[]>();
   for (const p of projects) {
-    const label = specialProjectLabel(p) || shortenPath(p);
+    const label = specialProjectLabel(p) || shortName(p);
     labels.set(p, label);
     const matchingProjects = projectsByLabel.get(label) || [];
     matchingProjects.push(p);
@@ -914,11 +914,22 @@ export function computeProjectLabels(projects: string[]): Map<string, string> {
   }
   for (const matchingProjects of projectsByLabel.values()) {
     if (matchingProjects.length < 2) continue;
-    for (const project of matchingProjects) {
+    const compactLabels = matchingProjects.map((project) => shortenPath(project));
+    const compactLabelCounts = new Map<string, number>();
+    for (const label of compactLabels) {
+      compactLabelCounts.set(label, (compactLabelCounts.get(label) || 0) + 1);
+    }
+    for (const [index, project] of matchingProjects.entries()) {
       // The compact path can still collide for long projects that share their
       // first and last segments. Fall back to the full path rather than
       // showing two indistinguishable project rows.
-      labels.set(project, project);
+      const compactLabel = compactLabels[index] || "";
+      labels.set(
+        project,
+        compactLabelCounts.get(compactLabel) === 1
+          ? compactLabel
+          : normalizePathForDisplay(project),
+      );
     }
   }
   return labels;
@@ -1058,7 +1069,7 @@ export function rollupTopProjects(
 }
 
 function specialProjectLabel(project: string): string | null {
-  const normalized = project.replace(/\/$/, "");
+  const normalized = normalizePathForDisplay(project).replace(/\/+$/, "");
   if (!normalized) return null;
   if (normalized === "(globalStorage)") return "Cursor Global Storage";
   if (normalized === "~") return "Home";

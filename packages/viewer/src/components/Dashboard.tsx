@@ -1357,8 +1357,9 @@ function ReplayCard({
   }, []);
   useOutsideClick(menuRef, closeMenu, menuOpen);
 
-  const displayProject = rollupProject(s.project, s.projectIdentity);
-  const isWorktreeReplay = displayProject !== s.project;
+  const displayProjectKey = rollupProject(s.project, s.projectIdentity);
+  const displayProject = projectDisplayName(displayProjectKey, s.projectIdentity);
+  const isWorktreeReplay = displayProjectKey !== s.project;
 
   // New-design derived values, mirroring the Sessions-tab source card.
   // replaySuggestedTitle already resolves the explicit title first, so it is the

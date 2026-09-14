@@ -1181,7 +1181,7 @@ export function TitleInsightsHeader({
               </div>
               <div className="space-y-1">
                 {rolledTopProjects.map((p) => {
-                  const name = p.project.split("/").pop() || p.project;
+                  const name = projectDisplayName(p.project, p.projectIdentity);
                   return (
                     <div key={p.project} className="flex items-center gap-2 text-xs">
                       <span

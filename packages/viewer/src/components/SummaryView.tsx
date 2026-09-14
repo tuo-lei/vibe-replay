@@ -10,7 +10,7 @@ import {
 } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
-import { formatReplaySourceLabel } from "../utils/format";
+import { formatReplaySourceLabel, shortName } from "../utils/format";
 import {
   DataQualityIndicator,
   getSessionDataQualityNotes,
@@ -1665,7 +1665,7 @@ function FileActivityHeatmap({
           ))}
           {/* File rows */}
           {topFiles.map((f) => {
-            const basename = f.path.split("/").pop() || f.path;
+            const basename = shortName(f.path);
             return [
               <div
                 key={`label-${f.path}`}
@@ -1970,7 +1970,7 @@ function FileTable({
           </thead>
           <tbody>
             {visibleFiles.map((f) => {
-              const filename = f.path.split("/").pop() || f.path;
+              const filename = shortName(f.path);
               const isEdited = f.editCount > 0;
               return (
                 <tr
