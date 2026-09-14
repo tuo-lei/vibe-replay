@@ -924,12 +924,7 @@ export function computeProjectLabels(projects: string[]): Map<string, string> {
       // first and last segments. Fall back to the full path rather than
       // showing two indistinguishable project rows.
       const compactLabel = compactLabels[index] || "";
-      labels.set(
-        project,
-        compactLabelCounts.get(compactLabel) === 1
-          ? compactLabel
-          : normalizePathForDisplay(project),
-      );
+      labels.set(project, compactLabelCounts.get(compactLabel) === 1 ? compactLabel : project);
     }
   }
   return labels;

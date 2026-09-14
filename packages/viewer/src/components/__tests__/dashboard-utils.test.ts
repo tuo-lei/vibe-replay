@@ -90,6 +90,10 @@ describe("Windows path display", () => {
     const duplicateLabels = computeProjectLabels(["C:\\one\\app", "D:\\two\\app"]);
     expect(duplicateLabels.get("C:\\one\\app")).toBe("C:/one/app");
     expect(duplicateLabels.get("D:\\two\\app")).toBe("D:/two/app");
+
+    const mixedSeparators = computeProjectLabels(["C:\\work\\app", "C:/work/app"]);
+    expect(mixedSeparators.get("C:\\work\\app")).toBe("C:\\work\\app");
+    expect(mixedSeparators.get("C:/work/app")).toBe("C:/work/app");
   });
 });
 
