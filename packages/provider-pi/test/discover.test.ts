@@ -86,6 +86,53 @@ describe("discoverPiSessions", () => {
     });
   });
 
+  it("accepts OMP metadata before the Pi session header", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-omp-discover-"));
+    tempDirs.push(root);
+    const projectDir = join(root, "-Users-test-project");
+    await mkdir(projectDir, { recursive: true });
+    const path = join(projectDir, "2026-01-01T00-00-00-000Z_omp-session.jsonl");
+    const lines = [
+      { type: "title", v: 1, title: "OMP title" },
+      {
+        type: "session",
+        version: 3,
+        id: "omp-discovery-session",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+        title: "Initial OMP title",
+      },
+      {
+        type: "model_change",
+        id: "model-change",
+        model: "gpt-5.6",
+        timestamp: "2026-01-01T00:00:00.100Z",
+      },
+      {
+        type: "message",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Inspect OMP" }] },
+      },
+      {
+        type: "message",
+        id: "assistant-message",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: { role: "assistant", model: "gpt-5.6", content: [{ type: "text", text: "Done" }] },
+      },
+    ];
+    await writeFile(path, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf-8");
+
+    const sessions = await discoverPiSessions(root, false);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "omp-discovery-session",
+      title: "OMP title",
+      project: "/Users/test/project",
+      promptCount: 1,
+      model: "gpt-5.6",
+    });
+  });
+
   it("can retain a readable transcript with no prompts for remote status display", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-pi-no-prompts-"));
     tempDirs.push(root);
