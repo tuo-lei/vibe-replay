@@ -210,6 +210,30 @@ describe("generateGitHubMarkdown", () => {
     expect(md).toContain("`src/app.ts` modified 5x");
   });
 
+  it("normalizes Windows file paths in the export", () => {
+    const edits: Scene[] = Array.from({ length: 5 }, () => ({
+      type: "tool-call",
+      toolName: "Edit",
+      input: {
+        file_path: "C:\\Users\\TuoLei\\vibe-replay\\src\\auth.ts",
+        old_string: "",
+        new_string: "",
+      },
+      result: "OK",
+    }));
+    const session = makeSession({
+      scenes: [{ type: "user-prompt", content: "Fix the auth file" }, ...edits],
+      meta: {
+        ...makeSession().meta,
+        stats: { sceneCount: 6, userPrompts: 1, toolCalls: 5 },
+      },
+    });
+
+    const md = generateGitHubMarkdown(session);
+    expect(md).toContain("`src/auth.ts` modified 5x");
+    expect(md).not.toContain("\\");
+  });
+
   it("counts provider edit tools that report multiple file paths", () => {
     const session = makeSession({
       scenes: [

@@ -1552,6 +1552,114 @@ describe("Codex parser", () => {
     expect(result.model).toBe("gpt-5.6-sol");
   });
 
+  it("keeps token_usage_record envelopes out of replay turns", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-09-08T09:00:00.000Z",
+          type: "session_meta",
+          ordinal: 0,
+          payload: { id: "codex-session-usage", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-09-08T09:00:01.000Z",
+          type: "event_msg",
+          ordinal: 1,
+          payload: { type: "user_message", message: "Ship the usage parser change." },
+        },
+        {
+          timestamp: "2026-09-08T09:00:02.000Z",
+          type: "token_usage_record",
+          ordinal: 2,
+          payload: {
+            turn_id: "turn-1",
+            response_id: "resp-1",
+            thread_id: "codex-session-usage",
+            thread_token_usage: {
+              input_tokens: 9999,
+              cached_input_tokens: 1111,
+              output_tokens: 888,
+              total_tokens: 10887,
+            },
+            turn_token_usage: {
+              input_tokens: 5000,
+              cached_input_tokens: 200,
+              output_tokens: 100,
+              total_tokens: 5300,
+            },
+            usage: {
+              input_tokens: 5000,
+              cached_input_tokens: 200,
+              output_tokens: 100,
+            },
+          },
+        },
+        {
+          timestamp: "2026-09-08T09:00:03.000Z",
+          type: "event_msg",
+          ordinal: 3,
+          payload: {
+            type: "agent_message",
+            message: "Done.",
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(
+      result.turns.map((turn) => ({
+        role: turn.role,
+        text: turn.blocks.find((block) => block.type === "text")?.text,
+      })),
+    ).toEqual([
+      { role: "user", text: "Ship the usage parser change." },
+      { role: "assistant", text: "Done." },
+    ]);
+    expect(result.tokenUsage).toBeUndefined();
+  });
+
+  it("keeps event_msg token_count usage when token_usage_record is also present", () => {
+    const result = parseCodexLines([
+      ...lines,
+      JSON.stringify({
+        timestamp: "2026-04-26T05:00:06.500Z",
+        type: "token_usage_record",
+        payload: {
+          turn_id: "turn-1",
+          thread_token_usage: {
+            input_tokens: 9999,
+            cached_input_tokens: 1111,
+            output_tokens: 888,
+            total_tokens: 10887,
+          },
+          turn_token_usage: {
+            input_tokens: 5000,
+            cached_input_tokens: 200,
+            output_tokens: 100,
+            total_tokens: 5300,
+          },
+          usage: {
+            input_tokens: 5000,
+            cached_input_tokens: 200,
+            output_tokens: 100,
+          },
+        },
+      }),
+    ]);
+
+    expect(result.tokenUsage).toMatchObject({
+      inputTokens: 700,
+      cacheReadTokens: 300,
+      outputTokens: 50,
+    });
+    expect(result.contextLimit).toBe(258400);
+    expect(
+      result.turns.flatMap((turn) =>
+        turn.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])),
+      ),
+    ).toEqual(["Please update the auth flow", "I'll inspect the code first."]);
+  });
+
   it("keeps JSONL file order when envelope ordinals are not sequential", () => {
     const result = parseCodexLines(
       [

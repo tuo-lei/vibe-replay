@@ -5,6 +5,7 @@ import {
   agentWorktreeParent,
   archiveSessionKey,
   cleanPrompt,
+  computeProjectLabels,
   dataSourceBadgeClass,
   fetchWithRetry,
   formatDataSourceLabel,
@@ -19,11 +20,13 @@ import {
   providerBarClass,
   providerDisplayName,
   providerFamily,
+  projectName,
   replayArchiveKey,
   replaySuggestedTitle,
   rollupProject,
   rollupTopProjects,
   sessionIdentityKey,
+  shortenPath,
   sessionPromptPreview,
   shouldRefreshCachedList,
   shortCoworkSpaceId,
@@ -66,6 +69,33 @@ function makeSource(overrides: Partial<SourceSession> = {}): SourceSession {
     ...overrides,
   };
 }
+
+describe("Windows path display", () => {
+  it("uses the final segment for Windows project names", () => {
+    expect(projectName("C:\\git\\roblox\\vibe-replay")).toBe("vibe-replay");
+    expect(projectName("C:/git/roblox/vibe-replay")).toBe("vibe-replay");
+  });
+
+  it("normalizes Windows separators in compact project labels", () => {
+    expect(shortenPath("C:\\Users\\TuoLei\\very-long-project-name")).toBe(
+      "C:/…/very-long-project-name",
+    );
+  });
+
+  it("uses readable project names until disambiguation is needed", () => {
+    const labels = computeProjectLabels(["C:\\git\\roblox\\ros", "C:\\git\\roblox\\vibe-replay"]);
+    expect(labels.get("C:\\git\\roblox\\ros")).toBe("ros");
+    expect(labels.get("C:\\git\\roblox\\vibe-replay")).toBe("vibe-replay");
+
+    const duplicateLabels = computeProjectLabels(["C:\\one\\app", "D:\\two\\app"]);
+    expect(duplicateLabels.get("C:\\one\\app")).toBe("C:/one/app");
+    expect(duplicateLabels.get("D:\\two\\app")).toBe("D:/two/app");
+
+    const mixedSeparators = computeProjectLabels(["C:\\work\\app", "C:/work/app"]);
+    expect(mixedSeparators.get("C:\\work\\app")).toBe("C:\\work\\app");
+    expect(mixedSeparators.get("C:/work/app")).toBe("C:/work/app");
+  });
+});
 
 afterEach(() => {
   vi.useRealTimers();

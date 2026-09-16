@@ -228,7 +228,8 @@ export async function extractCodexSessionInfo(
         obj.type === "event_msg" ||
         obj.type === "response_item" ||
         obj.type === "compacted" ||
-        obj.type === "world_state"
+        obj.type === "world_state" ||
+        obj.type === "token_usage_record"
       ) {
         sawKnownRecord = true;
       }
@@ -272,6 +273,10 @@ export async function extractCodexSessionInfo(
           const worldModel = state.model;
           if (typeof worldModel === "string" && worldModel.trim()) model = worldModel;
         }
+        continue;
+      }
+
+      if (obj.type === "token_usage_record") {
         continue;
       }
 

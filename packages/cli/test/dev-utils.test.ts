@@ -10,6 +10,8 @@ import {
   waitForProcessTree,
 } from "../../../scripts/dev-utils.mjs";
 
+const DESCENDANT_PROCESS_TEST_TIMEOUT = process.platform === "win32" ? 15_000 : 5_000;
+
 describe("dev port utilities", () => {
   it("validates explicit ports", () => {
     expect(parsePort("23456")).toBe(23456);
@@ -136,18 +138,20 @@ describe("dev port utilities", () => {
     }
   });
 
-  it("kills a descendant before the port reservation can be reused", async () => {
-    const initial = await reserveFreePort(45_000 + Math.floor(Math.random() * 5_000));
-    const port = initial.port;
-    await initial.release();
+  it(
+    "kills a descendant before the port reservation can be reused",
+    async () => {
+      const initial = await reserveFreePort(45_000 + Math.floor(Math.random() * 5_000));
+      const port = initial.port;
+      await initial.release();
 
-    const descendantSource = `
+      const descendantSource = `
       import { createServer } from "node:net";
       const server = createServer();
       server.listen(${port}, "127.0.0.1", () => process.stdout.write("ready\\n"));
       setInterval(() => {}, 1000);
     `;
-    const parentSource = `
+      const parentSource = `
       import { spawn } from "node:child_process";
       const child = spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(descendantSource)}], {
         stdio: ["ignore", "pipe", "inherit"],
@@ -155,43 +159,45 @@ describe("dev port utilities", () => {
       child.stdout.pipe(process.stdout);
       setInterval(() => {}, 1000);
     `;
-    const child = spawn(process.execPath, ["--input-type=module", "-e", parentSource], {
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-
-    try {
-      await new Promise((resolve, reject) => {
-        let output = "";
-        const timer = setTimeout(() => reject(new Error(`child did not bind: ${output}`)), 5_000);
-        child.stdout.on("data", (chunk) => {
-          output += chunk;
-          if (output.includes("ready")) {
-            clearTimeout(timer);
-            resolve();
-          }
-        });
-        child.once("error", (error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
+      const child = spawn(process.execPath, ["--input-type=module", "-e", parentSource], {
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "inherit"],
       });
 
-      expect(await isPortFree(port)).toBe(false);
-      await killProcessTree(child);
-      await waitForProcessTree(child, 2_000);
+      try {
+        await new Promise((resolve, reject) => {
+          let output = "";
+          const timer = setTimeout(() => reject(new Error(`child did not bind: ${output}`)), 5_000);
+          child.stdout.on("data", (chunk) => {
+            output += chunk;
+            if (output.includes("ready")) {
+              clearTimeout(timer);
+              resolve();
+            }
+          });
+          child.once("error", (error) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+        });
 
-      const deadline = Date.now() + 2_000;
-      while (!(await isPortFree(port)) && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        expect(await isPortFree(port)).toBe(false);
+        await killProcessTree(child);
+        await waitForProcessTree(child, 2_000);
+
+        const deadline = Date.now() + 2_000;
+        while (!(await isPortFree(port)) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+
+        const reservation = await reservePort(port, "Test port");
+        await reservation.release();
+        expect(await isPortFree(port)).toBe(true);
+      } finally {
+        await killProcessTree(child);
+        await waitForProcessTree(child, 2_000);
       }
-
-      const reservation = await reservePort(port, "Test port");
-      await reservation.release();
-      expect(await isPortFree(port)).toBe(true);
-    } finally {
-      await killProcessTree(child);
-      await waitForProcessTree(child, 2_000);
-    }
-  });
+    },
+    DESCENDANT_PROCESS_TEST_TIMEOUT,
+  );
 });

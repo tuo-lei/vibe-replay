@@ -986,7 +986,7 @@ function filePathsFromInput(input: Record<string, any>): string[] {
 
 /** Show last 2 path segments for disambiguation (avoids basename collisions) */
 function shortPath(fullPath: string): string {
-  const parts = fullPath.split("/");
+  const parts = fullPath.replaceAll("\\", "/").split("/");
   if (parts.length <= 2) return parts.join("/");
   return parts.slice(-2).join("/");
 }
@@ -1074,7 +1074,7 @@ function wrapMultiLine(s: string, maxWidth: number, maxLines: number): string[] 
 }
 
 function baseName(p: string): string {
-  return p.split("/").pop() || p;
+  return p.replaceAll("\\", "/").split("/").pop() || p;
 }
 
 function escMd(s: string): string {

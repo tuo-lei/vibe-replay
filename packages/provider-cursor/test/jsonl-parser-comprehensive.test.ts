@@ -235,6 +235,91 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     expect(result.dataSourceInfo?.sources?.length).toBeGreaterThan(0);
   });
 
+  it("skips turn_ended lifecycle records in the main transcript", async () => {
+    const leaked = "TURN_ENDED_MUST_NOT_LEAK";
+    const path = await writeJsonl(tempDir, "turn-ended.jsonl", [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<timestamp>Thursday, Jan 1, 2026, 12:00 AM (UTC-7)</timestamp>\n<user_query>\nShip the parser change\n</user_query>",
+            },
+          ],
+        },
+      },
+      {
+        role: "assistant",
+        timestamp: "2026-01-01T07:00:04.000Z",
+        message: { content: [{ type: "text", text: "Parser change is ready." }] },
+      },
+      { type: "turn_ended", status: "success" },
+      {
+        type: "turn_ended",
+        status: "error",
+        role: "assistant",
+        timestamp: "2026-01-01T07:00:09.000Z",
+        message: { content: [{ type: "text", text: leaked }] },
+      },
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<timestamp>Thursday, Jan 1, 2026, 12:00:10 AM (UTC-7)</timestamp>\n<user_query>\nAdd a test\n</user_query>",
+            },
+          ],
+        },
+      },
+      {
+        role: "assistant",
+        timestamp: "2026-01-01T07:00:12.000Z",
+        message: { content: [{ type: "text", text: "Coverage is in place." }] },
+      },
+    ]);
+
+    const parsed = await parseCursorSession(path);
+    expect(parsed.turns).toHaveLength(4);
+    expect(parsed.turns.map((turn) => turn.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(parsed.parseWarnings).toBeUndefined();
+    expect(parsed.turnStats).toEqual([
+      { turnIndex: 0, durationMs: 4_000 },
+      { turnIndex: 1, durationMs: 2_000 },
+    ]);
+    expect(parsed.startTime).toBe("2026-01-01T07:00:00.000Z");
+    expect(parsed.endTime).toBe("2026-01-01T07:00:12.000Z");
+    expect(parsed.totalDurationMs).toBe(6_000);
+
+    const texts = parsed.turns.flatMap((turn) =>
+      turn.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])),
+    );
+    expect(texts).toEqual([
+      "Ship the parser change",
+      "Parser change is ready.",
+      "Add a test",
+      "Coverage is in place.",
+    ]);
+    expect(texts.join("\n")).not.toContain(leaked);
+
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    expect(replay.scenes.map((scene) => scene.type)).toEqual([
+      "user-prompt",
+      "text-response",
+      "user-prompt",
+      "text-response",
+    ]);
+    expect(replay.scenes.map((scene) => ("content" in scene ? scene.content : ""))).not.toContain(
+      leaked,
+    );
+  });
+
   it("normalizes inline Cursor JSONL tool calls for diff parity", async () => {
     const path = await writeJsonl(tempDir, "inline-tool-call.jsonl", [
       {
