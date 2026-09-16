@@ -201,6 +201,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Pi | Supported (JSONL tree sessions, branching, compaction summaries) |
+| OMP | Supported through the Pi-compatible JSONL session format (`~/.omp/agent/sessions`) |
 | Grok Bot | Supported (cloud-box JSONL; `send_message` promoted to visible replies; group-chat wakes split per speaker and related room transcripts merge into one multi-party replay). **[Watch the Eng+GTM demo](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92)** |
 | More coming soon | — |
 

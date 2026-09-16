@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
-import { getPiSessionsDir } from "./config.js";
+import { getPiSessionsDirs } from "./config.js";
 const PROMPT_SCAN_LIMIT = 2;
 
 const decodedProjectDirCache = new Map<string, string | Promise<string>>();
@@ -19,10 +19,19 @@ interface PiSessionHeader {
 }
 
 export async function discoverPiSessions(
-  sessionsRoot = getPiSessionsDir(),
+  sessionsRoot?: string,
   resolveGitRepo = true,
   includeUnreplayable = false,
 ): Promise<SessionInfo[]> {
+  if (sessionsRoot === undefined) {
+    const sessions: SessionInfo[] = [];
+    for (const root of getPiSessionsDirs()) {
+      sessions.push(...(await discoverPiSessions(root, resolveGitRepo, includeUnreplayable)));
+    }
+    sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return sessions;
+  }
+
   const sessions: SessionInfo[] = [];
 
   let projectDirs: string[];
@@ -117,18 +126,26 @@ async function extractPiSessionInfo(
       }
 
       if (!header) {
-        if (entry.type !== "session" || typeof entry.id !== "string") {
-          if (!includeUnreplayable) return null;
-          break;
+        if (entry.type === "title" || entry.type === "title_change") {
+          const nextTitle = typeof entry.title === "string" ? entry.title.trim() : "";
+          if (nextTitle) title = nextTitle;
+          continue;
         }
+        if (entry.type !== "session" || typeof entry.id !== "string") continue;
         header = entry;
+        if (!title && typeof entry.title === "string") title = entry.title.trim() || undefined;
         if (typeof entry.timestamp === "string" && entry.timestamp) timestamp = entry.timestamp;
         continue;
       }
 
+      if (entry.type === "title" || entry.type === "title_change") {
+        const nextTitle = typeof entry.title === "string" ? entry.title.trim() : "";
+        if (nextTitle) title = nextTitle;
+        continue;
+      }
       if (entry.type === "session_info") {
         const name = typeof entry.name === "string" ? entry.name.trim() : "";
-        title = name || undefined;
+        title = name || title;
         continue;
       }
 
@@ -138,8 +155,9 @@ async function extractPiSessionInfo(
         continue;
       }
 
-      if (entry.type === "model_change" && typeof entry.modelId === "string") {
-        model = entry.modelId;
+      if (entry.type === "model_change") {
+        const nextModel = typeof entry.modelId === "string" ? entry.modelId : entry.model;
+        if (typeof nextModel === "string" && nextModel) model = nextModel;
         continue;
       }
 

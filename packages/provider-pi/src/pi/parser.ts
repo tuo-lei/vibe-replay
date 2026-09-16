@@ -10,7 +10,12 @@ import type {
 } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
-import { getPiSessionsDir, readPiModelContextWindows } from "./config.js";
+import {
+  getPiAgentDirForSession,
+  getPiSessionsDir,
+  getPiSessionsDirForSession,
+  readPiModelContextWindows,
+} from "./config.js";
 
 interface PiHeader {
   type: "session";
@@ -18,6 +23,7 @@ interface PiHeader {
   id: string;
   timestamp: string;
   cwd: string;
+  title?: string;
 }
 
 interface PiEntryBase {
@@ -114,8 +120,8 @@ export async function parsePiSession(
   return parsePiLines(allLines, {
     sourcePath: paths[0],
     sessionInfo,
-    sessionsDir: getPiSessionsDir(),
-    modelContextWindows: await readPiModelContextWindows(),
+    sessionsDir: getPiSessionsDirForSession(paths[0]),
+    modelContextWindows: await readPiModelContextWindows(getPiAgentDirForSession(paths[0])),
   });
 }
 
@@ -135,6 +141,7 @@ export function parsePiLines(
   const byId = new Map<string, PiEntryBase>();
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
 
+  let title = options.sessionInfo?.title;
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex];
     if (!line.trim()) continue;
@@ -156,6 +163,7 @@ export function parsePiLines(
     if (entry.type === "session") {
       if (!header && typeof (entry as PiHeader).id === "string") {
         header = entry as PiHeader;
+        if (!title && typeof header.title === "string") title = header.title.trim() || undefined;
       }
       continue;
     }
@@ -177,7 +185,6 @@ export function parsePiLines(
   const compactions: NonNullable<ProviderParseResult["compactions"]> = [];
   const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
   const diagnostics: SessionDiagnostic[] = [];
-  let title = options.sessionInfo?.title;
   let model: string | undefined = options.sessionInfo?.model;
   let currentModel: string | undefined = model;
   let currentProvider: string | undefined;
@@ -195,6 +202,13 @@ export function parsePiLines(
       if (!lastTimestamp || entry.timestamp > lastTimestamp) lastTimestamp = entry.timestamp;
     }
 
+    if (entry.type === "title" || entry.type === "title_change") {
+      const titleEntry = entry as PiEntryBase & { title?: unknown };
+      const nextTitle = typeof titleEntry.title === "string" ? titleEntry.title.trim() : "";
+      if (nextTitle) title = nextTitle;
+      continue;
+    }
+
     if (entry.type === "session_info") {
       const sessionInfoEntry = entry as PiEntryBase & { name?: unknown };
       const name = typeof sessionInfoEntry.name === "string" ? sessionInfoEntry.name.trim() : "";
@@ -203,8 +217,9 @@ export function parsePiLines(
     }
 
     if (entry.type === "model_change") {
-      const modelChange = entry as { modelId?: unknown; provider?: unknown };
-      const nextModel = modelChange.modelId;
+      const modelChange = entry as { modelId?: unknown; model?: unknown; provider?: unknown };
+      const nextModel =
+        typeof modelChange.modelId === "string" ? modelChange.modelId : modelChange.model;
       if (typeof nextModel === "string" && nextModel) {
         currentModel = nextModel;
         model = nextModel;
