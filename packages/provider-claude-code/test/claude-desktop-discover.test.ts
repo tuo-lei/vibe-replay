@@ -2,6 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { parseClaudeCodeSession } from "../src/claude-code/parser.js";
 import {
   discoverFromDir,
   discoverFromDirs,
@@ -15,6 +16,7 @@ const fixture = (name: string) => join(__dirname, "fixtures", name);
 // ---------------------------------------------------------------------------
 
 const DESKTOP_JSON = fixture("claude-desktop-session.json");
+const DESKTOP_JSON_579 = fixture("claude-desktop-session-schema-watch-579.json");
 const JSONL_FIXTURE = fixture("claude-desktop-session.jsonl");
 
 // ---------------------------------------------------------------------------
@@ -221,6 +223,83 @@ describe("discoverFromDir", () => {
 
     expect(info?.provider).toBe("claude-desktop");
     expect(info?.sessionId).toBe("desktop-cli-session-001");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// schema-watch #579 — Desktop sidecar extras stay metadata-only
+// ---------------------------------------------------------------------------
+
+describe("schema-watch #579 Desktop sidecar extras", () => {
+  async function layoutWithJsonl(): Promise<{
+    projectsDir: string;
+    jsonlPath: string;
+  }> {
+    const { mkdir, copyFile } = await import("node:fs/promises");
+    const projectsDir = await mkdtemp(join(tmpdir(), "vr-desktop-579-"));
+    const encodedDir = join(projectsDir, "-Users-test-desktop-project");
+    await mkdir(encodedDir, { recursive: true });
+    const jsonlPath = join(encodedDir, "desktop-cli-session-001.jsonl");
+    await copyFile(JSONL_FIXTURE, jsonlPath);
+    return { projectsDir, jsonlPath };
+  }
+
+  it("discovers a session whose sidecar carries the newly observed fields", async () => {
+    const { projectsDir } = await layoutWithJsonl();
+    const info = await extractDesktopSessionInfo(DESKTOP_JSON_579, projectsDir);
+
+    expect(info).not.toBeNull();
+    expect(info?.provider).toBe("claude-desktop");
+    expect(info?.sessionId).toBe("desktop-cli-session-001");
+    expect(info?.title).toBe("Add desktop session support feature");
+    expect(info?.model).toBe("claude-opus-4-7");
+    expect(info?.timestamp).toBe(new Date(1750000150000).toISOString());
+  });
+
+  it("does not treat promptSuggestion or completedTurns as conversation provenance", async () => {
+    const { projectsDir } = await layoutWithJsonl();
+    const info = await extractDesktopSessionInfo(DESKTOP_JSON_579, projectsDir);
+
+    expect(info?.firstPrompt).toMatch(/Add a new feature to support desktop sessions/);
+    expect(info?.firstPrompt).not.toContain("Suggested next prompt");
+    expect(info?.prompts?.join("\n") ?? "").not.toContain("Suggested next prompt");
+    // JSONL has two user records; sidecar completedTurns is 99.
+    expect(info?.promptCount).toBe(2);
+  });
+
+  it("keeps JSONL as the source of PR and branch provenance", async () => {
+    const { projectsDir } = await layoutWithJsonl();
+    const info = await extractDesktopSessionInfo(DESKTOP_JSON_579, projectsDir);
+
+    // Sidecar `prs` is non-empty and `writtenBranches` includes extra names.
+    // Discovery still follows the JSONL (`pr-link` absent, gitBranch: main).
+    expect(info?.hasPR).toBeUndefined();
+    expect(info?.gitBranch).toBe("main");
+  });
+
+  it("still discovers when the sidecar records error/errorAt", async () => {
+    const { projectsDir } = await layoutWithJsonl();
+    const info = await extractDesktopSessionInfo(DESKTOP_JSON_579, projectsDir);
+
+    expect(info).not.toBeNull();
+    expect(info?.transcriptStatus).toBeUndefined();
+  });
+
+  it("parses the linked JSONL into the same turns when sidecar extras are present", async () => {
+    const { projectsDir, jsonlPath } = await layoutWithJsonl();
+    const info = await extractDesktopSessionInfo(DESKTOP_JSON_579, projectsDir);
+    const parsed = await parseClaudeCodeSession(jsonlPath);
+
+    expect(info?.sessionId).toBe(parsed.sessionId);
+    const userTurns = parsed.turns.filter((t) => t.role === "user");
+    expect(userTurns).toHaveLength(2);
+    const texts = userTurns.flatMap((t) =>
+      t.blocks.filter((b) => b.type === "text").map((b) => (b as { text: string }).text),
+    );
+    expect(texts.join("\n")).not.toContain("Suggested next prompt");
+    expect(parsed.prLinks).toBeUndefined();
+    expect(parsed.gitBranch).toBe("main");
+    expect(parsed.gitBranches).toBeUndefined();
   });
 });
 

@@ -129,6 +129,44 @@ describe("parseClaudeCoworkSession", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("parses when sibling metadata carries schema-watch #579 Desktop extras", async () => {
+    const { copyFile } = await import("node:fs/promises");
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-579-"));
+    const sessionDir = join(tempDir, "local_cowork-session-xyz789");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      `${sessionDir}.json`,
+      JSON.stringify({
+        sessionId: "local_cowork-session-002",
+        title: "Research Cowork session storage",
+        completedTurns: 99,
+        error: { code: "tool_failed" },
+        errorAt: 1750000190000,
+        promptSuggestion: "Suggested next prompt that must not become a user turn",
+        prs: [{ prNumber: 579 }],
+        sessionPermissionUpdates: [{ mode: "bypassPermissions" }],
+        spawnSeed: "seed-must-not-drive-replay",
+        writtenBranches: ["main"],
+      }),
+      "utf-8",
+    );
+    const auditPath = join(sessionDir, "audit.jsonl");
+    await copyFile(AUDIT_FIXTURE, auditPath);
+
+    const baseline = await parseClaudeCoworkSession(AUDIT_FIXTURE);
+    const result = await parseClaudeCoworkSession(auditPath);
+
+    expect(result.sessionId).toBe(baseline.sessionId);
+    expect(result.turns).toHaveLength(baseline.turns.length);
+    const texts = result.turns.flatMap((t) =>
+      t.blocks.filter((b) => b.type === "text").map((b) => (b as { text: string }).text),
+    );
+    expect(texts.join("\n")).not.toContain("Suggested next prompt");
+    expect(result.prLinks).toEqual(baseline.prLinks);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("summarizes Cowork system and enabled MCP definitions without retaining content", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-context-"));
     const sessionDir = join(tempDir, "local_session");

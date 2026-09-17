@@ -8,6 +8,15 @@ import { readGitRepo } from "@vibe-replay/provider-core/utils";
 
 export const DEFAULT_CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
+/**
+ * Claude Desktop `local_*.json` sidecar. Discovery overlays title/model/
+ * lastActivityAt; the sibling Claude Code JSONL remains the conversation
+ * source. Extra keys are declared so schema-watch drift is explicit — they
+ * must not create replay turns or replace JSONL prompts, PRs, or branches.
+ *
+ * Worktree fields `alwaysAllowedReasons`, `branch`, `originCwd`, and
+ * `sourceBranch` are conditional (#415) and stay unused here.
+ */
 interface DesktopSessionJson {
   sessionId: string;
   cliSessionId: string;
@@ -17,14 +26,29 @@ interface DesktopSessionJson {
   worktreeName?: string;
   sourceBranch?: string;
   branch?: string;
+  alwaysAllowedReasons?: unknown;
   createdAt: number;
   lastActivityAt: number;
   model?: string;
   isArchived?: boolean;
   title?: string;
   permissionMode?: string;
+  /** Desktop-reported turn count. JSONL is the turn source. */
   completedTurns?: number;
   scheduledTaskId?: string;
+  /** Session-level failure stamp. Does not hide a readable JSONL. */
+  error?: unknown;
+  errorAt?: number;
+  /** Next-prompt UI hint. Never treated as a user prompt. */
+  promptSuggestion?: unknown;
+  /** Desktop PR list. Provenance stays on JSONL `pr-link` events. */
+  prs?: unknown;
+  /** Permission-mode history. JSONL `permission-mode` events win. */
+  sessionPermissionUpdates?: unknown;
+  /** Spawn identifier. Not used for replay determinism. */
+  spawnSeed?: unknown;
+  /** Branches Desktop recorded. JSONL `gitBranch` wins. */
+  writtenBranches?: unknown;
 }
 
 export async function discoverClaudeDesktopSessions(): Promise<SessionInfo[]> {
@@ -133,6 +157,11 @@ export async function extractDesktopSessionInfo(
 
     const info = await extractSessionInfo(jsonlPath, jsonlStat.size, desktop.cwd);
     if (!info) return null;
+
+    // Sidecar extras (`completedTurns`, `error`/`errorAt`, `promptSuggestion`,
+    // `prs`, `sessionPermissionUpdates`, `spawnSeed`, `writtenBranches`) are
+    // typed above and intentionally unused. They must not create turns or
+    // override JSONL prompt/PR/branch provenance.
 
     const gitRepo = await readGitRepo(desktop.cwd);
 
