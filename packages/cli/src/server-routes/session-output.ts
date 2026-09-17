@@ -16,6 +16,8 @@ import { resolveReplayDir } from "../server-replay-catalog.js";
 import { scanForSecrets } from "../scan.js";
 import type { ReplaySession } from "../types.js";
 
+const INVALID_TARGET_ID_ERROR = "invalid targetId";
+
 interface SessionOutputRouteDeps {
   baseDir: string;
   loadSession: (slug: string, targetId?: string) => Promise<ReplaySession>;
@@ -32,7 +34,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
@@ -50,7 +52,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
@@ -68,7 +70,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
@@ -86,7 +88,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
@@ -119,7 +121,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     let targetDir: string;
     try {
       await loadSession(result.slug, targetId);
@@ -137,7 +139,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
@@ -173,7 +175,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       await loadSession(result.slug, targetId);
@@ -194,7 +196,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
@@ -223,7 +225,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(result.slug, targetId);
       const targetDir = await resolveReplayDir(baseDir, result.slug, targetId);
@@ -273,7 +275,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const rawSession = await loadSession(result.slug, targetId);
