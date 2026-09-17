@@ -232,6 +232,45 @@ describe("extractCoworkSessionInfo", () => {
     expect(info?.spaceIdSetBy).toBe("user");
     expect(info?.fsDetectedFiles).toEqual(["README.md", "src/index.ts"]);
   });
+
+  it("ignores schema-watch #579 Desktop sidecar extras on Cowork metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-cowork-579-"));
+    const metadataPath = join(root, "local_cowork-session-xyz789.json");
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        sessionId: "local_cowork-session-002",
+        cwd: "/sessions/magical-laughing-wright/mnt/outputs",
+        createdAt: 1750000000000,
+        lastActivityAt: 1750000200000,
+        model: "claude-opus-4-6[1m]",
+        title: "Research Cowork session storage",
+        initialMessage:
+          "Please investigate how Cowork stores session data locally and summarize the format for me.",
+        completedTurns: 99,
+        error: { code: "tool_failed" },
+        errorAt: 1750000190000,
+        promptSuggestion: "Suggested next prompt that must not become a user turn",
+        prs: [{ prNumber: 579, prUrl: "https://example.test/pr/579" }],
+        sessionPermissionUpdates: [{ mode: "bypassPermissions" }],
+        spawnSeed: "seed-must-not-drive-replay",
+        writtenBranches: ["main", "claude/unrelated-worktree"],
+      }),
+    );
+
+    const { jsonPath } = await buildCoworkLayout({ metadataPath });
+    const info = await extractCoworkSessionInfo(jsonPath);
+
+    expect(info).not.toBeNull();
+    expect(info?.provider).toBe("claude-cowork");
+    expect(info?.sessionId).toBe("cowork-session-002");
+    expect(info?.title).toBe("Research Cowork session storage");
+    expect(info?.firstPrompt).toMatch(/investigate how Cowork stores session data/);
+    expect(info?.firstPrompt).not.toContain("Suggested next prompt");
+    expect(info?.prompts?.join("\n") ?? "").not.toContain("Suggested next prompt");
+    expect(info?.hasPR).toBeUndefined();
+    expect(info?.gitBranch).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
