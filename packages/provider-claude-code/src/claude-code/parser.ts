@@ -321,7 +321,7 @@ export async function parseClaudeCodeLines(
             .split("\n")[0]
             .replace("Base directory for this skill: ", "")
             .trim();
-          const skillName = skillPath.split("/").pop() || skillPath;
+          const skillName = skillPath.split(/[\\/]/).pop() || skillPath;
           recordSkillActivation(skillName);
         }
         // Extract slash command name from command output

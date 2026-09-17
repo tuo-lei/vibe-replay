@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { matchesProjectFacet } from "../engine/dashboard-filtering";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
-import { plural } from "../utils/format";
+import { normalizePathForDisplay, pathSegments, plural, shortName } from "../utils/format";
 import { isAutomated, sessionScore } from "../utils/sessionSignals";
 import {
   cleanPrompt,
@@ -988,11 +988,21 @@ interface ProjectFileGroup {
 }
 
 function displayFileName(file: string, project: string): string {
-  const normalizedProject = project.replace(/\/$/, "");
-  if (normalizedProject && file.startsWith(`${normalizedProject}/`)) {
-    return file.slice(normalizedProject.length + 1);
+  const normalizedProject = normalizePathForDisplay(project).replace(/\/+$/, "");
+  const normalizedFile = normalizePathForDisplay(file);
+  const isWindowsPath =
+    file.includes("\\") ||
+    project.includes("\\") ||
+    /^[A-Za-z]:\//.test(normalizedFile) ||
+    /^[A-Za-z]:\//.test(normalizedProject) ||
+    normalizedFile.startsWith("//") ||
+    normalizedProject.startsWith("//");
+  const comparableFile = isWindowsPath ? normalizedFile.toLowerCase() : normalizedFile;
+  const comparableProject = isWindowsPath ? normalizedProject.toLowerCase() : normalizedProject;
+  if (comparableProject && comparableFile.startsWith(`${comparableProject}/`)) {
+    return normalizedFile.slice(normalizedProject.length + 1);
   }
-  const parts = file.split("/");
+  const parts = pathSegments(normalizedFile);
   return parts.slice(-3).join("/");
 }
 
@@ -1191,9 +1201,7 @@ function FileConnectionsView({
                       : "bg-terminal-bg/40 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
                   }`}
                 >
-                  <div className="truncate text-xs font-mono">
-                    {cluster.displayName.split("/").pop()}
-                  </div>
+                  <div className="truncate text-xs font-mono">{shortName(cluster.displayName)}</div>
                   <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
                     {cluster.displayName}
                   </div>
@@ -1213,7 +1221,7 @@ function FileConnectionsView({
               <div className="space-y-3">
                 <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-sm">
                   <div className="text-sm font-sans font-semibold text-terminal-text truncate">
-                    {selected.displayName.split("/").pop()}
+                    {shortName(selected.displayName)}
                   </div>
                   <div className="text-xs font-mono text-terminal-dimmer mt-0.5 break-all">
                     {selected.file}
