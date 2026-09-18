@@ -1,0 +1,29 @@
+{
+  "sessionId": "local_desktop-session-abc123",
+  "cliSessionId": "desktop-cli-session-001",
+  "cwd": "/Users/test/desktop-project",
+  "originCwd": "/Users/test/desktop-project",
+  "sourceBranch": "main",
+  "branch": "claude/desktop-feature",
+  "alwaysAllowedReasons": ["worktree"],
+  "createdAt": 1750000000000,
+  "lastActivityAt": 1750000150000,
+  "model": "claude-opus-4-7",
+  "isArchived": false,
+  "title": "Add desktop session support feature",
+  "permissionMode": "default",
+  "completedTurns": 99,
+  "error": { "code": "tool_failed", "message": "bash exited 1" },
+  "errorAt": 1750000140000,
+  "promptSuggestion": "Suggested next prompt that must not become a user turn",
+  "prs": [
+    {
+      "prNumber": 579,
+      "prUrl": "https://github.com/tuo-lei/vibe-replay/pull/579",
+      "prRepository": "tuo-lei/vibe-replay"
+    }
+  ],
+  "sessionPermissionUpdates": [{ "mode": "bypassPermissions", "at": 1750000120000 }],
+  "spawnSeed": "seed-must-not-drive-replay",
+  "writtenBranches": ["main", "claude/desktop-feature", "claude/unrelated-worktree"]
+}

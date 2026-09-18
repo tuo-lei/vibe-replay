@@ -18,6 +18,10 @@ import { claudeDataDirs } from "../claude-data-paths.js";
  *
  * Unlike Code-tab sessions, the transcript lives inside the Cowork directory
  * itself — we do not need to cross-reference ~/.claude/projects/.
+ *
+ * Schema-watch #579 found no Cowork audit drift. Desktop-sidecar extras may
+ * appear on this metadata file too and are typed here so they stay
+ * metadata-only (`initialMessage` + audit.jsonl remain the conversation source).
  */
 interface CoworkSessionJson {
   sessionId: string;
@@ -36,6 +40,14 @@ interface CoworkSessionJson {
   skillsEnabled?: boolean;
   spaceId?: string;
   spaceIdSetBy?: string;
+  completedTurns?: number;
+  error?: unknown;
+  errorAt?: number;
+  promptSuggestion?: unknown;
+  prs?: unknown;
+  sessionPermissionUpdates?: unknown;
+  spawnSeed?: unknown;
+  writtenBranches?: unknown;
 }
 
 export async function discoverClaudeCoworkSessions(): Promise<SessionInfo[]> {
@@ -116,6 +128,11 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   }
 
   if (!meta.sessionId) return null;
+
+  // Desktop-sidecar extras (`completedTurns`, `error`/`errorAt`,
+  // `promptSuggestion`, `prs`, `sessionPermissionUpdates`, `spawnSeed`,
+  // `writtenBranches`) are typed on CoworkSessionJson and unused. They must
+  // not become prompts or replay turns — `initialMessage` + audit.jsonl win.
 
   // Audit.jsonl is co-located inside the local_{id}/ directory next to this JSON.
   const dir = jsonPath.replace(/\.json$/, "");
