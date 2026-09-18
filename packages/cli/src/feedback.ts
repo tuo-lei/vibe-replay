@@ -241,6 +241,8 @@ const TOOL_FAILURE_PATTERN =
  */
 export function buildCoachingSignals(session: ReplaySession): CoachingSignal[] {
   const signals: CoachingSignal[] = [];
+  const recoverySignals: CoachingSignal[] = [];
+  const repeatedSignals: CoachingSignal[] = [];
   const failedToolIndices: number[] = [];
   const repeatedAttempts = new Map<string, number[]>();
   let userPromptCount = 0;
@@ -302,7 +304,7 @@ export function buildCoachingSignals(session: ReplaySession): CoachingSignal[] {
     const failure = session.scenes[failureIndex];
     const recovery = session.scenes[recoveryIndex];
     if (failure.type !== "tool-call" || recovery.type !== "tool-call") continue;
-    signals.push({
+    recoverySignals.push({
       kind: "recovery-candidate",
       sceneIndices: [failureIndex, recoveryIndex],
       summary: `Possible detour/recovery pair: ${failure.toolName} failed at scene ${failureIndex}, followed by ${recovery.toolName} at scene ${recoveryIndex}`,
@@ -311,14 +313,20 @@ export function buildCoachingSignals(session: ReplaySession): CoachingSignal[] {
 
   for (const [attemptKey, sceneIndices] of repeatedAttempts) {
     if (sceneIndices.length < 2) continue;
-    signals.push({
+    repeatedSignals.push({
       kind: "repeated-attempt",
       sceneIndices,
       summary: `Repeated tool attempt (${attemptKey.replace(/^(command|path):/, "")}) at scenes ${sceneIndices.join(", ")}`,
     });
   }
 
-  return signals.slice(0, 30);
+  // Keep the initial timeline signals, but reserve capacity for the derived
+  // recovery/repetition signals that carry the most coaching value.
+  return [
+    ...signals.slice(0, 14),
+    ...recoverySignals.slice(0, 8),
+    ...repeatedSignals.slice(0, 8),
+  ].slice(0, 30);
 }
 
 function evidenceTextForScene(scene: Scene, index: number, maxChars = 1_200): string {
@@ -385,16 +393,36 @@ export function buildCoachingEvidenceWindows(session: ReplaySession): string {
   }
   flush();
 
+  const chunks = windows.flatMap((window) => {
+    if (window.length <= 6_000) return [window];
+    const scenes = window.split(/\n(?=\[SCENE \d+\])/);
+    const split: string[] = [];
+    let current = "";
+    for (const scene of scenes) {
+      if (current && current.length + scene.length + 1 > 6_000) {
+        split.push(current);
+        current = "";
+      }
+      current = current ? `${current}\n${scene}` : scene;
+    }
+    if (current) split.push(current);
+    return split;
+  });
+
   let totalChars = 0;
   const bounded: string[] = [];
-  for (const window of windows) {
-    if (bounded.length >= 24 || totalChars + window.length > 24_000) break;
-    bounded.push(window);
-    totalChars += window.length;
+  for (const window of chunks) {
+    if (bounded.length >= 24 || totalChars >= 24_000) break;
+    const windowBudget = Math.min(6_000, 24_000 - totalChars);
+    const boundedWindow =
+      window.length > windowBudget ? `${window.slice(0, windowBudget)}…` : window;
+    bounded.push(boundedWindow);
+    totalChars += boundedWindow.length;
   }
-  return bounded
+  const rendered = bounded
     .map((window, index) => `--- EVIDENCE WINDOW ${index + 1} ---\n${window}`)
     .join("\n");
+  return rendered.length > 24_000 ? `${rendered.slice(0, 23_999)}…` : rendered;
 }
 
 const OBSERVED_PATH_KEYS = [
@@ -999,10 +1027,17 @@ function sceneEvidenceQuote(session: ReplaySession, sceneIndex: number): string 
   );
 }
 
-function evidenceQuoteAppears(session: ReplaySession, quote: string): boolean {
+function evidenceQuoteAppears(
+  session: ReplaySession,
+  quote: string,
+  allowedSceneIndices?: readonly number[],
+): boolean {
   const normalized = quote.trim();
   if (!normalized) return false;
-  return session.scenes.some((scene) => {
+  const indices = allowedSceneIndices || session.scenes.map((_, index) => index);
+  return indices.some((index) => {
+    const scene = session.scenes[index];
+    if (!scene) return false;
     const candidates =
       scene.type === "tool-call"
         ? [
@@ -1218,7 +1253,7 @@ export function parseFeedbackResponse(
           ? finding.evidenceQuote.trim()
           : undefined;
       const evidenceQuote =
-        (rawEvidenceQuote && evidenceQuoteAppears(session, rawEvidenceQuote)
+        (rawEvidenceQuote && evidenceQuoteAppears(session, rawEvidenceQuote, evidenceSceneIndices)
           ? rawEvidenceQuote
           : undefined) ||
         sceneEvidenceQuote(session, detourSceneIndex) ||
@@ -1270,15 +1305,15 @@ export function parseFeedbackResponse(
       ) {
         continue;
       }
-      const providedQuotes = stringsOnly(mistake.evidenceQuotes)
-        .map((quote) => quote.trim())
-        .filter((quote) => quote && evidenceQuoteAppears(session, quote));
-      const evidenceQuotes =
-        providedQuotes.length > 0
-          ? providedQuotes
-          : occurrenceSceneIndices
-              .map((index) => sceneEvidenceQuote(session, index))
-              .filter((quote): quote is string => Boolean(quote));
+      const rawQuotes = stringsOnly(mistake.evidenceQuotes).map((quote) => quote.trim());
+      const evidenceQuotes = occurrenceSceneIndices
+        .map((index, quoteIndex) => {
+          const quote = rawQuotes[quoteIndex];
+          return quote && evidenceQuoteAppears(session, quote, [index])
+            ? quote
+            : sceneEvidenceQuote(session, index);
+        })
+        .filter((quote): quote is string => Boolean(quote));
       recurringMistakes.push({
         title: mistake.title,
         occurrenceSceneIndices,
@@ -1334,7 +1369,8 @@ export function parseFeedbackResponse(
           ? recommendation.evidenceQuote.trim()
           : undefined;
       const evidenceQuote =
-        (rawEvidenceQuote && evidenceQuoteAppears(session, rawEvidenceQuote)
+        (rawEvidenceQuote &&
+        evidenceQuoteAppears(session, rawEvidenceQuote, enrichedEvidenceSceneIndices)
           ? rawEvidenceQuote
           : undefined) || sceneEvidenceQuote(session, enrichedEvidenceSceneIndices[0]);
       if (

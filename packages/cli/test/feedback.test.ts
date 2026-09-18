@@ -960,6 +960,33 @@ describe("buildCoachingEvidenceWindows", () => {
     expect(windows).toContain("SCENE 1");
     expect(windows).toContain("SCENE 3");
   });
+
+  it("keeps later evidence when one contiguous window is oversized", () => {
+    const scenes: Scene[] = [{ type: "user-prompt", content: "Run the build" }];
+    for (let i = 0; i < 30; i++) {
+      scenes.push({
+        type: "tool-call",
+        toolName: "Bash",
+        input: { command: "pnpm build" },
+        result: `attempt ${i} failed ${"x".repeat(1_000)}`,
+        isError: true,
+        bashOutput: { command: "pnpm build", stdout: `failed ${i}` },
+      });
+    }
+    const session = makeSession({
+      scenes,
+      meta: {
+        ...makeSession().meta,
+        stats: { sceneCount: scenes.length, userPrompts: 1, toolCalls: 30 },
+      },
+    });
+
+    const windows = buildCoachingEvidenceWindows(session);
+    expect(windows.length).toBeGreaterThan(0);
+    expect(windows.length).toBeLessThanOrEqual(24_000);
+    expect(windows).toContain("SCENE 1");
+    expect(windows).toContain("EVIDENCE WINDOW 2");
+  });
 });
 
 // ─── buildSessionDigest ────────────────────────────────────
