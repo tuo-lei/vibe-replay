@@ -187,9 +187,17 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
     setShowRerunConfirm(null);
     try {
       const result = await runAiCoach();
+      const wrongTurnText =
+        result.wrongTurnCount === 1
+          ? "1 recoverable wrong turn"
+          : `${result.wrongTurnCount} recoverable wrong turns`;
+      const recommendationText =
+        result.repoRecommendationCount === 1
+          ? "1 prevention idea"
+          : `${result.repoRecommendationCount} prevention ideas`;
       setCoachStatus({
         type: "success",
-        text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)${providerRunSuffix(result)}`,
+        text: `Score ${result.score}/10 \u2014 ${wrongTurnText}, ${recommendationText}, ${result.itemCount} comment(s)${providerRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -399,20 +407,20 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                   <div className="px-3 py-2 flex items-start gap-2">
                     <span className="text-xs shrink-0">{"\uD83D\uDCAC"}</span>
                     <span className="text-xs font-mono text-terminal-blue leading-relaxed">
-                      Be specific — which file? what error?
+                      It tried the wrong path, then found the right one
                     </span>
                   </div>
                   <div className="px-3 py-2 border-t border-terminal-border-subtle flex items-center gap-2">
                     <span className="text-xs font-mono font-semibold text-terminal-orange">
-                      6/10
+                      Evidence
                     </span>
                     <span className="text-xs font-mono text-terminal-dimmer">
-                      {"·"} 4 comments added inline
+                      {"·"} recovery + prevention plan
                     </span>
                   </div>
                 </div>
               }
-              description="Score your prompting technique and get inline coaching comments."
+              description="Find evidence-backed wrong turns, explain the recovery, and suggest concrete prevention changes for the repo or next session."
               running={aiCoachRunning}
               disabled={isAnyRunning}
               status={coachStatus}

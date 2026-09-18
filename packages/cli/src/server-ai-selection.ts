@@ -1,4 +1,9 @@
-import { getAiRuntime, readPiDefaultAiSelection, type AiProviderInfo } from "./ai-runtime.js";
+import {
+  ensureAiDefaultSelection,
+  getAiRuntime,
+  readAiDefaultSelection,
+  type AiProviderInfo,
+} from "./ai-runtime.js";
 import type { AiSelection } from "./feedback.js";
 
 export interface ResolvedAiSelection {
@@ -9,6 +14,9 @@ export interface ResolvedAiSelection {
   authSubscription: boolean;
   authSource?: string;
 }
+
+const PREFERRED_DEFAULT_MODEL_ID = "gpt-5.6-luna";
+const PREFERRED_PROVIDER_IDS = ["custom-openai", "openai"] as const;
 
 function parseAiSelectionBody(body: unknown): AiSelection | undefined {
   if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
@@ -32,55 +40,47 @@ function parseAiSelectionBody(body: unknown): AiSelection | undefined {
   };
 }
 
-function normalizeAiBaseUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return value.replace(/\/+$/, "");
-  }
-}
-
 export async function resolveDefaultAiSelection(
   providers: AiProviderInfo[],
 ): Promise<AiSelection | undefined> {
   const usable = providers.filter((provider) => provider.configured && provider.models.length > 0);
   if (usable.length === 0) return undefined;
 
-  const piDefault = await readPiDefaultAiSelection();
-  if (piDefault?.providerId) {
-    const matchingProvider = usable.find((provider) => provider.id === piDefault.providerId);
+  const savedDefault = await readAiDefaultSelection();
+  if (savedDefault) {
+    const matchingProvider = usable.find((provider) => provider.id === savedDefault.providerId);
     if (
       matchingProvider &&
-      piDefault.modelId &&
-      matchingProvider.models.some((model) => model.id === piDefault.modelId)
+      matchingProvider.models.some((model) => model.id === savedDefault.modelId)
     ) {
       return {
         providerId: matchingProvider.id,
-        modelId: piDefault.modelId,
+        modelId: savedDefault.modelId,
       };
     }
   }
 
-  // Provider ids are not globally stable across runtimes. For custom
-  // providers, use the configured endpoint as the identity and only accept
-  // the default model when that exact provider exposes it.
-  if (piDefault?.baseUrl && piDefault.modelId) {
-    const normalizedBaseUrl = normalizeAiBaseUrl(piDefault.baseUrl);
-    const matchingProvider = usable.find(
+  // Vibe Replay owns its default. Prefer Luna when the configured provider
+  // exposes it, with the local/custom endpoint ahead of a direct API key.
+  const preferredProvider = PREFERRED_PROVIDER_IDS.map((id) =>
+    usable.find(
       (provider) =>
-        provider.custom &&
-        normalizeAiBaseUrl(provider.custom.baseUrl) === normalizedBaseUrl &&
-        provider.models.some((model) => model.id === piDefault.modelId),
-    );
-    if (matchingProvider) {
-      return { providerId: matchingProvider.id, modelId: piDefault.modelId };
-    }
+        provider.id === id &&
+        provider.models.some((model) => model.id === PREFERRED_DEFAULT_MODEL_ID),
+    ),
+  ).find((provider): provider is AiProviderInfo => provider !== undefined);
+  if (preferredProvider) {
+    const preferred = {
+      providerId: preferredProvider.id,
+      modelId: PREFERRED_DEFAULT_MODEL_ID,
+    };
+    // Seed the app-owned settings file once so CLI and browser surfaces share
+    // the same default without importing another agent's configuration.
+    return await ensureAiDefaultSelection(preferred).catch(() => preferred);
   }
 
-  // Do not invent a provider/model when there is no explicit cross-runtime
-  // identity. The UI should ask the user to choose one instead of silently
-  // selecting the first catalog entry.
+  // Do not invent a provider/model or silently select the first catalog entry.
+  // The UI should ask the user to choose one when Luna is unavailable.
   return undefined;
 }
 

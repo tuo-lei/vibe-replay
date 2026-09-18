@@ -360,6 +360,17 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
           source: "user" as const,
         };
         writeAiSelectionPreference(next);
+        void fetch(apiUrl("/api/ai/default"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            providerId: next.providerId,
+            modelId: next.modelId,
+          }),
+        }).catch(() => {
+          // The browser preference remains usable if the local server is
+          // unavailable; the next refresh can reconcile it.
+        });
         updateSelection(next);
         if (mountedRef.current) setDefaultSelection(next);
       }
