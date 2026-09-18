@@ -180,6 +180,8 @@ describe("AiStudioPanel", () => {
       runAiCoach: vi.fn(async () => ({
         score: 7,
         itemCount: 1,
+        wrongTurnCount: 1,
+        repoRecommendationCount: 1,
         providerId: "openai",
         providerName: "OpenAI",
         modelId: "gpt-test",

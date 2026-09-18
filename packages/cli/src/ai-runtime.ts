@@ -39,6 +39,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 
 const DEFAULT_AI_AUTH_PATH = join(homedir(), ".vibe-replay", "ai-auth.json");
 const DEFAULT_AI_CONFIG_PATH = join(homedir(), ".vibe-replay", "ai-providers.json");
+const DEFAULT_AI_SETTINGS_PATH = join(homedir(), ".vibe-replay", "ai-settings.json");
 const CREDENTIAL_LOCK_WAIT_MS = 25;
 const CREDENTIAL_LOCK_TIMEOUT_MS = 30_000;
 const CREDENTIAL_LOCK_STALE_MS = 60_000;
@@ -718,49 +719,37 @@ export function getAiConfigPath(): string {
 }
 
 export interface AiDefaultSelection {
-  providerId?: string;
-  modelId?: string;
-  /** Provider identity used to map Pi custom gateways to Vibe Replay. */
-  baseUrl?: string;
+  providerId: string;
+  modelId: string;
 }
 
-/**
- * Pi keeps the user's provider/model preference in a non-secret settings file.
- * Reuse that preference when the embedded runtime can map it to one of the
- * providers available to Vibe Replay (for example, a local gateway model).
- */
-export async function readPiDefaultAiSelection(): Promise<AiDefaultSelection | undefined> {
-  const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+export function getAiSettingsPath(): string {
+  return process.env.VIBE_REPLAY_AI_SETTINGS?.trim() || DEFAULT_AI_SETTINGS_PATH;
+}
+
+export async function readAiDefaultSelection(): Promise<AiDefaultSelection | undefined> {
   try {
-    const raw = await readFile(join(agentDir, "settings.json"), "utf8");
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const providerId =
-      typeof value.defaultProvider === "string" ? value.defaultProvider : undefined;
-    const modelId = typeof value.defaultModel === "string" ? value.defaultModel : undefined;
-    if (!providerId && !modelId) return undefined;
-    let baseUrl: string | undefined;
-    if (providerId) {
-      try {
-        const modelsRaw = await readFile(join(agentDir, "models.json"), "utf8");
-        const modelsConfig = JSON.parse(modelsRaw) as unknown;
-        const providers = isRecord(modelsConfig) ? modelsConfig.providers : undefined;
-        const provider = isRecord(providers) ? providers[providerId] : undefined;
-        baseUrl =
-          isRecord(provider) && typeof provider.baseUrl === "string" ? provider.baseUrl : undefined;
-      } catch {
-        // settings.json is sufficient for built-in Pi providers; models.json
-        // is only needed to identify a separately named custom gateway.
-      }
-    }
+    const raw = JSON.parse(await readFile(getAiSettingsPath(), "utf8")) as Record<string, unknown>;
+    if (typeof raw.providerId !== "string" || typeof raw.modelId !== "string") return undefined;
     return {
-      ...(providerId ? { providerId } : {}),
-      ...(modelId ? { modelId } : {}),
-      ...(baseUrl ? { baseUrl } : {}),
+      providerId: raw.providerId,
+      modelId: raw.modelId,
     };
   } catch {
-    // Pi is optional; a missing or malformed settings file should not affect
-    // the built-in provider registry.
     return undefined;
+  }
+}
+
+export async function writeAiDefaultSelection(
+  selection: AiDefaultSelection,
+  signal?: AbortSignal,
+): Promise<void> {
+  const settingsPath = getAiSettingsPath();
+  const release = await acquireFileLock(`${settingsPath}.transaction`, signal);
+  try {
+    await persistJsonFile(settingsPath, selection, signal);
+  } finally {
+    await release();
   }
 }
 
@@ -916,9 +905,13 @@ function customModelFromDiscovery(
     raw.context_length ?? raw.context_window ?? raw.max_context_length ?? raw.max_model_len,
     128_000,
   );
+  // Many OpenAI-compatible gateways omit output limits from /models. A
+  // 32k default is rejected by common GPT-4o-compatible deployments whose
+  // actual completion ceiling is 16k, so keep the unknown-model default
+  // conservative while honoring an explicitly advertised limit.
   const maxTokens = positiveNumber(
     raw.max_output_tokens ?? raw.max_tokens ?? raw.max_completion_tokens,
-    Math.min(contextWindow, 32_768),
+    Math.min(contextWindow, 16_384),
   );
   // Custom gateways frequently advertise reasoning models but reject
   // reasoning_effort when function tools are present. AI Studio always uses a

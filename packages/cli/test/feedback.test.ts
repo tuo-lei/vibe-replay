@@ -2,6 +2,9 @@ import type { ReplaySession, Scene } from "@vibe-replay/types";
 import { describe, expect, it } from "vitest";
 import {
   __testables,
+  buildCoachingSignals,
+  buildCoachingEvidenceWindows,
+  buildObservedRepoContext,
   buildSessionDigest,
   extractJson,
   type FeedbackResult,
@@ -545,8 +548,14 @@ describe("parseFeedbackResponse", () => {
     const result = parseFeedbackResponse(
       makeValidFeedbackJson({
         frictionPoints: [
-          { type: "misunderstood", description: "AI read wrong file", turn: 2 },
-          { type: "buggy_code", description: "Test failed", turn: 4 },
+          {
+            type: "misunderstood",
+            description: "AI read wrong file",
+            turn: 2,
+            actor: "agent",
+            evidenceSceneIndices: [1, 2],
+          },
+          { type: "buggy_code", description: "Test failed", turn: 4, actor: "shared" },
         ],
       }),
       session,
@@ -554,6 +563,8 @@ describe("parseFeedbackResponse", () => {
     expect(result).not.toBeNull();
     expect(result!.frictionPoints).toHaveLength(2);
     expect(result!.frictionPoints![0].type).toBe("misunderstood");
+    expect(result!.frictionPoints![0].actor).toBe("agent");
+    expect(result!.frictionPoints![0].evidenceSceneIndices).toEqual([1, 2]);
     expect(result!.frictionPoints![1].turn).toBe(4);
   });
 
@@ -571,6 +582,71 @@ describe("parseFeedbackResponse", () => {
     expect(result).not.toBeNull();
     expect(result!.frictionPoints).toHaveLength(1);
     expect(result!.frictionPoints![0].type).toBe("buggy_code");
+  });
+
+  it("normalizes command detours and enriches related repository evidence", () => {
+    const commandSession = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Build the mac target" },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build @mac" },
+          result: "unknown target",
+          isError: true,
+          bashOutput: { command: "pnpm build @mac", stdout: "unknown target" },
+        },
+        { type: "text-response", content: "I will inspect the script." },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build:mac" },
+          result: "done",
+          bashOutput: { command: "pnpm build:mac", stdout: "done" },
+        },
+      ],
+    });
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        frictionPoints: [
+          {
+            type: "buggy_code",
+            description: "The command syntax was wrong.",
+            turn: 1,
+            actor: "agent",
+            evidenceSceneIndices: [1],
+          },
+        ],
+        wrongTurns: [
+          {
+            title: "Wrong build syntax",
+            detourSceneIndex: 1,
+            recoverySceneIndex: 3,
+            evidenceSceneIndices: [1, 3],
+            description: "The first command used an unsupported target.",
+            recovery: "The valid command succeeded.",
+            betterApproach: "Inspect the script first.",
+            confidence: "high",
+          },
+        ],
+        repoRecommendations: [
+          {
+            category: "documentation",
+            priority: "high",
+            target: "AGENTS.md",
+            addition: "Document the valid build syntax.",
+            rationale: "This prevents the detour.",
+            verification: "Run the documented command.",
+            evidenceSceneIndices: [1],
+          },
+        ],
+      }),
+      commandSession,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.frictionPoints![0].type).toBe("wrong_approach");
+    expect(result!.repoRecommendations![0].evidenceSceneIndices).toEqual([1, 3]);
   });
 
   it("sets frictionPoints to undefined when all entries are invalid", () => {
@@ -623,6 +699,112 @@ describe("parseFeedbackResponse", () => {
     expect(result!.aiPerformance).toBeUndefined();
   });
 
+  it("parses evidence-backed wrong turns and repository recommendations", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        wrongTurns: [
+          {
+            title: "Used the wrong build flag",
+            detourSceneIndex: 2,
+            recoverySceneIndex: 3,
+            evidenceSceneIndices: [2, 3],
+            evidenceQuote: "src/login.ts",
+            description: "The agent used a flag that the build script rejected.",
+            recovery: "It read the build script and found the supported syntax.",
+            betterApproach: "Inspect the build entry point before trying variants.",
+            confidence: "high",
+          },
+        ],
+        repoRecommendations: [
+          {
+            category: "documentation",
+            priority: "high",
+            target: "AGENTS.md",
+            addition: "Document the supported build flag and show one valid command.",
+            rationale: "The stale instruction caused the initial detour.",
+            verification: "Run the documented command from a clean checkout.",
+            evidenceSceneIndices: [2, 3],
+            evidenceQuote: "src/login.ts",
+          },
+        ],
+        recurringMistakes: [
+          {
+            title: "Repeated broad search",
+            occurrenceSceneIndices: [1, 2],
+            evidenceQuotes: ["Let me look at the login code", "export function login() {}"],
+            description: "The agent repeated an exploratory search before acting.",
+            impact: "Added two unnecessary tool calls.",
+            prevention: "Document the auth entry point in AGENTS.md.",
+            confidence: "medium",
+          },
+        ],
+        nextSessionChecklist: ["Read the build docs before running a variant."],
+        analysisLimitations: ["The first command output was truncated."],
+      }),
+      session,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.wrongTurns).toHaveLength(1);
+    expect(result!.wrongTurns![0].recoverySceneIndex).toBe(3);
+    expect(result!.wrongTurns![0].evidenceQuote).toBe("src/login.ts");
+    expect(result!.recurringMistakes).toHaveLength(1);
+    expect(result!.recurringMistakes![0].occurrenceSceneIndices).toEqual([1, 2]);
+    expect(result!.repoRecommendations).toHaveLength(1);
+    expect(result!.repoRecommendations![0].category).toBe("documentation");
+    expect(result!.repoRecommendations![0].target).toBe("AGENTS.md");
+    expect(result!.repoRecommendations![0].addition).toContain("supported build flag");
+    expect(result!.repoRecommendations![0].verification).toContain("clean checkout");
+    expect(result!.repoRecommendations![0].evidenceQuote).toBe("src/login.ts");
+    expect(result!.nextSessionChecklist).toEqual(["Read the build docs before running a variant."]);
+    expect(result!.analysisLimitations).toEqual(["The first command output was truncated."]);
+  });
+
+  it("rejects wrong turns without ordered, scene-grounded recovery evidence", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        wrongTurns: [
+          {
+            title: "Missing evidence",
+            detourSceneIndex: 2,
+            recoverySceneIndex: 2,
+            evidenceSceneIndices: [2],
+            description: "unsupported",
+            recovery: "unsupported",
+            betterApproach: "unsupported",
+            confidence: "high",
+          },
+          {
+            title: "Unknown scene",
+            detourSceneIndex: 99,
+            recoverySceneIndex: 100,
+            evidenceSceneIndices: [99, 100],
+            description: "unsupported",
+            recovery: "unsupported",
+            betterApproach: "unsupported",
+            confidence: "high",
+          },
+        ],
+        repoRecommendations: [
+          {
+            category: "workflow",
+            priority: "medium",
+            target: "AGENTS.md",
+            addition: "Do something",
+            rationale: "No valid evidence",
+            verification: "Run the workflow",
+            evidenceSceneIndices: [99],
+          },
+        ],
+      }),
+      session,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.wrongTurns).toBeUndefined();
+    expect(result!.repoRecommendations).toBeUndefined();
+  });
+
   it("extracts JSON from noisy output with surrounding text", () => {
     const json = makeValidFeedbackJson();
     const noisy = `Here is my analysis:\n\n${json}\n\nI hope this helps!`;
@@ -657,6 +839,129 @@ describe("parseFeedbackResponse", () => {
   });
 });
 
+// ─── buildCoachingSignals ─────────────────────────────────
+
+describe("buildCoachingSignals", () => {
+  it("finds tool failures and later user corrections as candidate signals", () => {
+    const session = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Fix the build" },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build" },
+          result: "Command failed with exit code 1",
+          isError: true,
+        },
+        {
+          type: "tool-call",
+          toolName: "Read",
+          input: { file_path: "scripts/build.mjs" },
+          result: "The supported syntax is documented here.",
+        },
+        { type: "user-prompt", content: "No, use the colon syntax instead." },
+      ],
+    });
+
+    expect(buildCoachingSignals(session)).toEqual([
+      {
+        kind: "tool-failure",
+        sceneIndices: [1],
+        summary: "Tool failure signal at scene 1 (Bash)",
+      },
+      {
+        kind: "user-correction",
+        sceneIndices: [3],
+        summary: "Possible user correction at scene 3",
+      },
+      {
+        kind: "recovery-candidate",
+        sceneIndices: [1, 2],
+        summary:
+          "Possible detour/recovery pair: Bash failed at scene 1, followed by Read at scene 2",
+      },
+    ]);
+  });
+
+  it("does not treat the first user prompt as a correction", () => {
+    const session = makeSession({
+      scenes: [{ type: "user-prompt", content: "Actually fix the auth bug" }],
+    });
+
+    expect(buildCoachingSignals(session)).toEqual([]);
+  });
+});
+
+describe("buildObservedRepoContext", () => {
+  it("summarizes only repository paths and commands visible in the session", () => {
+    const session = makeSession({
+      meta: {
+        ...makeSession().meta,
+        project: "/repo",
+        gitRepo: "tuo-lei/vibe-replay",
+        gitBranch: "feat/example",
+        contextFiles: ["AGENTS.md"],
+        trackedFiles: ["README.md"],
+      },
+      scenes: [
+        { type: "user-prompt", content: "Fix the build" },
+        {
+          type: "tool-call",
+          toolName: "Read",
+          input: { file_path: "scripts/build.mjs" },
+          result: "source",
+        },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build" },
+          result: "done",
+          bashOutput: { command: "pnpm build", stdout: "done" },
+        },
+      ],
+    });
+
+    const context = buildObservedRepoContext(session);
+    expect(context).toContain("Repository: tuo-lei/vibe-replay");
+    expect(context).toContain("AGENTS.md");
+    expect(context).toContain("scripts/build.mjs");
+    expect(context).toContain("pnpm build");
+  });
+});
+
+describe("buildCoachingEvidenceWindows", () => {
+  it("preserves repeated commands and exact failure output", () => {
+    const session = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Run the build" },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build" },
+          result: "Command failed with exit code 1",
+          isError: true,
+          bashOutput: { command: "pnpm build", stdout: "Command failed with exit code 1" },
+        },
+        { type: "text-response", content: "Retrying the same command." },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm build" },
+          result: "Command failed with exit code 1",
+          isError: true,
+          bashOutput: { command: "pnpm build", stdout: "Command failed with exit code 1" },
+        },
+      ],
+    });
+
+    const windows = buildCoachingEvidenceWindows(session);
+    expect(windows).toContain("pnpm build");
+    expect(windows).toContain("Command failed with exit code 1");
+    expect(windows).toContain("SCENE 1");
+    expect(windows).toContain("SCENE 3");
+  });
+});
+
 // ─── buildSessionDigest ────────────────────────────────────
 
 describe("buildSessionDigest", () => {
@@ -683,6 +988,12 @@ describe("buildSessionDigest", () => {
     const session = makeSession();
     const digest = buildSessionDigest(session);
     expect(digest).toContain("Read");
+  });
+
+  it("labels assistant scenes so coaching findings can cite exact evidence", () => {
+    const digest = buildSessionDigest(makeSession());
+    expect(digest).toContain("[SCENE 1] Thinking");
+    expect(digest).toContain("[SCENE 2] Read");
   });
 
   it("handles tool-call with diff", () => {
@@ -874,6 +1185,52 @@ describe("feedbackToAnnotations", () => {
     expect(annotations[0].body).toContain("Great session.");
     expect(annotations[0].body).toContain("Clear communication");
     expect(annotations[0].body).toContain("More context");
+  });
+
+  it("anchors wrong-turn coaching to the detour scene", () => {
+    const feedback: FeedbackResult = {
+      summary: "The agent recovered after checking the build script.",
+      score: 7,
+      strengths: [],
+      improvements: [],
+      feedbackItems: [],
+      wrongTurns: [
+        {
+          title: "Wrong build flag",
+          detourSceneIndex: 2,
+          recoverySceneIndex: 3,
+          evidenceSceneIndices: [2, 3],
+          description: "The first command used unsupported syntax.",
+          recovery: "The agent read the script and used the supported syntax.",
+          betterApproach: "Inspect the build entry point before trying flags.",
+          confidence: "high",
+        },
+      ],
+      repoRecommendations: [
+        {
+          category: "documentation",
+          priority: "high",
+          target: "AGENTS.md",
+          addition: "Document the supported build flag.",
+          rationale: "This would prevent the same detour.",
+          verification: "Run the documented build command.",
+          evidenceSceneIndices: [2, 3],
+        },
+      ],
+      nextSessionChecklist: ["Check the build docs first."],
+    };
+
+    const annotations = feedbackToAnnotations(feedback);
+
+    expect(annotations).toHaveLength(2);
+    expect(annotations[0].body).toContain("Wrong Directions & Recoveries");
+    expect(annotations[0].body).toContain("Suggested Repo Additions");
+    expect(annotations[0].body).toContain("AGENTS.md");
+    expect(annotations[0].body).toContain("Run the documented build command.");
+    expect(annotations[0].body).toContain("Next Session Checklist");
+    expect(annotations[1].sceneIndex).toBe(2);
+    expect(annotations[1].body).toContain("Recovery at scene 3");
+    expect(annotations[1].body).toContain("Evidence scenes:** 2, 3");
   });
 
   it("creates per-item annotations with correct sceneIndex", () => {

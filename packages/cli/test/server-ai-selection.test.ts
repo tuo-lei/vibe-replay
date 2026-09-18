@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AiProviderInfo } from "../src/ai-runtime.js";
 import { __testables } from "../src/server.js";
 
-let piAgentDir: string;
-let previousPiAgentDir: string | undefined;
+let settingsPath: string;
+let previousSettingsPath: string | undefined;
 
 function provider(
   id: string,
@@ -32,54 +32,46 @@ function provider(
   };
 }
 
-async function writePiDefault(providerId: string, modelId: string, baseUrl?: string) {
-  await writeFile(
-    join(piAgentDir, "settings.json"),
-    JSON.stringify({ defaultProvider: providerId, defaultModel: modelId }),
-  );
-  if (baseUrl) {
-    await writeFile(
-      join(piAgentDir, "models.json"),
-      JSON.stringify({ providers: { [providerId]: { baseUrl } } }),
-    );
-  }
+async function writeAppDefault(providerId: string, modelId: string) {
+  await writeFile(settingsPath, JSON.stringify({ providerId, modelId }));
 }
 
 beforeEach(async () => {
-  piAgentDir = await mkdtemp(join(tmpdir(), "vibe-replay-pi-default-"));
-  previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = piAgentDir;
+  const root = await mkdtemp(join(tmpdir(), "vibe-replay-ai-default-"));
+  settingsPath = join(root, "ai-settings.json");
+  previousSettingsPath = process.env.VIBE_REPLAY_AI_SETTINGS;
+  process.env.VIBE_REPLAY_AI_SETTINGS = settingsPath;
 });
 
 afterEach(async () => {
-  if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-  else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
-  await rm(piAgentDir, { recursive: true, force: true });
+  if (previousSettingsPath === undefined) delete process.env.VIBE_REPLAY_AI_SETTINGS;
+  else process.env.VIBE_REPLAY_AI_SETTINGS = previousSettingsPath;
+  await rm(settingsPath, { force: true });
+  await rm(join(settingsPath, ".."), { recursive: true, force: true });
 });
 
 describe("AI default selection", () => {
-  it("maps a Pi custom provider by endpoint identity, not by provider name", async () => {
-    await writePiDefault("pi-gateway", "luna", "http://gateway.example/v1");
+  it("reads the app-owned default without consulting Pi settings", async () => {
+    await writeAppDefault("my-custom-provider", "luna");
 
     const selection = await __testables.resolveDefaultAiSelection([
-      provider("my-custom-provider", "luna", "http://gateway.example/v1/"),
-      provider("other-provider", "luna", "http://other.example/v1"),
+      provider("my-custom-provider", "luna"),
+      provider("other-provider", "luna"),
     ]);
 
     expect(selection).toEqual({ providerId: "my-custom-provider", modelId: "luna" });
   });
 
-  it("does not select a same-named model from a different provider", async () => {
-    await writePiDefault("pi-gateway", "luna", "http://gateway.example/v1");
-
+  it("prefers Luna on the custom endpoint when no app default exists", async () => {
     const selection = await __testables.resolveDefaultAiSelection([
-      provider("wrong-provider", "luna", "http://other.example/v1"),
+      provider("openai", "gpt-5.6-luna"),
+      provider("custom-openai", "gpt-5.6-luna"),
     ]);
 
-    expect(selection).toBeUndefined();
+    expect(selection).toEqual({ providerId: "custom-openai", modelId: "gpt-5.6-luna" });
   });
 
-  it("does not choose the first provider when Pi has no matching default", async () => {
+  it("does not choose the first provider when Luna is unavailable", async () => {
     const selection = await __testables.resolveDefaultAiSelection([
       provider("first-provider", "first-model"),
       provider("second-provider", "second-model"),
