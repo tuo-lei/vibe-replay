@@ -20,6 +20,8 @@ import {
   customToolCompatibilityMessage,
   FileCredentialStore,
   PiAiRuntime,
+  readAiDefaultSelection,
+  writeAiDefaultSelection,
 } from "../src/ai-runtime.js";
 
 const temporaryRoots: string[] = [];
@@ -337,6 +339,31 @@ describe("streaming credential redaction", () => {
 });
 
 describe("PiAiRuntime", () => {
+  it("persists the app-owned default provider and model", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-settings-"));
+    temporaryRoots.push(root);
+    const settingsPath = join(root, "ai-settings.json");
+    const previous = process.env.VIBE_REPLAY_AI_SETTINGS;
+    process.env.VIBE_REPLAY_AI_SETTINGS = settingsPath;
+    try {
+      await writeAiDefaultSelection({
+        providerId: "custom-openai",
+        modelId: "gpt-5.6-luna",
+      });
+
+      expect(await readAiDefaultSelection()).toEqual({
+        providerId: "custom-openai",
+        modelId: "gpt-5.6-luna",
+      });
+      if (POSIX_FILE_MODES) {
+        expect((await stat(settingsPath)).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.VIBE_REPLAY_AI_SETTINGS;
+      else process.env.VIBE_REPLAY_AI_SETTINGS = previous;
+    }
+  });
+
   it("registers the initial provider and authentication matrix", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
     temporaryRoots.push(root);
@@ -908,6 +935,7 @@ describe("PiAiRuntime", () => {
       expect(result.result).toEqual({ ok: true });
       expect(requestBodies).toHaveLength(1);
       expect(requestBodies[0]?.tool_choice).toBe("required");
+      expect(requestBodies[0]?.max_tokens).toBe(16_384);
     } finally {
       fetchMock.mockRestore();
     }

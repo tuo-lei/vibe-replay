@@ -1,5 +1,9 @@
 import type { Context, Hono } from "hono";
-import { createBrowserAuthInteraction, getAiRuntime } from "../ai-runtime.js";
+import {
+  createBrowserAuthInteraction,
+  getAiRuntime,
+  writeAiDefaultSelection,
+} from "../ai-runtime.js";
 import { generateFeedback, generateToneAdjustment, generateTranslation } from "../feedback.js";
 import { loadOverlays, sessionWithEffectiveContent } from "../overlays.js";
 import { resolveAiSelection, resolveDefaultAiSelection } from "../server-ai-selection.js";
@@ -75,6 +79,30 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
         { available: false, providers: [], error: await getAiRuntime().getSafeErrorMessage(err) },
         500,
       );
+    }
+  });
+
+  app.post("/api/ai/default", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "AI default selection requests must be same-origin" }, 403);
+    }
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const ai = await resolveAiSelection(body, c.req.raw.signal);
+      await writeAiDefaultSelection(
+        { providerId: ai.selection.providerId, modelId: ai.modelId },
+        c.req.raw.signal,
+      );
+      return c.json({
+        ok: true,
+        defaultProvider: {
+          id: ai.selection.providerId,
+          modelId: ai.modelId,
+          name: ai.providerName,
+        },
+      });
+    } catch (err) {
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 400);
     }
   });
 
@@ -220,6 +248,8 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
         annotations: newAnnotations,
         score: fb.result.score,
         itemCount: fb.result.feedbackItems.length,
+        wrongTurnCount: fb.result.wrongTurns?.length || 0,
+        repoRecommendationCount: fb.result.repoRecommendations?.length || 0,
         outcome: fb.result.outcome,
         sessionGoal: fb.result.sessionGoal,
         providerId: ai.selection.providerId,

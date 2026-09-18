@@ -94,6 +94,8 @@ export interface AnnotationActions {
     | (() => Promise<{
         score: number;
         itemCount: number;
+        wrongTurnCount: number;
+        repoRecommendationCount: number;
         providerId: string;
         providerName: string;
         modelId: string;
@@ -444,6 +446,9 @@ export function useAnnotations(
             return {
               score: data.score as number,
               itemCount: data.itemCount as number,
+              wrongTurnCount: typeof data.wrongTurnCount === "number" ? data.wrongTurnCount : 0,
+              repoRecommendationCount:
+                typeof data.repoRecommendationCount === "number" ? data.repoRecommendationCount : 0,
               providerId: data.providerId as string,
               providerName: data.providerName as string,
               modelId: data.modelId as string,
