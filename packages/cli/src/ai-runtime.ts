@@ -753,6 +753,23 @@ export async function writeAiDefaultSelection(
   }
 }
 
+/** Seed a default only when the app-owned settings file is still empty. */
+export async function ensureAiDefaultSelection(
+  selection: AiDefaultSelection,
+  signal?: AbortSignal,
+): Promise<AiDefaultSelection> {
+  const settingsPath = getAiSettingsPath();
+  const release = await acquireFileLock(`${settingsPath}.transaction`, signal);
+  try {
+    const saved = await readAiDefaultSelection();
+    if (saved) return saved;
+    await persistJsonFile(settingsPath, selection, signal);
+    return selection;
+  } finally {
+    await release();
+  }
+}
+
 export interface AiRuntime {
   readonly models: Models;
   readonly credentials: CredentialStore;

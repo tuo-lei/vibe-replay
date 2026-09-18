@@ -1,7 +1,7 @@
 import {
+  ensureAiDefaultSelection,
   getAiRuntime,
   readAiDefaultSelection,
-  writeAiDefaultSelection,
   type AiProviderInfo,
 } from "./ai-runtime.js";
 import type { AiSelection } from "./feedback.js";
@@ -76,8 +76,7 @@ export async function resolveDefaultAiSelection(
     };
     // Seed the app-owned settings file once so CLI and browser surfaces share
     // the same default without importing another agent's configuration.
-    await writeAiDefaultSelection(preferred).catch(() => {});
-    return preferred;
+    return await ensureAiDefaultSelection(preferred).catch(() => preferred);
   }
 
   // Do not invent a provider/model or silently select the first catalog entry.

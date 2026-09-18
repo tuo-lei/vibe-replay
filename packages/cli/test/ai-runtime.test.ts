@@ -18,6 +18,7 @@ import {
   createAiRuntime,
   createBrowserAuthInteraction,
   customToolCompatibilityMessage,
+  ensureAiDefaultSelection,
   FileCredentialStore,
   PiAiRuntime,
   readAiDefaultSelection,
@@ -358,6 +359,34 @@ describe("PiAiRuntime", () => {
       if (POSIX_FILE_MODES) {
         expect((await stat(settingsPath)).mode & 0o777).toBe(0o600);
       }
+    } finally {
+      if (previous === undefined) delete process.env.VIBE_REPLAY_AI_SETTINGS;
+      else process.env.VIBE_REPLAY_AI_SETTINGS = previous;
+    }
+  });
+
+  it("does not overwrite an explicit default while seeding a fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-settings-race-"));
+    temporaryRoots.push(root);
+    const settingsPath = join(root, "ai-settings.json");
+    const previous = process.env.VIBE_REPLAY_AI_SETTINGS;
+    process.env.VIBE_REPLAY_AI_SETTINGS = settingsPath;
+    try {
+      await writeAiDefaultSelection({
+        providerId: "custom-openai",
+        modelId: "gpt-5.6-luna",
+      });
+
+      const selected = await ensureAiDefaultSelection({
+        providerId: "openai",
+        modelId: "gpt-5.6-luna",
+      });
+
+      expect(selected).toEqual({
+        providerId: "custom-openai",
+        modelId: "gpt-5.6-luna",
+      });
+      expect(await readAiDefaultSelection()).toEqual(selected);
     } finally {
       if (previous === undefined) delete process.env.VIBE_REPLAY_AI_SETTINGS;
       else process.env.VIBE_REPLAY_AI_SETTINGS = previous;
