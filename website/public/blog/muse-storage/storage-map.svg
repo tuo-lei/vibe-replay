@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Muse local session storage map</title>
+  <desc id="desc">Muse stores one JSONL per agent under ~/agents, with a sibling sessions.json runtime index, and every item record carries a source field naming the runtime subsystem that wrote it.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#141a08"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#a3e635"/><stop offset="1" stop-color="#4ade80"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7d8590"/></marker>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)"/>
+  <path d="M0 120H1200" stroke="#30363d" opacity=".5"/>
+  <text x="64" y="68" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="30" font-weight="700">Muse local session storage</text>
+  <text x="64" y="101" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="16">One JSONL per agent - every item names the runtime source that wrote it</text>
+  <g font-family="JetBrains Mono,ui-monospace,Menlo,monospace">
+    <rect x="64" y="166" width="470" height="122" rx="16" fill="#161b22" stroke="#a3e635" stroke-opacity=".65"/>
+    <text x="94" y="204" fill="#a3e635" font-size="14" font-weight="700">TRANSCRIPT</text>
+    <text x="94" y="241" fill="#e6edf3" font-size="16">~/agents/&lt;agentId&gt;/sessions/</text>
+    <text x="94" y="268" fill="#7d8590" font-size="14">&lt;agentId&gt;.jsonl - append-only</text>
+    <rect x="64" y="316" width="470" height="122" rx="16" fill="#161b22" stroke="#22d3ee" stroke-opacity=".6"/>
+    <text x="94" y="354" fill="#22d3ee" font-size="14" font-weight="700">RUNTIME INDEX</text>
+    <text x="94" y="391" fill="#e6edf3" font-size="16">sibling sessions.json</text>
+    <text x="94" y="418" fill="#7d8590" font-size="14">created/updated - item_count - model_id</text>
+    <rect x="64" y="466" width="470" height="122" rx="16" fill="#161b22" stroke="#b392f0" stroke-opacity=".6"/>
+    <text x="94" y="504" fill="#b392f0" font-size="14" font-weight="700">ENV OVERRIDE</text>
+    <text x="94" y="541" fill="#e6edf3" font-size="16">MUSE_AGENTS_DIR=/path/to/agents</text>
+    <text x="94" y="568" fill="#7d8590" font-size="14">replaces the ~/agents default</text>
+    <text x="548" y="211" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="13">parse</text>
+    <rect x="650" y="196" width="486" height="392" rx="20" fill="#0d1117" stroke="url(#accent)" stroke-width="2"/>
+    <text x="690" y="244" fill="#a3e635" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15" font-weight="700">SOURCE PROVENANCE</text>
+    <text x="690" y="286" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="24" font-weight="700">The runtime signs</text>
+    <text x="690" y="318" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="24" font-weight="700">every line it writes</text>
+    <text x="690" y="362" fill="#f85149" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">runtime.feed - 4,898 lines</text>
+    <text x="690" y="394" fill="#3fb950" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">runtime.self_improvement - 2,503</text>
+    <text x="690" y="426" fill="#79b8ff" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">scheduler.cron - 167</text>
+    <text x="690" y="458" fill="#79b8ff" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="15">runtime.monitoring / tool_guidance / ...</text>
+    <text x="690" y="506" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">thinking is a first-class record: 2,783 blocks,</text>
+    <text x="690" y="530" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">nearly 1 in 4 lines. skip developer messages,</text>
+    <text x="690" y="554" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">drop compaction summaries, map exec/read to</text>
+    <text x="690" y="578" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">Bash/Read and pair calls by call_id.</text>
+    <rect x="64" y="628" width="1072" height="1" fill="#30363d"/>
+    <text x="64" y="664" fill="#7d8590" font-family="JetBrains Mono,ui-monospace,Menlo,monospace" font-size="14">471 agents - 11,667 lines - 0 malformed - no SQLite, no cloud, just JSONL</text>
+  </g>
+</svg>
