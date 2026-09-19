@@ -613,7 +613,7 @@ function formatSuccessPayload(success: unknown): string {
   if (mediaPath && onlyOmitted) {
     return omittedNotes.length > 0 ? `${mediaPath}\n${omittedNotes[0]}` : mediaPath;
   }
-  const actionSummary = computerUseActionSummary(remaining, omittedNotes);
+  const actionSummary = computerUseActionSummary(remaining, omittedNotes, mediaPath);
   if (actionSummary) return actionSummary;
   if (Object.keys(rest).length === 0) return mediaPath || "";
   return formatPayload(rest);
@@ -622,6 +622,7 @@ function formatSuccessPayload(success: unknown): string {
 function computerUseActionSummary(
   remaining: Record<string, unknown>,
   omittedNotes: string[],
+  mediaPath?: string,
 ): string | undefined {
   const actionCount = remaining.actionCount ?? remaining.action_count;
   const countLabel =
@@ -643,8 +644,11 @@ function computerUseActionSummary(
     return typeof item === "string" && item.startsWith("[omitted ");
   });
   if (!restOnlyOmitted) return undefined;
-  const label = `${countLabel} actions`;
-  return omittedNotes.length > 0 ? `${label}\n${omittedNotes[0]}` : label;
+  const parts: string[] = [];
+  if (mediaPath) parts.push(mediaPath);
+  parts.push(`${countLabel} actions`);
+  if (omittedNotes.length > 0) parts.push(omittedNotes[0]);
+  return parts.join("\n");
 }
 
 function formatPayload(value: unknown): string {

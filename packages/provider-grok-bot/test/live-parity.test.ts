@@ -380,6 +380,56 @@ describe("Grok Bot live-session parity", () => {
     expect(JSON.stringify(replay.scenes)).not.toContain(HUGE_IMAGE);
   });
 
+  it("keeps screenshotPath on computer_use results that also have actionCount", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "screenshot the page" }] },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "computer_use",
+              toolCallId: "cu-path",
+              input: { actions: [{ type: "screenshot" }] },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        role: "tool",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              name: "computer_use",
+              toolCallId: "cu-path",
+              result: {
+                success: {
+                  actionCount: 3,
+                  durationMs: 900,
+                  screenshotPath: "/tmp/screenshot.png",
+                  screenshot: HUGE_SCREENSHOT,
+                },
+              },
+            },
+          ],
+        },
+      }),
+    ]);
+    const tool = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool?.type).toBe("tool_use");
+    expect(tool?.type === "tool_use" && tool._result).toContain("/tmp/screenshot.png");
+    expect(tool?.type === "tool_use" && tool._result).toContain("3 actions");
+    expect(tool?.type === "tool_use" && tool._result).toContain("omitted");
+    expect(JSON.stringify(parsed.turns)).not.toContain(HUGE_SCREENSHOT);
+  });
+
   it("splits a live Eng↔GTM group wake and ignores trailing hidden prompts", () => {
     expect(stripGrokBotHiddenPayload(LIVE_GROUP_WAKE)).toContain("[Group chat:");
     expect(stripGrokBotHiddenPayload(LIVE_GROUP_WAKE)).not.toContain("[SAND_HIDDEN_PROMPT]");
