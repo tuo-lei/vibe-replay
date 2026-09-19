@@ -1306,6 +1306,18 @@ program
     });
   });
 
+// E2E-encrypted remote session sharing through the Cloudflare relay.
+// Prints a capability URL; anyone opening it can browse this machine's
+// sessions read-only. The relay only forwards ciphertext.
+program
+  .command("relay")
+  .description("Share this machine's sessions via the Cloudflare relay (E2E-encrypted URL)")
+  .option("--relay-origin <url>", "Relay origin (default: https://vibe-replay.com)")
+  .action(async (opts: { relayOrigin?: string }) => {
+    const { startRelay } = await import("./relay.js");
+    await startRelay({ relayOrigin: opts.relayOrigin });
+  });
+
 // Keep backwards-compatible hidden alias
 program
   .command("login", { hidden: true })
