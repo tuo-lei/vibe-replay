@@ -85,7 +85,12 @@ immediately; nothing is stored server-side.
 is a bearer capability — anyone holding the full URL (including the `#fragment`) can read your
 sessions while the shipper runs, and browser history or screenshots can leak it. The viewer page
 is served by the relay, so it is the trust anchor for the browser-side crypto: if you don't
-trust the relay operator to serve the page honestly, don't use the share URL.
+trust the relay operator to serve the page honestly, don't use the share URL. The CLI refuses
+cleartext (`http:`) relay origins except loopback, since an on-path attacker could otherwise swap
+the viewer page and steal the key from the fragment. The box id is 128-bit random and unguessable,
+but anyone who learns it (e.g. the relay operator, who sees the request path) can occupy the VM or
+viewer socket slot; without the content key they learn nothing from the ciphertext, and the shipper
+auto-reconnects and re-announces itself, so a hijacked slot is reclaimed on the next reconnect.
 
 ### Watch the full replay
 
