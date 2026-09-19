@@ -27,5 +27,13 @@ migrations_dir = "drizzle"
 binding = "REPLAY_BUCKET"
 bucket_name = "vibe-replay-storage"
 
+[[durable_objects.bindings]]
+name = "LIVE_RELAY"
+class_name = "LiveRelay"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LiveRelay"]
+
 [triggers]
 crons = ["0 */6 * * *"]
