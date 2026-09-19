@@ -19,7 +19,13 @@ import {
   resolveGrokBotParsePaths,
   resolveOwnerName,
 } from "./group-merge.js";
-import { classifyGrokBotUserWake, formatAnsweringHeader, peelGrokBotMetaTag } from "./meta-wake.js";
+import {
+  classifyGrokBotUserWake,
+  formatAnsweringHeader,
+  peelGrokBotMetaTag,
+  SAND_HIDDEN_PROMPT,
+  stripGrokBotHiddenPayload,
+} from "./meta-wake.js";
 import {
   formatAttachedImageMention,
   grokBotAttachmentIdentity,
@@ -31,6 +37,7 @@ import {
   stripFileUrl,
 } from "./media.js";
 import {
+  flattenGrokBotStatusText,
   grokBotMcpAttribution,
   grokBotReplayToolName,
   isGrokBotEditTool,
@@ -64,7 +71,13 @@ export {
   mergeDiscoveredGroupSessions,
   mergeGrokBotGroupParses,
 } from "./group-merge.js";
-export { classifyGrokBotUserWake, parseGrokBotMetaWake, peelGrokBotMetaTag } from "./meta-wake.js";
+export {
+  classifyGrokBotUserWake,
+  parseGrokBotMetaWake,
+  peelGrokBotMetaTag,
+  SAND_HIDDEN_PROMPT,
+  stripGrokBotHiddenPayload,
+} from "./meta-wake.js";
 export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
 export {
   formatAttachedImageMention,
@@ -73,9 +86,9 @@ export {
   scrubGrokBotMediaPayload,
   stripFileUrl,
 } from "./media.js";
+export { flattenGrokBotStatusText } from "./tool-mapping.js";
 export { findSandSubagentId, isSandSubagentSessionId } from "./subagent.js";
 
-export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 const USER_TURN_PREFIX_RE = /^\s*\[t\d+u\]\s*/i;
 const SEND_MESSAGE_TOOL = "send_message";
 
@@ -262,8 +275,8 @@ export function parseGrokBotLines(
     const recordTs = coerceTimestamp(record.timestamp);
 
     if (role === "user") {
-      const text = stripUserDecorators(extractText(content));
-      if (!text || isHiddenPrompt(text)) continue;
+      const text = stripGrokBotHiddenPayload(stripUserDecorators(extractText(content)));
+      if (!text) continue;
       const timestamp = recordTs;
       if (timestamp) {
         allTimestamps.push(timestamp);
@@ -358,9 +371,7 @@ export function parseGrokBotLines(
           : {};
       const mappedInput = mapGrokBotToolArgs(rawName, block.input);
       const childId = result?.subagentId || findSandSubagentId(mappedInput);
-      if (childId && !stringField(mappedInput, "sessionId")) {
-        mappedInput.sessionId = childId;
-      }
+      if (childId) mappedInput.sessionId = childId;
       const mcp = grokBotMcpAttribution(rawName, rawInput);
       const call: ToolCallSite = {
         name: grokBotReplayToolName(rawName, rawInput),
@@ -432,7 +443,7 @@ export function parseGrokBotLines(
 }
 
 export function isHiddenPrompt(text: string): boolean {
-  return text.includes(SAND_HIDDEN_PROMPT);
+  return text.includes(SAND_HIDDEN_PROMPT) && !stripGrokBotHiddenPayload(text);
 }
 
 export function stripUserDecorators(text: string): string {
@@ -507,13 +518,7 @@ function extractSendMessageTextRaw(input: unknown, depth = 0): string {
 }
 
 export function extractStatusUpdateText(input: unknown): string {
-  const promoted = extractSendMessageText(input);
-  if (promoted.trim()) return promoted;
-  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
-  const obj = input as Record<string, unknown>;
-  if (typeof obj.update === "string") return obj.update;
-  if (typeof obj.status === "string") return obj.status;
-  return "";
+  return flattenGrokBotStatusText(input) || "";
 }
 
 function collectToolResults(records: { record: GrokBotRecord }[]): CollectedResult[] {
@@ -582,6 +587,8 @@ function formatSuccessPayload(success: unknown): string {
   if (typeof obj.stdout === "string") return obj.stdout;
   if (typeof obj.output === "string") return obj.output;
   if (typeof obj.text === "string") return obj.text;
+  const status = flattenGrokBotStatusText(obj.currentStep);
+  if (status) return status;
   const mediaPath = mediaPathFromPayload(obj);
   const rest = omitKeys(obj, ["timestamp", "messageId", "message_id"]);
   const remaining = mediaPath
@@ -606,8 +613,38 @@ function formatSuccessPayload(success: unknown): string {
   if (mediaPath && onlyOmitted) {
     return omittedNotes.length > 0 ? `${mediaPath}\n${omittedNotes[0]}` : mediaPath;
   }
+  const actionSummary = computerUseActionSummary(remaining, omittedNotes);
+  if (actionSummary) return actionSummary;
   if (Object.keys(rest).length === 0) return mediaPath || "";
   return formatPayload(rest);
+}
+
+function computerUseActionSummary(
+  remaining: Record<string, unknown>,
+  omittedNotes: string[],
+): string | undefined {
+  const actionCount = remaining.actionCount ?? remaining.action_count;
+  const countLabel =
+    typeof actionCount === "number"
+      ? String(actionCount)
+      : typeof actionCount === "string" && actionCount.trim()
+        ? actionCount.trim()
+        : undefined;
+  if (!countLabel) return undefined;
+  const restKeys = Object.keys(remaining).filter(
+    (key) =>
+      key !== "actionCount" &&
+      key !== "action_count" &&
+      key !== "durationMs" &&
+      key !== "duration_ms",
+  );
+  const restOnlyOmitted = restKeys.every((key) => {
+    const item = remaining[key];
+    return typeof item === "string" && item.startsWith("[omitted ");
+  });
+  if (!restOnlyOmitted) return undefined;
+  const label = `${countLabel} actions`;
+  return omittedNotes.length > 0 ? `${label}\n${omittedNotes[0]}` : label;
 }
 
 function formatPayload(value: unknown): string {
@@ -713,11 +750,6 @@ function firstString(...values: unknown[]): string | undefined {
     if (typeof value === "string" && value.trim()) return value;
   }
   return undefined;
-}
-
-function stringField(obj: Record<string, unknown>, key: string): string | undefined {
-  const value = obj[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function namesMatch(left: string, right: string): boolean {
@@ -878,8 +910,10 @@ export function countGrokBotDiscoveryStats(content: string): {
     }
 
     if (record.role === "user") {
-      const text = stripUserDecorators(extractText(record.message?.content));
-      if (!text || isHiddenPrompt(text)) continue;
+      const text = stripGrokBotHiddenPayload(
+        stripUserDecorators(extractText(record.message?.content)),
+      );
+      if (!text) continue;
       const peeled = peelGrokBotMetaTag(text);
       const groupSource = peeled?.rest || text;
       const group = parseGrokBotGroupWake(groupSource);

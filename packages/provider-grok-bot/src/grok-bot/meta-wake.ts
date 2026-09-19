@@ -12,7 +12,13 @@
  *   [A background task just completed] → context-injection (not a user chat)
  *   [first run] → skip (bootstrap; often also wrapped in SAND_HIDDEN_PROMPT)
  *   <<SAND_AGENT_PROFILE_UPDATE…>> → skip / strip; not a prompt
+ *
+ * Group wakes sometimes append `[SAND_HIDDEN_PROMPT]<<SAND_AGENT_PROFILE_UPDATE…>>`
+ * after the room payload. Strip that suffix so the splitter still runs; a
+ * turn that is *only* the hidden marker stays skipped.
  */
+
+export const SAND_HIDDEN_PROMPT = "[SAND_HIDDEN_PROMPT]";
 
 export type GrokBotMetaLabel =
   | "routine"
@@ -45,6 +51,16 @@ const BACKGROUND_TASK_RE = /^\s*\[A background task just completed\]\s*/i;
 const FIRST_RUN_RE = /^\s*\[first run\]\s*/i;
 export function stripGrokBotProfileUpdate(text: string): string {
   return text.replace(/<<SAND_AGENT_PROFILE_UPDATE[\s\S]*?>>/gi, "").trim();
+}
+
+/**
+ * Drop a trailing/leading hidden-prompt payload while keeping any visible
+ * text that preceded it (group-chat wakes). Empty result means skip the turn.
+ */
+export function stripGrokBotHiddenPayload(text: string): string {
+  const index = text.indexOf(SAND_HIDDEN_PROMPT);
+  const cut = index >= 0 ? text.slice(0, index) : text;
+  return stripGrokBotProfileUpdate(cut).trim();
 }
 
 function hasProfileUpdate(text: string): boolean {

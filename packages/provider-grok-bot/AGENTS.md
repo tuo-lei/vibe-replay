@@ -33,7 +33,9 @@ follow-up, not this package. Skip `store.db` / conversation-blobs / encryption.
 
 One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [...] } }`.
 
-- Skip user text containing `[SAND_HIDDEN_PROMPT]` or a lone `[first run]`
+- Skip user text that is *only* `[SAND_HIDDEN_PROMPT]` or a lone `[first run]`.
+  Group wakes may append `[SAND_HIDDEN_PROMPT]<<SAND_AGENT_PROFILE_UPDATE…>>`
+  after the room payload — strip that suffix so the splitter still runs
 - Strip leading `[t0u]` / `[t3u]` prefixes from user text
 - Meta wakes (after `[tNu]` strip):
   - `[routine]` / `[agent]` → `subtype: "context-injection"` (empty bodies dropped)
@@ -62,14 +64,21 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
 - `communicate_update` is a high-volume status/memory side-effect. Keep it as a
   `CommunicateUpdate` tool scene (including success). Do **not** promote it to
   an assistant reply. Flatten the status text onto `update` so the tool card
-  has a one-line summary. `_isError` still marks `failure` / `rejected` / `error`
+  has a one-line summary. Live calls send `{ currentStep }` (sometimes a JSON
+  string wrapping `__sand_tool__` / `{ text, imageKey }`) — unwrap that onto
+  `update`. `_isError` still marks `failure` / `rejected` / `error`
+- Empty `send_message` (`input: {}`) is not a visible reply; do not invent text
 - `role: "tool"` lines carry `tool_result` (not Claude's user-nested pattern).
   Pair to the preceding `tool_use` by `toolCallId` when present, else by order
   (prefer matching tool name; leave unenriched rather than attaching another
   tool's result)
 - `generate_image` / `computer_use` results keep `filePath` / `screenshotPath`
   and replace embedded `imageData` / screenshot base64 with an `[omitted …]`
-  stub so a 16MB artist JSONL stays parseable
+  stub so a 16MB artist JSONL stays parseable. `computer_use` often has no
+  path — still scrub `success.screenshot` and summarize `actions`
+- A parent `task` result `{ success: { agentId: "sand-subagent-<uuid>" } }` is
+  the child id (input `agentId` is a different run uuid). Attach the sibling
+  transcript; do not promote a non-`sand-subagent-` input id to `sessionId`
 - Few/no top-level timestamps; synthesize ISO times from `result.success.timestamp`
   when it is epoch ms. Tool durations use the assistant record timestamp (when
   present) as the initial baseline, then advance to each result so later tools
@@ -85,8 +94,8 @@ web/edit aliases. `get_mcp_tools` is discovery noise and is omitted from scenes.
 `mcp` and dynamic MCP short names (`pull_request_read`, `search_analytics_query`)
 plus top-level `serverIdentifier` / `providerIdentifier` / `server` /
 `toolName` / `tool` become `mcp__<server>__<tool>` cards with `_mcpServer` /
-`_mcpTool`. Nested `args` is the tool payload only — identifiers found only
-there (including after flatten) do not attribute a call as MCP.
+`_mcpTool`. Nested `args` / `arguments` is the tool payload only — identifiers
+found only there (including after flatten) do not attribute a call as MCP.
 
 ## Group chat
 
@@ -143,7 +152,9 @@ The CLI ships a tiny bundled sample at `packages/cli/assets/samples/grok-bot.jso
 and injects it when grok discovery finds no sessions (empty box/export roots).
 Edge coverage lives in `test/parser-edges.test.ts` (mismatched results,
 hidden-tool leak, Windows file URLs, attachment-only replies, missing
-subagents, nested grandchildren).
+subagents, nested grandchildren) and `test/live-parity.test.ts` (live box
+shapes: `currentStep`, empty `send_message`, MCP `arguments`, nested
+`success.agentId`, screenshot/imageData scrub, group wake + hidden suffix).
 
 Try with:
 
