@@ -34,14 +34,14 @@ The body after the frontmatter is the prompt itself, written for an agent. Write
 
 The folder is the portable contract; the runner is chosen per task via `runner:`.
 
-- **`local`** — the task needs machine-local data (local sessions, credentials, paired devices). It is executed by a personal agent scheduler (e.g. a Muse cron, a Hermes/OpenClaw scheduled job) that references the `PROMPT.md` file. Each agent runs the same prompt against its own environment.
-- **`github-actions`** — the task only needs repo data. It is dispatched by `.github/workflows/agent-crons.yml`, which ticks hourly, selects due tasks from their frontmatter, and runs each prompt with the repo's agent action. Manual runs are available via `workflow_dispatch`.
+- **`local`** — the only runner today. The task needs machine-local data (local sessions, credentials, paired devices) and is executed by a personal agent scheduler (e.g. a Muse cron, a Hermes/OpenClaw scheduled job) that references the `PROMPT.md` file. Each agent runs the same prompt against its own environment.
+- **`github-actions`** — reserved. When the first repo-data-only task appears, add a generic dispatcher workflow: tick on a schedule, select due tasks from frontmatter, run each prompt with the repo's agent action. No dispatcher ships until a task needs it.
 
 ## Adding a task
 
 1. Create `crons/<task-name>/PROMPT.md` with the frontmatter above and an English prompt.
 2. Pick `runner: local` (needs this machine) or `runner: github-actions` (repo data only).
-3. For `local`, wire it into your agent's scheduler pointing at the file. For `github-actions`, no extra wiring — the dispatcher picks it up automatically.
+3. For `local`, wire it into your agent's scheduler pointing at the file. `github-actions` has no dispatcher yet — add one when the first such task lands.
 4. If the task keeps a baseline, store it under the task directory (e.g. `snapshots/`) and update it in the same PR as any behavior change.
 
 ## Design notes
