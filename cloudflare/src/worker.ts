@@ -16,6 +16,7 @@ import {
   userFiles,
 } from "./db/schema";
 import { ensureFeaturedExploreReplays, pinFeaturedExploreReplays } from "./explore-seed";
+import { renderLiveViewerPage } from "./live-viewer";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,6 +128,8 @@ function jsonForInlineScript(value: unknown): string {
 type Env = AuthEnv & {
   ASSETS: Fetcher;
   REPLAY_BUCKET: R2Bucket;
+  /** Durable Object namespace for `vibe-replay relay` live boxes. */
+  LIVE_RELAY: DurableObjectNamespace;
   /** GitHub App credentials for authenticated API access (5000 req/hr). */
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
@@ -2380,6 +2383,29 @@ app.get("/r/:id", (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Live relay — E2E-encrypted remote session sharing (`vibe-replay relay`)
+// ---------------------------------------------------------------------------
+
+/** Box ids are 16 random bytes, base64url-encoded (22 chars), unguessable. */
+const LIVE_BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
+
+app.get("/live/:boxId", async (c) => {
+  const boxId = c.req.param("boxId");
+  if (!LIVE_BOX_ID_RE.test(boxId)) {
+    return c.text("Not Found", 404);
+  }
+  // WebSocket upgrade → hand the raw request to the box's Durable Object,
+  // which bridges the VM shipper and the viewer (ciphertext only).
+  if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
+    const id = c.env.LIVE_RELAY.idFromName(`live:${boxId}`);
+    const stub = c.env.LIVE_RELAY.get(id);
+    return stub.fetch(c.req.raw);
+  }
+  // Plain GET → serve the E2E viewer page (key comes from the URL fragment).
+  return c.html(renderLiveViewerPage(boxId));
+});
+
+// ---------------------------------------------------------------------------
 // Fallback — serve static assets (Astro website)
 // ---------------------------------------------------------------------------
 
@@ -2651,6 +2677,9 @@ export function createSentryOptions(env: Env): Sentry.CloudflareOptions {
 }
 
 export default Sentry.withSentry(createSentryOptions, worker);
+
+// Durable Object for the E2E live relay (`vibe-replay relay`).
+export { LiveRelay } from "./live-relay";
 
 // ---------------------------------------------------------------------------
 // POST /api/replays — register or refresh a replay
