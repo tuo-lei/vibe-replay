@@ -61,6 +61,37 @@ ProxyJump configuration; credentials are never stored by vibe-replay.
 
 `sshHost` can be a normal hostname or an alias from `~/.ssh/config`, so existing keys, agents, `ProxyJump`, and `ProxyCommand` configuration continue to work. No private key or password belongs in this file. Remote Codex, Claude Code, and Pi JSONL files are copied into a per-target local cache and parsed by the same providers as local sessions; source cards show the configured location label. A transcript that is still being written is kept at its last stable cached version instead of making the whole SSH source unavailable. Codex titles match `/resume`: explicit names from `session_index.jsonl` take precedence over the read-only `state_5.sqlite` title. The live database and WAL are never copied. Hosts with Python `sqlite3` or the `sqlite3` CLI unavailable still use cached metadata. Sessions whose source is missing, unreadable, or contains no meaningful human prompt remain visible with an explicit status and cannot be generated into an empty replay. Remote repository identity is retained for local filtering but omitted from shareable replay data. Remote Live mode is intentionally unavailable. Remote sessions stay in local insights and are excluded from optional cloud insight sync.
 
+### Remote live sharing (`vibe-replay relay`)
+
+No inbound ports, no SSH tunnel — just one outbound WebSocket. On the machine that holds your sessions:
+
+```bash
+vibe-replay relay
+```
+
+It prints a share URL like `https://<relay>/live/<boxId>#<key>`. Open it on your laptop or phone
+and you get the session list, search, full replay reading, and live tail of the remote machine —
+read-only, through an end-to-end encrypted pipe.
+
+**How it works.** Your machine and your browser both dial out to a Cloudflare Durable Object,
+which only forwards ciphertext between them. Each run generates a fresh 128-bit box id (routing)
+and a 256-bit AES-GCM content key (in the URL `#fragment`, never sent to the server). Every
+command and response is encrypted with a fresh IV and box-scoped associated data, so the relay —
+and anyone watching the network — sees only opaque frames. Kill the CLI and the URL dies
+immediately; nothing is stored server-side.
+
+**Scope.** This MVP is read-only by design: the only commands the shipper answers are
+`list`, `get`, `search`, `tail`, `untail`, and `ping`. Anything else is rejected. The share URL
+is a bearer capability — anyone holding the full URL (including the `#fragment`) can read your
+sessions while the shipper runs, and browser history or screenshots can leak it. The viewer page
+is served by the relay, so it is the trust anchor for the browser-side crypto: if you don't
+trust the relay operator to serve the page honestly, don't use the share URL. The CLI refuses
+cleartext (`http:`) relay origins except loopback, since an on-path attacker could otherwise swap
+the viewer page and steal the key from the fragment. The box id is 128-bit random and unguessable,
+but anyone who learns it (e.g. the relay operator, who sees the request path) can occupy the VM or
+viewer socket slot; without the content key they learn nothing from the ciphertext, and the shipper
+auto-reconnects and re-announces itself, so a hijacked slot is reclaimed on the next reconnect.
+
 ### Watch the full replay
 
 Pick a session and step through every prompt, thinking block, tool call, and code diff with animated playback. Three view modes — All, Compact, and Custom.
@@ -256,6 +287,7 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 
 ## Security & Privacy
 
+- **Remote live sharing** — `vibe-replay relay` exposes sessions read-only (`list`/`get`/`search`/`tail` only) through an end-to-end encrypted pipe: AES-256-GCM with per-run keys in the URL fragment, relay forwards ciphertext it cannot read. The share URL is a bearer capability — treat it like a password and stop the CLI when done.
 - **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
 - **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
