@@ -82,7 +82,8 @@ function fmtTime(iso) {
   try { return new Date(iso).toLocaleString(); } catch (e) { return iso || ""; }
 }
 function escHtml(s) {
-  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function renderList(sessions) {
@@ -131,11 +132,28 @@ function openSession(s) {
   $("listWrap").style.display = "none";
   $("detailWrap").style.display = "block";
   $("scenes").innerHTML = "";
-  cmd({ cmd: "get", id: s.sessionId }).then(function (res) {
-    if (!res.ok) { setStatus("Error: " + res.error, true); return; }
-    setStatus("E2E-encrypted · " + res.data.totalScenes + " scenes");
-    $("scenes").innerHTML = renderScenes(res.data.scenes);
-  }).catch(function (e) { setStatus("Error: " + e.message, true); });
+  // The shipper caps one page at 5000 scenes; walk offsets until the total
+  // the server reported is reached so long sessions are never truncated.
+  var scenes = [];
+  var total = Infinity;
+  var offset = 0;
+  function more() {
+    if (offset >= total) {
+      setStatus("E2E-encrypted · " + total + " scenes");
+      $("scenes").innerHTML = renderScenes(scenes);
+      return;
+    }
+    setStatus("Loading scenes " + offset + "/" + (total === Infinity ? "…" : total) + "…");
+    cmd({ cmd: "get", id: s.sessionId, offset: offset, limit: 5000 }).then(function (res) {
+      if (!res.ok) { setStatus("Error: " + res.error, true); return; }
+      total = res.data.totalScenes;
+      scenes = scenes.concat(res.data.scenes);
+      if (!res.data.scenes.length) { total = scenes.length; } // guard against stalls
+      else { offset = scenes.length; }
+      more();
+    }).catch(function (e) { setStatus("Error: " + e.message, true); });
+  }
+  more();
 }
 function backToList() {
   stopTail();
@@ -144,13 +162,18 @@ function backToList() {
   $("listWrap").style.display = "block";
   refreshList();
 }
-function refreshList() {
+function refreshList(retried) {
   setStatus("Loading sessions…");
   cmd({ cmd: "list" }).then(function (res) {
     if (!res.ok) { setStatus("Error: " + res.error, true); return; }
     setStatus("E2E-encrypted · " + res.data.sessions.length + " sessions");
     renderList(res.data.sessions);
-  }).catch(function (e) { setStatus("Error: " + e.message, true); });
+  }).catch(function (e) {
+    // The VM socket may be mid-reconnect when the page opens and the relay
+    // drops the first frame — retry once before surfacing the error.
+    if (!retried) { setStatus("Retrying…"); setTimeout(function () { refreshList(true); }, 2000); }
+    else { setStatus("Error: " + e.message, true); }
+  });
 }
 function doSearch() {
   var q = $("q").value.trim();

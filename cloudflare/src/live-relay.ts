@@ -74,7 +74,10 @@ export class LiveRelay {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    const size = typeof message === "string" ? message.length : message.byteLength;
+    // Measure text frames in UTF-8 bytes: message.length counts UTF-16 code
+    // units, which understates the wire size of non-ASCII payloads.
+    const size =
+      typeof message === "string" ? new TextEncoder().encode(message).byteLength : message.byteLength;
     if (size > MAX_ENVELOPE_BYTES) {
       this.closeQuietly(ws, 1009, "frame too large");
       return;

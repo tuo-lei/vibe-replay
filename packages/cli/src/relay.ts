@@ -24,7 +24,7 @@ import {
   randomBoxId,
   type EncryptedFrame,
 } from "./relay-crypto.js";
-import { getAllProviders } from "./providers/index.js";
+import { getAllProviders, deduplicateSessionsByProvider } from "./providers/index.js";
 import { transformToReplay } from "./transform.js";
 import { CLI_VERSION } from "./version.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
@@ -38,6 +38,11 @@ const SEARCH_SESSION_CAP = 40;
 const SEARCH_SNIPPET_CHARS = 160;
 const TAIL_POLL_MS = 2000;
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+/** Max concurrent live-tail subscriptions (one viewer, one command source). */
+const MAX_TAILS = 8;
+/** Re-resolve a tailed session's files this often — /resume continuations
+ *  land in a new file, and discovery is the only way to learn about it. */
+const TAIL_REDISCOVER_EVERY = 15;
 
 interface RelaySessionSummary {
   provider: string;
@@ -68,14 +73,16 @@ function summarize(info: SessionInfo): RelaySessionSummary {
 }
 
 async function listSessions(): Promise<RelaySessionSummary[]> {
-  const out: RelaySessionSummary[] = [];
+  const all: SessionInfo[] = [];
   for (const provider of getAllProviders()) {
     try {
-      for (const s of await provider.discover()) out.push(summarize(s));
+      for (const s of await provider.discover()) all.push(s);
     } catch {
       // best-effort across providers
     }
   }
+  // Same cross-provider dedup contract as the dashboard: one card per session.
+  const out = deduplicateSessionsByProvider(all).map(summarize);
   out.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return out;
 }
@@ -153,7 +160,11 @@ async function searchSessions(query: string, limit: number) {
 interface TailState {
   timer: NodeJS.Timeout;
   sceneCount: number;
-  mtimeMs: number;
+  /** All files currently backing the session (multi-file: /resume). */
+  filePaths: string[];
+  mtimes: Map<string, number>;
+  polls: number;
+  polling: boolean;
 }
 
 export interface RelayOptions {
@@ -162,6 +173,19 @@ export interface RelayOptions {
 
 export async function startRelay(options: RelayOptions = {}): Promise<void> {
   const origin = (options.relayOrigin ?? DEFAULT_RELAY_ORIGIN).replace(/\/$/, "");
+  // The viewer page is the trust anchor for browser-side E2EE: the content key
+  // lives in the URL fragment, so a cleartext non-loopback origin would let an
+  // on-path attacker swap the viewer page and steal the key before AES-GCM
+  // ever protects the relay frames.
+  {
+    const u = new URL(origin);
+    const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]" || u.hostname === "::1";
+    if (u.protocol === "http:" && !loopback) {
+      throw new Error(
+        `refusing cleartext relay origin ${origin}: use https (http://localhost is allowed for local testing)`,
+      );
+    }
+  }
   const boxId = randomBoxId();
   const { key, raw } = await generateContentKey();
   const keyString = exportKeyString(raw);
@@ -173,12 +197,19 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   let stopped = false;
   let reconnectDelayMs = 2000;
 
-  const sendFrame = async (payload: unknown): Promise<void> => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  /** Returns false when the socket is down or the frame is oversized — the
+   *  caller decides whether to retry or send a smaller correlated error. */
+  const sendFrame = async (payload: unknown): Promise<boolean> => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
     const outer = JSON.stringify({ t: "frame", ...frame });
-    if (outer.length > MAX_FRAME_BYTES) return;
-    ws.send(outer);
+    if (outer.length > MAX_FRAME_BYTES) return false;
+    try {
+      ws.send(outer);
+    } catch {
+      return false;
+    }
+    return true;
   };
 
   const stopTail = (sessionId: string): void => {
@@ -189,50 +220,80 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     }
   };
 
+  const statAll = (paths: string[]): Map<string, number> => {
+    const mtimes = new Map<string, number>();
+    for (const p of paths) {
+      try {
+        mtimes.set(p, statSync(p).mtimeMs);
+      } catch {
+        // file may vanish mid-tail; treat as unchanged
+      }
+    }
+    return mtimes;
+  };
+
   const startTail = async (sessionId: string): Promise<number> => {
     stopTail(sessionId);
     const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const info = await findSessionInfo(sessionId);
-    const filePath = info?.filePath;
-    let mtimeMs = 0;
-    if (filePath) {
-      try {
-        mtimeMs = statSync(filePath).mtimeMs;
-      } catch {
-        // file may vanish; tail still works off scene count
-      }
-    }
+    const filePaths = info?.filePaths ?? [];
     const poll = async (): Promise<void> => {
+      const tail = tails.get(sessionId);
+      if (!tail || tail.polling) return; // no overlapping polls
+      tail.polling = true;
       try {
-        const tail = tails.get(sessionId);
-        if (!tail) return;
-        // Skip the re-parse when the underlying file hasn't changed.
-        if (filePath) {
-          try {
-            const m = statSync(filePath).mtimeMs;
-            if (m === tail.mtimeMs) return;
-            tail.mtimeMs = m;
-          } catch {
-            // stat failed; fall through and re-parse anyway
+        tail.polls += 1;
+        // /resume continuations land in a NEW file: periodically re-resolve
+        // the session so the tail follows it instead of going quiet.
+        if (tail.polls % TAIL_REDISCOVER_EVERY === 0) {
+          const fresh = await findSessionInfo(sessionId);
+          if (fresh) {
+            for (const p of fresh.filePaths) {
+              if (!tail.filePaths.includes(p)) tail.filePaths.push(p);
+            }
           }
         }
+        let changed = false;
+        for (const [p, m] of statAll(tail.filePaths)) {
+          if (tail.mtimes.get(p) !== m) {
+            changed = true;
+            tail.mtimes.set(p, m);
+          }
+        }
+        if (!changed && tail.filePaths.length > 0) return; // skip the re-parse
         const current = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
         if (current.scenes.length > tail.sceneCount) {
           const newScenes = current.scenes.slice(tail.sceneCount);
-          tail.sceneCount = current.scenes.length;
-          await sendFrame({
-            event: "tail",
-            id: sessionId,
-            newScenes,
-            totalScenes: current.scenes.length,
-          });
+          // Advance only on successful delivery — a dropped frame must be
+          // retried by the next poll, not skipped forever.
+          if (
+            await sendFrame({
+              event: "tail",
+              id: sessionId,
+              newScenes,
+              totalScenes: current.scenes.length,
+            })
+          ) {
+            tail.sceneCount = current.scenes.length;
+          }
+        } else if (current.scenes.length < tail.sceneCount) {
+          tail.sceneCount = current.scenes.length; // session rewritten; resync
         }
       } catch {
         // session unreadable mid-tail; keep polling
+      } finally {
+        tail.polling = false;
       }
     };
     const timer = setInterval(() => void poll(), TAIL_POLL_MS);
-    tails.set(sessionId, { timer, sceneCount: replay.scenes.length, mtimeMs });
+    tails.set(sessionId, {
+      timer,
+      sceneCount: replay.scenes.length,
+      filePaths,
+      mtimes: statAll(filePaths),
+      polls: 0,
+      polling: false,
+    });
     return replay.scenes.length;
   };
 
@@ -263,6 +324,9 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
         case "tail": {
           const id = msg.id;
           if (typeof id !== "string") return { seq, ok: false, error: "missing id" };
+          if (!tails.has(id) && tails.size >= MAX_TAILS) {
+            return { seq, ok: false, error: "too many live tails" };
+          }
           const totalScenes = await startTail(id);
           return { seq, ok: true, data: { subscribed: true, totalScenes } };
         }
@@ -282,6 +346,10 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     }
   };
 
+  // Serialize command handling: one viewer, one command source — concurrent
+  // parse/discovery work has no backpressure otherwise.
+  let commandChain: Promise<void> = Promise.resolve();
+
   const onMessage = async (event: MessageEvent): Promise<void> => {
     let outer: Record<string, unknown>;
     try {
@@ -297,7 +365,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     } catch {
       return; // not for us — ignore
     }
-    await sendFrame(await handleCommand(inner));
+    const run = commandChain.then(async () => {
+      const response = await handleCommand(inner);
+      if (!(await sendFrame(response))) {
+        // Oversized response or dead socket: send a small correlated error so
+        // the viewer doesn't wait out the full timeout on a dropped reply.
+        await sendFrame({ seq: inner.seq, ok: false, error: "response too large to relay" });
+      }
+    });
+    commandChain = run.catch(() => {});
+    await run;
   };
 
   const connect = (): void => {
