@@ -29,6 +29,7 @@ var seq = 0;
 var pending = {};
 var tailTimer = null;
 var currentSession = null;
+var displayedCount = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -110,16 +111,30 @@ function sceneLabel(type) {
   return map[type] || type;
 }
 function sceneBody(sc) {
+  if (sc.type === "tool-call") {
+    var head = sc.toolName || "tool";
+    var arg = "";
+    if (sc.input && typeof sc.input === "object") {
+      arg = sc.input.command || sc.input.file_path || sc.input.path || sc.input.pattern || sc.input.query || "";
+      if (!arg) { try { arg = JSON.stringify(sc.input).slice(0, 300); } catch (e) { arg = ""; } }
+    } else if (typeof sc.input === "string") { arg = sc.input.slice(0, 300); }
+    var res = typeof sc.result === "string" ? sc.result : "";
+    return head + (arg ? " " + arg : "") + (res ? "\n" + res : "");
+  }
   if (typeof sc.content === "string") return sc.content;
   if (typeof sc.result === "string") return sc.result;
   if (typeof sc.prompt === "string") return sc.prompt;
   return JSON.stringify(sc).slice(0, 2000);
 }
+var SCENE_PREVIEW_CHARS = 8000;
 function renderScenes(scenes) {
   var html = "";
   scenes.forEach(function (sc) {
+    var body = escHtml(sceneBody(sc));
+    var note = body.length > SCENE_PREVIEW_CHARS
+      ? '<div class="trunc">… truncated here (' + body.length + ' chars total)</div>' : "";
     html += '<div class="scene"><div class="sl">' + escHtml(sceneLabel(sc.type)) + '</div>'
-      + '<pre>' + escHtml(sceneBody(sc)).slice(0, 8000) + '</pre></div>';
+      + '<pre>' + body.slice(0, SCENE_PREVIEW_CHARS) + '</pre>' + note + '</div>';
   });
   return html;
 }
@@ -132,6 +147,7 @@ function openSession(s) {
   $("listWrap").style.display = "none";
   $("detailWrap").style.display = "block";
   $("scenes").innerHTML = "";
+  displayedCount = 0;
   // The shipper caps one page at 5000 scenes; walk offsets until the total
   // the server reported is reached so long sessions are never truncated.
   var scenes = [];
@@ -141,6 +157,7 @@ function openSession(s) {
     if (offset >= total) {
       setStatus("E2E-encrypted · " + total + " scenes");
       $("scenes").innerHTML = renderScenes(scenes);
+      displayedCount = scenes.length;
       return;
     }
     setStatus("Loading scenes " + offset + "/" + (total === Infinity ? "…" : total) + "…");
@@ -206,10 +223,33 @@ function startTail() {
   setStatus("Watching live…");
   cmd({ cmd: "tail", id: currentSession.sessionId }).then(function (res) {
     if (!res.ok) { setStatus("Error: " + res.error, true); return; }
-    setStatus("E2E-encrypted · live — new turns appear below");
-    $("tailBtn").textContent = "Stop watching";
-    $("tailBtn").onclick = stopTail;
+    // The shipper baselines at its own (newer) scene count; fetch anything
+    // added between page load and subscribe so no scenes fall in the gap.
+    var missing = res.data.totalScenes - displayedCount;
+    if (missing > 0) { fetchRange(displayedCount, missing, beginLive); }
+    else { beginLive(); }
   }).catch(function (e) { setStatus("Error: " + e.message, true); });
+}
+function fetchRange(offset, count, done) {
+  cmd({ cmd: "get", id: currentSession.sessionId, offset: offset, limit: Math.min(5000, count) }).then(function (r) {
+    if (!r.ok || !r.data.scenes.length) { done(); return; }
+    appendScenes(r.data.scenes);
+    var rest = count - r.data.scenes.length;
+    if (rest > 0) { fetchRange(offset + r.data.scenes.length, rest, done); }
+    else { done(); }
+  }).catch(function () { done(); });
+}
+function beginLive() {
+  setStatus("E2E-encrypted · live — new turns appear below");
+  $("tailBtn").textContent = "Stop watching";
+  $("tailBtn").onclick = stopTail;
+}
+function appendScenes(scenes) {
+  var div = document.createElement("div");
+  div.innerHTML = renderScenes(scenes);
+  $("scenes").appendChild(div);
+  displayedCount += scenes.length;
+  window.scrollTo(0, document.body.scrollHeight);
 }
 function stopTail() {
   if (currentSession) cmd({ cmd: "untail", id: currentSession.sessionId }).catch(function () {});
@@ -218,10 +258,16 @@ function stopTail() {
 }
 function onTailEvent(ev) {
   if (!currentSession || ev.id !== currentSession.sessionId) return;
-  var div = document.createElement("div");
-  div.innerHTML = renderScenes(ev.newScenes);
-  $("scenes").appendChild(div);
-  window.scrollTo(0, document.body.scrollHeight);
+  if (ev.event === "tail-gap") {
+    var div = document.createElement("div");
+    div.innerHTML = '<div class="scene"><div class="sl">Notice</div><pre>'
+      + escHtml(ev.skipped + " new scenes were too large to relay — reload the session to see them.")
+      + '</pre></div>';
+    $("scenes").appendChild(div);
+    displayedCount += ev.skipped;
+    return;
+  }
+  appendScenes(ev.newScenes);
 }
 
 function connect() {
@@ -238,7 +284,7 @@ function connect() {
     try { outer = JSON.parse(e.data); } catch (err) { return; }
     if (outer.t !== "frame" || !outer.iv || !outer.data) return;
     decryptFrame(outer.iv, outer.data).then(function (inner) {
-      if (inner.event === "tail") { onTailEvent(inner); return; }
+      if (inner.event === "tail" || inner.event === "tail-gap") { onTailEvent(inner); return; }
       var p = pending[inner.seq];
       if (p) { delete pending[inner.seq]; p.resolve(inner); }
     }).catch(function () { /* not for us */ });

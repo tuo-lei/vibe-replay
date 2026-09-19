@@ -165,6 +165,8 @@ interface TailState {
   mtimes: Map<string, number>;
   polls: number;
   polling: boolean;
+  /** A batch failed to send (socket down): re-parse and retry next poll. */
+  dirty: boolean;
 }
 
 export interface RelayOptions {
@@ -258,27 +260,44 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
           }
         }
         let changed = false;
-        for (const [p, m] of statAll(tail.filePaths)) {
+        const mtimes = statAll(tail.filePaths);
+        for (const [p, m] of mtimes) {
           if (tail.mtimes.get(p) !== m) {
             changed = true;
             tail.mtimes.set(p, m);
           }
         }
-        if (!changed && tail.filePaths.length > 0) return; // skip the re-parse
+        // DB-backed providers (OpenCode, Hermes) expose synthetic `#session:`
+        // markers instead of stat-able files: with no mtimes to compare, never
+        // skip the re-parse or the tail would go permanently quiet.
+        if (!changed && !tail.dirty && mtimes.size > 0) return; // skip the re-parse
         const current = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
         if (current.scenes.length > tail.sceneCount) {
           const newScenes = current.scenes.slice(tail.sceneCount);
-          // Advance only on successful delivery — a dropped frame must be
-          // retried by the next poll, not skipped forever.
-          if (
-            await sendFrame({
-              event: "tail",
-              id: sessionId,
-              newScenes,
-              totalScenes: current.scenes.length,
-            })
-          ) {
+          const payload = {
+            event: "tail",
+            id: sessionId,
+            newScenes,
+            totalScenes: current.scenes.length,
+          };
+          if (await sendFrame(payload)) {
             tail.sceneCount = current.scenes.length;
+            tail.dirty = false;
+          } else if (JSON.stringify(payload).length > MAX_FRAME_BYTES) {
+            // Oversized batches can never be delivered; skip with a visible
+            // gap marker instead of retrying forever.
+            tail.sceneCount = current.scenes.length;
+            tail.dirty = false;
+            await sendFrame({
+              event: "tail-gap",
+              id: sessionId,
+              skipped: newScenes.length,
+              totalScenes: current.scenes.length,
+            });
+          } else {
+            // Socket down mid-poll: retry the same delta next poll instead of
+            // advancing past it.
+            tail.dirty = true;
           }
         } else if (current.scenes.length < tail.sceneCount) {
           tail.sceneCount = current.scenes.length; // session rewritten; resync
@@ -297,6 +316,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       mtimes: statAll(filePaths),
       polls: 0,
       polling: false,
+      dirty: false,
     });
     return replay.scenes.length;
   };
