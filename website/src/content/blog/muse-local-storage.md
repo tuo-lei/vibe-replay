@@ -1,6 +1,6 @@
 ---
 title: "What Does Muse Store Locally? Agent Session JSONL Explained"
-excerpt: "Muse keeps one JSONL per agent under ~/agents — with session_header/item/compaction_checkpoint records, thinking as a first-class citizen, and a source field on every line naming the runtime subsystem that wrote it."
+excerpt: "Muse keeps one JSONL per agent under ~/agents — with session_header/item/compaction_checkpoint records, thinking as a first-class citizen, and a source field on every item naming the runtime subsystem that wrote it."
 cover: "/blog/muse-storage/storage-map.png"
 date: 2026-09-18
 readTime: "7 min read"
@@ -71,8 +71,8 @@ This is the most unusual thing about the Muse format, and the reason the provide
 
 | Source | Lines | What it is |
 | --- | --- | --- |
-| `runtime.feed` | 4,898 | The main agent loop |
-| `runtime` | 3,525 | Core runtime |
+| `runtime.feed` | 4,898 | Background feed-writer agent (proactive Feed posts) |
+| `runtime` | 3,525 | Interactive agent loop (user chat + subagent delegations) |
 | `runtime.self_improvement` | 2,503 | Background self-improvement passes |
 | `scheduler.cron` | 167 | Scheduled cron runs |
 | `runtime.monitoring` | 19 | Monitoring injections |
@@ -90,11 +90,12 @@ vibe-replay uses `record.source` — not text sniffing — to decide what the ru
 
 ## What gets filtered
 
-Three things never make the replay:
+Two things never make the replay:
 
 1. **`developer` messages** (101) — runtime instructions with sources like `runtime.dev_notice` and `runtime.onboarding`. They're addressed to the model, not part of your conversation.
 2. **Compaction summaries** — the 15 `compaction_checkpoint` records are kept as metadata (timestamp and trigger), but the summary blob itself is not replayed. It's a compressed memory of everything before the checkpoint — replaying it would surface distilled context the session itself never showed.
-3. **`[Subagent Context]`-prefixed injections** — context handed to subagents, skipped for titles and first prompts.
+
+One thing is only *downplayed*: the runtime injects a huge `[Subagent Context]` blob as the first user message of delegated sessions. Discovery skips it when picking titles and first prompts, but the parser still renders it — so you'll see it as the opening user message in a subagent's replay.
 
 ## Tool names need a map
 
@@ -114,7 +115,7 @@ Or open the full dashboard:
 npx vibe-replay@latest -d
 ```
 
-Muse is a good reminder that the interesting part of a transcript format isn't the container — JSONL is JSONL — it's the **provenance model**. One file per agent, no SQLite, no cloud round-trip, and every line stamped with the name of the subsystem that wrote it. Once you model the source field, thinking blocks, and the call/result pairing, the replay matches the session instead of the raw log.
+Muse is a good reminder that the interesting part of a transcript format isn't the container — JSONL is JSONL — it's the **provenance model**. One file per agent, no SQLite, no cloud round-trip, and every item stamped with the name of the subsystem that wrote it. Once you model the source field, thinking blocks, and the call/result pairing, the replay matches the session instead of the raw log.
 
 For comparison, see the cloud-box JSONL of [Grok Bot](/blog/grok-bot-local-storage/) and [Hermes's profile-aware `state.db`](/blog/hermes-local-storage/).
 
