@@ -1123,6 +1123,21 @@ describe("Grok Bot tool mapping", () => {
     expect(mapGrokBotToolArgs("communicate_update", { update: "Scanning inbox…" })).toMatchObject({
       update: "Scanning inbox…",
     });
+    expect(
+      mapGrokBotToolArgs("communicate_update", { currentStep: "Checking the badge copy now." }),
+    ).toMatchObject({
+      update: "Checking the badge copy now.",
+    });
+    expect(
+      mapGrokBotToolArgs("communicate_update", {
+        currentStep: JSON.stringify({
+          __sand_tool__: true,
+          result: "No MCP servers are installed.",
+        }),
+      }),
+    ).toMatchObject({
+      update: "No MCP servers are installed.",
+    });
     expect(mapGrokBotToolArgs("read", { path: "/tmp/a.ts", name: "readme" })).toEqual({
       path: "/tmp/a.ts",
       name: "readme",
