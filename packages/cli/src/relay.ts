@@ -179,7 +179,11 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   // ever protects the relay frames.
   {
     const u = new URL(origin);
-    const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]" || u.hostname === "::1";
+    const loopback =
+      u.hostname === "localhost" ||
+      u.hostname === "127.0.0.1" ||
+      u.hostname === "[::1]" ||
+      u.hostname === "::1";
     if (u.protocol === "http:" && !loopback) {
       throw new Error(
         `refusing cleartext relay origin ${origin}: use https (http://localhost is allowed for local testing)`,
