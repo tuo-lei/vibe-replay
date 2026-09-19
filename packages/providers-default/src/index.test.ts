@@ -29,6 +29,7 @@ describe("default provider registry", () => {
       "cursor",
       "grok-bot",
       "hermes",
+      "muse",
       "opencode",
       "pi",
     ]);
@@ -37,6 +38,7 @@ describe("default provider registry", () => {
   it("looks up providers by name", () => {
     expect(getProvider("cursor")?.displayName).toBe("Cursor");
     expect(getProvider("grok-bot")?.displayName).toBe("Grok Bot");
+    expect(getProvider("muse")?.displayName).toBe("Muse");
     expect(getProvider("missing-provider")).toBeUndefined();
   });
 });

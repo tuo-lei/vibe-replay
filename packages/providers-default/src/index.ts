@@ -5,6 +5,7 @@ import { codexProvider } from "@vibe-replay/provider-codex";
 import { cursorProvider } from "@vibe-replay/provider-cursor";
 import { grokBotProvider } from "@vibe-replay/provider-grok-bot";
 import { hermesProvider } from "@vibe-replay/provider-hermes";
+import { museProvider } from "@vibe-replay/provider-muse";
 import { opencodeProvider } from "@vibe-replay/provider-opencode";
 import { piProvider } from "@vibe-replay/provider-pi";
 import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
@@ -17,6 +18,7 @@ const providers: Provider[] = [
   cursorProvider,
   grokBotProvider,
   hermesProvider,
+  museProvider,
   opencodeProvider,
   piProvider,
 ];
@@ -33,6 +35,7 @@ const PROVIDER_PRIORITY = [
   "cursor",
   "grok-bot",
   "hermes",
+  "muse",
   "opencode",
   "pi",
 ];

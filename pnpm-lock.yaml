@@ -157,6 +157,9 @@ importers:
       '@vibe-replay/provider-hermes':
         specifier: workspace:*
         version: link:../provider-hermes
+      '@vibe-replay/provider-muse':
+        specifier: workspace:*
+        version: link:../provider-muse
       '@vibe-replay/provider-opencode':
         specifier: workspace:*
         version: link:../provider-opencode
@@ -324,6 +327,25 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
 
+  packages/provider-muse:
+    dependencies:
+      '@vibe-replay/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
+      '@vibe-replay/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
+    devDependencies:
+      '@types/node':
+        specifier: ^26.4.1
+        version: 26.4.1
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
+
   packages/provider-opencode:
     dependencies:
       '@vibe-replay/provider-contract':
@@ -388,6 +410,9 @@ importers:
       '@vibe-replay/provider-hermes':
         specifier: workspace:*
         version: link:../provider-hermes
+      '@vibe-replay/provider-muse':
+        specifier: workspace:*
+        version: link:../provider-muse
       '@vibe-replay/provider-opencode':
         specifier: workspace:*
         version: link:../provider-opencode
