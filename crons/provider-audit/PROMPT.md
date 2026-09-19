@@ -3,8 +3,6 @@ name: provider-audit
 description: Weekly audit of AI provider session transcript formats for drift — new record/item types (new features) and changed field shapes (breaking changes).
 schedule: "0 9 * * 1"
 timezone: America/Los_Angeles
-runner: local
-timeout_minutes: 30
 ---
 
 # Provider session-format audit

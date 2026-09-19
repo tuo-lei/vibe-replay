@@ -1,8 +1,8 @@
 # crons
 
-Scheduled agent tasks for this repo. Each task is a **prompt, not a script**: the schedule and the instructions live here as data, and any agent (or runner) can execute them.
+Scheduled agent tasks for this repo. Each task is a **prompt, not a script**: the schedule and the instructions live here as data, and any agent can execute them.
 
-There is no cross-agent standard for scheduled tasks, so this folder follows a small convention composed of existing standards: 5-field cron expressions for schedules, `name`/`description` frontmatter in the style of the [Agent Skills spec](https://agentskills.io/specification), and GitHub Actions as the default repo-side runner.
+There is no cross-agent standard for scheduled tasks, so this folder follows a small convention composed of existing standards: 5-field cron expressions for schedules and `name`/`description` frontmatter in the style of the [Agent Skills spec](https://agentskills.io/specification).
 
 ## Anatomy of a task
 
@@ -23,26 +23,22 @@ description: >-                 # required: what it does and when it runs
   Weekly audit of AI provider session transcript formats for drift.
 schedule: "0 9 * * 1"           # required: 5-field cron (minute hour dom month dow)
 timezone: America/Los_Angeles   # optional: IANA timezone, default UTC
-runner: local                   # required: local | github-actions (see below)
-timeout_minutes: 30             # optional: per-run budget, default 30
 ---
 ```
 
 The body after the frontmatter is the prompt itself, written for an agent. Write it in English. It should be self-contained: goal, procedure, how to judge results, reporting rules, and hard constraints (privacy, what not to touch).
 
-## Runners
+## Execution
 
-The folder is the portable contract; the runner is chosen per task via `runner:`.
+These prompts run **inside an agent**. To schedule one, wire the `PROMPT.md` into your agent's scheduler (a Muse cron, a Grok bot scheduler, a Hermes/OpenClaw scheduled job, …) — the agent reads the prompt and runs it in its own environment.
 
-- **`local`** — the only runner today. The task needs machine-local data (local sessions, credentials, paired devices) and is executed by a personal agent scheduler (e.g. a Muse cron, a Hermes/OpenClaw scheduled job) that references the `PROMPT.md` file. Each agent runs the same prompt against its own environment.
-- **`github-actions`** — reserved. When the first repo-data-only task appears, add a generic dispatcher workflow: tick on a schedule, select due tasks from frontmatter, run each prompt with the repo's agent action. No dispatcher ships until a task needs it.
+If a task needs machine-local data (local sessions, credentials, paired devices), state that in the prompt body so nobody tries to run it somewhere it can't work. The provider-audit prompt does this: it only audits providers with sessions on the machine it's running on.
 
 ## Adding a task
 
 1. Create `crons/<task-name>/PROMPT.md` with the frontmatter above and an English prompt.
-2. Pick `runner: local` (needs this machine) or `runner: github-actions` (repo data only).
-3. For `local`, wire it into your agent's scheduler pointing at the file. `github-actions` has no dispatcher yet — add one when the first such task lands.
-4. If the task keeps a baseline, store it under the task directory (e.g. `snapshots/`) and update it in the same PR as any behavior change.
+2. Wire it into your agent's scheduler pointing at the file.
+3. If the task keeps a baseline, store it under the task directory (e.g. `snapshots/`) and update it in the same PR as any behavior change.
 
 ## Design notes
 
