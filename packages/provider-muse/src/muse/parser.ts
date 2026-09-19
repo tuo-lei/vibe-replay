@@ -181,10 +181,15 @@ export function parseMuseLines(
       continue;
     }
     if (record.type === "compaction_checkpoint") {
+      // The checkpoint timestamp marks when compaction ran (the session was
+      // still alive), so it counts toward endTime/duration just like it does
+      // for the discovery scan's lastTimestamp.
+      const checkpointTimestamp = record.created_at ?? now();
       compactions.push({
-        timestamp: record.created_at ?? now(),
+        timestamp: checkpointTimestamp,
         trigger: record.trigger ?? "unknown",
       });
+      timestamps.push(checkpointTimestamp);
       continue;
     }
     if (record.type !== "item") {

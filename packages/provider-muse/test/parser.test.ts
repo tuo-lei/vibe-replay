@@ -151,6 +151,27 @@ describe("parseMuseLines", () => {
     expect(JSON.stringify(parsed.turns)).not.toContain("very long summary");
   });
 
+  it("counts the compaction checkpoint timestamp toward session end time", () => {
+    const parsed = parseMuseLines(
+      [
+        header(),
+        item({ type: "message", role: "user", text: "Hello" }, "2026-09-18T10:01:00Z"),
+        JSON.stringify({
+          type: "compaction_checkpoint",
+          compaction_id: 1,
+          trigger: "threshold",
+          created_at: "2026-09-18T10:05:00Z",
+          summary: "summary",
+        }),
+      ],
+      { now: () => "2026-09-18T10:06:00Z" },
+    );
+
+    // Same convention as the discovery scan's lastTimestamp: the session was
+    // still alive when compaction ran.
+    expect(parsed.endTime).toBe("2026-09-18T10:05:00Z");
+  });
+
   it("collects warnings for malformed lines and skips unknown record types", () => {
     const parsed = parseMuseLines([
       header(),

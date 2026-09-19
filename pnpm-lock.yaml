@@ -157,6 +157,9 @@ importers:
       '@vibe-replay/provider-hermes':
         specifier: workspace:*
         version: link:../provider-hermes
+      '@vibe-replay/provider-muse':
+        specifier: workspace:*
+        version: link:../provider-muse
       '@vibe-replay/provider-opencode':
         specifier: workspace:*
         version: link:../provider-opencode
