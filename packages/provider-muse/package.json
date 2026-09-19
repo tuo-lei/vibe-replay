@@ -1,0 +1,40 @@
+{
+  "name": "@vibe-replay/provider-muse",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/muse/index.ts",
+      "types": "./src/muse/index.ts"
+    },
+    "./config": {
+      "import": "./src/muse/config.ts",
+      "types": "./src/muse/config.ts"
+    },
+    "./discover": {
+      "import": "./src/muse/discover.ts",
+      "types": "./src/muse/discover.ts"
+    },
+    "./parser": {
+      "import": "./src/muse/parser.ts",
+      "types": "./src/muse/parser.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.11"
+  }
+}

@@ -30,6 +30,7 @@ import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parseHermesSession } from "@vibe-replay/provider-hermes/parser";
 import { parseOpencodeSession } from "@vibe-replay/provider-opencode/parser";
 import { parseGrokBotSession } from "./providers/grok-bot/parser.js";
+import { parseMuseSession } from "./providers/muse/parser.js";
 import { parsePiSession } from "./providers/pi/parser.js";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult } from "./providers/types.js";
@@ -896,6 +897,15 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       richFallbackProvider = "Grok Bot";
     }
   }
+  if (input.provider === "muse") {
+    try {
+      return await scanMuseSession(input);
+    } catch {
+      // Fall through to the lightweight scanner so Muse sessions still show
+      // up if the richer parser hits an unknown record shape.
+      richFallbackProvider = "Muse";
+    }
+  }
   if (input.provider === "opencode") {
     if (hasSqliteSessionMarker(input)) {
       try {
@@ -1516,6 +1526,30 @@ async function scanGrokBotSession(input: ScanInput): Promise<SessionScanResult> 
   };
 
   const parsed = await parseGrokBotSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
+}
+
+async function scanMuseSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "muse",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: input.sourceLineCount || 0,
+    fileSize: input.sourceFileSize || 0,
+    filePath: input.filePaths[0] || "",
+    filePaths: input.filePaths,
+    firstPrompt: scanFallbackPrompt(input, "(Muse session)"),
+    model: input.discoveryModel,
+  };
+
+  const parsed = await parseMuseSession(input.filePaths, sessionInfo);
   return buildScanResultFromParsed(input, parsed);
 }
 
