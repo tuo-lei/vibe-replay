@@ -4,8 +4,13 @@
  * Mirrors the command set the VM shipper speaks (list/get/search/tail/
  * untail/ping). All frames are AES-256-GCM encrypted in the browser with the
  * key from the URL fragment (`location.hash`); the relay only forwards
- * ciphertext. Ported from the original hand-rolled viewer page so the React
- * live viewer reuses the exact same wire protocol.
+ * ciphertext. Presence display names are encrypted the same way: the hello
+ * carries `{iv, data}` ciphertext, the relay stores and broadcasts it
+ * verbatim, and every viewer decrypts names locally — the relay never sees a
+ * name in plaintext. Responses too large for one frame arrive chunked
+ * (`chunk`/`chunks` inside the encrypted payload) and are reassembled here.
+ * Ported from the original hand-rolled viewer page so the React live viewer
+ * reuses the exact same wire protocol.
  */
 import type { Scene } from "../types";
 
@@ -43,9 +48,35 @@ export interface ViewerPresence {
   name: string;
 }
 
+/**
+ * Encrypted display name as carried in hello and presence broadcasts.
+ * AES-GCM ciphertext (base64url) produced with the share URL fragment key —
+ * opaque to the relay, decrypted locally by every viewer.
+ */
+export interface NameCipher {
+  iv: string;
+  data: string;
+}
+
+/** Display names are normalized in the browser before encryption. */
+export const MAX_NAME_CHARS = 32;
+
+/**
+ * Normalize a raw display name: strip control characters, trim, cap at
+ * MAX_NAME_CHARS. Falls back to "Guest" for empty input. Applied in the
+ * browser (which encrypts the result) and again after decrypting a roster
+ * name, so a malicious peer can never inject control characters into the UI.
+ */
+export function normalizeName(raw: string): string {
+  const cleaned = raw.replace(/\p{Cc}/gu, "").trim();
+  return cleaned.slice(0, MAX_NAME_CHARS) || "Guest";
+}
+
 export const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
 export const BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const COMMAND_TIMEOUT_MS = 30_000;
+/** Chunked command responses: hard cap on chunks per command (mirrors the shipper). */
+const MAX_CHUNKS = 64;
 
 export function b64urlEncode(bytes: Uint8Array<ArrayBuffer>): string {
   const s = btoa(String.fromCharCode(...bytes));
@@ -118,6 +149,11 @@ export class LiveClient implements LiveRelay {
   private presence: ViewerPresence[] = [];
   /** Our own viewer id, from the relay's `welcome`. Null until it arrives. */
   private selfVid: string | null = null;
+  /** Generation counter: concurrent presence handlers must not let an older
+   *  broadcast's async decryptions overwrite a newer roster. */
+  private presenceGen = 0;
+  /** In-flight chunked command responses, keyed by command seq. */
+  private chunkBufs = new Map<number, { chunks: number; parts: string[]; received: number }>();
   private closed = false;
   /** True once close() was called — suppresses the disconnect handlers. */
   private intentionalClose = false;
@@ -131,8 +167,10 @@ export class LiveClient implements LiveRelay {
   /**
    * Connect as a viewer. Reads the content key from `location.hash`, opens
    * the WebSocket to the same host, and says hello with the display name
-   * (shown in the presence roster, Excalidraw-style). Throws on a missing or
-   * malformed key, or when the socket cannot be established.
+   * AES-GCM-encrypted (the relay only ever sees the ciphertext — it stores
+   * and broadcasts it verbatim and other viewers decrypt it locally).
+   * Throws on a missing or malformed key, or when the socket cannot be
+   * established.
    */
   static async connect(boxId: string, name: string): Promise<LiveClient> {
     const keyB64 = (location.hash || "").replace(/^#/, "");
@@ -142,6 +180,7 @@ export class LiveClient implements LiveRelay {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${proto}//${location.host}/live/${boxId}`);
     const client = new LiveClient(ws, key, boxId);
+    const nameCipher = await client.encryptName(normalizeName(name));
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       // A socket that times out or errors must never later trigger onopen and
@@ -165,7 +204,7 @@ export class LiveClient implements LiveRelay {
         clearTimeout(timer);
         ws.onopen = null;
         ws.onerror = null;
-        ws.send(JSON.stringify({ t: "hello", role: "viewer", name }));
+        ws.send(JSON.stringify({ t: "hello", role: "viewer", name: nameCipher }));
         resolve();
       };
       ws.onerror = () => fail(new Error("connection-error"));
@@ -202,6 +241,86 @@ export class LiveClient implements LiveRelay {
     return JSON.parse(new TextDecoder().decode(pt)) as Record<string, unknown>;
   }
 
+  /** Encrypt the normalized display name for the hello handshake. */
+  private async encryptName(displayName: string): Promise<NameCipher> {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: this.aad() },
+      this.key,
+      new TextEncoder().encode(displayName),
+    );
+    return { iv: b64urlEncode(iv), data: b64urlEncode(new Uint8Array(ct)) };
+  }
+
+  /**
+   * Decrypt one roster name. Corrupt, missing, or foreign-key ciphertext
+   * degrades to "Guest" — a malicious or broken peer must never break the
+   * roster UI. Legacy plaintext names pass through normalized.
+   */
+  private async decryptName(v: unknown): Promise<string> {
+    try {
+      if (typeof v === "string") return normalizeName(v);
+      if (
+        typeof v === "object" &&
+        v !== null &&
+        typeof (v as Record<string, unknown>).iv === "string" &&
+        typeof (v as Record<string, unknown>).data === "string"
+      ) {
+        const pt = await crypto.subtle.decrypt(
+          {
+            name: "AES-GCM",
+            iv: b64urlDecode((v as Record<string, unknown>).iv as string),
+            additionalData: this.aad(),
+          },
+          this.key,
+          b64urlDecode((v as Record<string, unknown>).data as string),
+        );
+        return normalizeName(new TextDecoder().decode(pt));
+      }
+    } catch {
+      // fall through to Guest
+    }
+    return "Guest";
+  }
+
+  /**
+   * Accumulate one chunk of a chunked command response. The shipper splits
+   * responses that don't fit a single frame; chunks are grouped by command
+   * seq and reassembled here before the pending command resolves. Malformed
+   * chunk metadata is dropped — the command simply times out on the
+   * existing COMMAND_TIMEOUT_MS path.
+   */
+  private accumulateChunk(seq: number, chunk: number, chunks: number, data: unknown): void {
+    if (
+      !Number.isInteger(chunk) ||
+      !Number.isInteger(chunks) ||
+      chunk < 0 ||
+      chunk >= chunks ||
+      chunks > MAX_CHUNKS
+    )
+      return;
+    if (typeof data !== "string") return;
+    const p = this.pending.get(seq);
+    if (!p) return; // unknown or already-timed-out command
+    let buf = this.chunkBufs.get(seq);
+    if (!buf) {
+      buf = { chunks, parts: Array.from<string>({ length: chunks }), received: 0 };
+      this.chunkBufs.set(seq, buf);
+    }
+    if (buf.chunks !== chunks || buf.parts[chunk] !== undefined) return;
+    buf.parts[chunk] = data;
+    buf.received += 1;
+    if (buf.received === buf.chunks) {
+      this.chunkBufs.delete(seq);
+      this.pending.delete(seq);
+      try {
+        p.resolve(JSON.parse(buf.parts.join("")) as Record<string, unknown>);
+      } catch {
+        p.reject(new Error("invalid chunked response"));
+      }
+    }
+  }
+
   private emitPresence(): void {
     const snapshot = this.presence.map((v) => ({ ...v }));
     for (const h of this.presenceHandlers) {
@@ -227,15 +346,21 @@ export class LiveClient implements LiveRelay {
       return;
     }
     if (outer.t === "presence" && Array.isArray(outer.viewers)) {
-      this.presence = outer.viewers
-        .filter(
-          (v): v is Record<string, unknown> =>
-            typeof v === "object" && v !== null && typeof v.vid === "string",
-        )
-        .map((v) => ({
+      // Roster names arrive as ciphertext ({iv, data}) the relay forwarded
+      // verbatim; decrypt each locally with the fragment key. Handlers run
+      // concurrently per message, so a generation guard keeps an older
+      // broadcast from overwriting a newer roster after slow decryptions.
+      const gen = ++this.presenceGen;
+      const roster: ViewerPresence[] = [];
+      for (const v of outer.viewers) {
+        if (typeof v !== "object" || v === null || typeof v.vid !== "string") continue;
+        roster.push({
           vid: (v.vid as string).slice(0, 64),
-          name: typeof v.name === "string" ? (v.name as string).slice(0, 32) : "Guest",
-        }));
+          name: await this.decryptName((v as Record<string, unknown>).name),
+        });
+      }
+      if (gen !== this.presenceGen) return; // superseded by a newer broadcast
+      this.presence = roster;
       this.emitPresence();
       return;
     }
@@ -252,9 +377,14 @@ export class LiveClient implements LiveRelay {
       for (const h of this.tailHandlers) h(ev);
       return;
     }
+    if (typeof inner.chunk === "number" && typeof inner.chunks === "number") {
+      this.accumulateChunk(inner.seq as number, inner.chunk, inner.chunks, inner.data);
+      return;
+    }
     const p = this.pending.get(inner.seq as number);
     if (p) {
       this.pending.delete(inner.seq as number);
+      this.chunkBufs.delete(inner.seq as number);
       p.resolve(inner);
     }
   }
@@ -264,6 +394,7 @@ export class LiveClient implements LiveRelay {
     this.closed = true;
     for (const [, p] of this.pending) p.reject(new Error("disconnected"));
     this.pending.clear();
+    this.chunkBufs.clear();
     if (this.intentionalClose) return;
     for (const h of this.disconnectHandlers) {
       try {
@@ -292,6 +423,7 @@ export class LiveClient implements LiveRelay {
         const p = this.pending.get(seq);
         if (p) {
           this.pending.delete(seq);
+          this.chunkBufs.delete(seq);
           p.reject(new Error("timeout"));
         }
       }, COMMAND_TIMEOUT_MS);

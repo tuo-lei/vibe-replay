@@ -5,6 +5,7 @@ import type { Scene } from "../types";
 import {
   boxIdFromPath,
   LiveClient,
+  normalizeName,
   type LiveRelay,
   type RelaySearchHit,
   type RelaySessionSummary,
@@ -38,7 +39,7 @@ const NAME_STORAGE_KEY = "vibe-replay:viewer-name";
 function readStoredName(): string | null {
   try {
     const v = window.localStorage.getItem(NAME_STORAGE_KEY);
-    return v && v.trim() ? v : null;
+    return v && v.trim() ? normalizeName(v) : null;
   } catch {
     return null;
   }
@@ -528,7 +529,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   }, []);
 
   const submitName = useCallback((raw: string) => {
-    const name = raw.trim().slice(0, 32) || "Guest";
+    const name = normalizeName(raw);
     try {
       window.localStorage.setItem(NAME_STORAGE_KEY, name);
     } catch {

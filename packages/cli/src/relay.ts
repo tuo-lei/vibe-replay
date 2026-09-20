@@ -38,6 +38,10 @@ const SEARCH_SESSION_CAP = 40;
 const SEARCH_SNIPPET_CHARS = 160;
 const TAIL_POLL_MS = 2000;
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+/** Plaintext bytes per chunk of a chunked command response. */
+const CHUNK_PLAINTEXT_BYTES = 512 * 1024;
+/** Hard cap: 64 chunks × 512 KiB = 32 MiB per command response. */
+const MAX_CHUNKS = 64;
 /** Max sessions with an active live-tail poll loop (shared by all viewers). */
 const MAX_TAILS = 8;
 /** Re-resolve a tailed session's files this often — /resume continuations
@@ -216,13 +220,71 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
     const outer = JSON.stringify({ t: "frame", ...frame, ...(via ? { via } : {}) });
-    if (outer.length > MAX_FRAME_BYTES) return false;
+    // Measured in UTF-8 bytes like the relay does: outer.length counts
+    // UTF-16 code units and would let multi-byte text slip a >4MiB frame
+    // past this gate (the relay would then kill the socket with 1009).
+    if (Buffer.byteLength(outer, "utf8") > MAX_FRAME_BYTES) return false;
     try {
       ws.send(outer);
     } catch {
       return false;
     }
     return true;
+  };
+
+  /**
+   * Split a command response that doesn't fit one frame into individually
+   * encrypted chunks. Each chunk carries `{seq, chunk, chunks, data}` inside
+   * its encrypted payload (the relay strips any outer plaintext beyond
+   * iv/data/via, so chunk metadata must live inside the ciphertext); the
+   * viewer reassembles by seq. Chunks are measured in UTF-8 bytes and split
+   * on code-point boundaries, so multi-byte text is never torn
+   * mid-character. Keeps every frame far under MAX_FRAME_BYTES
+   * no matter how large a session is.
+   */
+  const sendChunked = async (payload: Record<string, unknown>, via?: string): Promise<boolean> => {
+    const json = JSON.stringify(payload);
+    // Measured in UTF-8 bytes (not UTF-16 code units) and split on
+    // code-point boundaries, so multi-byte text is never torn mid-character
+    // and the documented size cap holds for non-ASCII transcripts too.
+    const parts: string[] = [];
+    let cur = "";
+    let curBytes = 0;
+    for (const ch of json) {
+      // UTF-8 byte length of one code point via arithmetic (far cheaper
+      // than Buffer.byteLength per character on multi-MB payloads).
+      const cp = ch.codePointAt(0) as number;
+      const b = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+      if (curBytes + b > CHUNK_PLAINTEXT_BYTES && cur.length > 0) {
+        parts.push(cur);
+        cur = "";
+        curBytes = 0;
+      }
+      cur += ch;
+      curBytes += b;
+    }
+    if (cur.length > 0) parts.push(cur);
+    if (parts.length === 0 || parts.length > MAX_CHUNKS) return false;
+    for (let i = 0; i < parts.length; i++) {
+      const ok = await sendFrame(
+        { seq: payload.seq, chunk: i, chunks: parts.length, data: parts[i] },
+        via,
+      );
+      if (!ok) return false;
+    }
+    return true;
+  };
+
+  /**
+   * Deliver a command response: one frame when it fits, chunked when it
+   * doesn't, and a small correlated error only when even chunking can't
+   * deliver it — so the viewer never waits out the full timeout on a
+   * dropped reply.
+   */
+  const sendResponse = async (payload: Record<string, unknown>, via?: string): Promise<void> => {
+    if (await sendFrame(payload, via)) return;
+    if (await sendChunked(payload, via)) return;
+    await sendFrame({ seq: payload.seq, ok: false, error: "response too large to relay" }, via);
   };
 
   /**
@@ -318,7 +380,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
           if (results.every(Boolean)) {
             tail.sceneCount = current.scenes.length;
             tail.dirty = false;
-          } else if (JSON.stringify(payload).length > MAX_FRAME_BYTES) {
+          } else if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_FRAME_BYTES) {
             // Oversized batches can never be delivered; skip with a visible
             // gap marker instead of retrying forever.
             tail.sceneCount = current.scenes.length;
@@ -438,11 +500,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     }
     const run = commandChain.then(async () => {
       const response = await handleCommand(inner, via);
-      if (!(await sendFrame(response, via))) {
-        // Oversized response or dead socket: send a small correlated error so
-        // the viewer doesn't wait out the full timeout on a dropped reply.
-        await sendFrame({ seq: inner.seq, ok: false, error: "response too large to relay" }, via);
-      }
+      await sendResponse(response, via);
     });
     commandChain = run.catch(() => {});
     await run;

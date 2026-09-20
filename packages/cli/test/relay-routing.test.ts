@@ -19,7 +19,7 @@ vi.mock("../src/relay-crypto.js", async (importOriginal) => {
 });
 
 // Fake provider/transform so tail commands don't touch the real filesystem.
-const providerState = vi.hoisted(() => ({ discoverCalls: 0 }));
+const providerState = vi.hoisted(() => ({ discoverCalls: 0, scenes: [] as unknown[] }));
 vi.mock("../src/providers/index.js", () => ({
   getAllProviders: () => [
     {
@@ -34,7 +34,7 @@ vi.mock("../src/providers/index.js", () => ({
   deduplicateSessionsByProvider: (xs: unknown) => xs,
 }));
 vi.mock("../src/transform.js", () => ({
-  transformToReplay: () => ({ scenes: [], meta: { stats: {} } }),
+  transformToReplay: () => ({ scenes: providerState.scenes, meta: { stats: {} } }),
 }));
 
 class FakeSocket {
@@ -63,6 +63,7 @@ const { startRelay } = await import("../src/relay.js");
 
 afterEach(() => {
   FakeSocket.instances = [];
+  providerState.scenes = [];
 });
 
 function lastOuter(sock: FakeSocket) {
@@ -210,5 +211,120 @@ describe("shipper viewer routing", () => {
     });
     await waitFor(() => sock.sent.length > 2, "re-subscribed");
     expect(providerState.discoverCalls).toBeGreaterThan(afterFirstTail);
+  });
+});
+
+describe("shipper chunked responses", () => {
+  it("splits an oversized get response into reassemblable chunks", async () => {
+    // ~1KB per scene × 20000 scenes; the get page (5000 scenes) is ~5MB,
+    // well over the 4MB single-frame cap.
+    providerState.scenes = Array.from({ length: 20000 }, (_, i) => ({
+      i,
+      pad: "x".repeat(1000),
+    }));
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 9, cmd: "get", id: "sess-1" }),
+        via: "viewer-chunk",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 2, "chunks sent");
+
+    const frames = sock.sent.slice(1).map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames.length).toBeGreaterThan(1);
+    for (const f of frames) {
+      // Every chunk echoes the routing tag and fits one frame.
+      expect(f.via).toBe("viewer-chunk");
+      expect(JSON.stringify(f).length).toBeLessThan(4 * 1024 * 1024);
+    }
+    const inners = frames.map((f) => JSON.parse(f.data as string) as Record<string, unknown>);
+    const chunkCount = inners[0]!.chunks as number;
+    expect(chunkCount).toBe(frames.length);
+    const assembled = JSON.parse(
+      inners
+        .sort((a, b) => (a.chunk as number) - (b.chunk as number))
+        .map((i) => i.data as string)
+        .join(""),
+    ) as Record<string, unknown>;
+    expect(assembled).toMatchObject({ seq: 9, ok: true });
+    const data = assembled.data as { totalScenes: number; scenes: unknown[] };
+    expect(data.totalScenes).toBe(20000);
+    expect(data.scenes).toHaveLength(5000);
+  });
+
+  it("still sends small responses as a single unchunked frame", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 5, cmd: "ping" }),
+        via: "viewer-abc",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "response sent");
+
+    const frames = sock.sent.slice(1).map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames).toHaveLength(1);
+    const inner = JSON.parse(frames[0]!.data as string) as Record<string, unknown>;
+    expect(inner).toMatchObject({ seq: 5, ok: true });
+    expect(inner).not.toHaveProperty("chunk");
+  });
+});
+
+describe("shipper chunked responses (UTF-8 bytes)", () => {
+  it("chunks by UTF-8 bytes, never tearing multi-byte text", async () => {
+    // 5000 scenes × 300 CJK chars: ~1.6M UTF-16 code units but ~4.5MB in
+    // UTF-8 — over the single-frame cap in bytes, under it in units. A
+    // unit-counting splitter would wrongly send this as one 4.5MB frame
+    // (the relay measures UTF-8 bytes and would kill the socket).
+    providerState.scenes = Array.from({ length: 20000 }, (_, i) => ({
+      i,
+      pad: "中".repeat(300),
+    }));
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 11, cmd: "get", id: "sess-1" }),
+        via: "viewer-cjk",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 2, "chunks sent");
+
+    const frames = sock.sent.slice(1).map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames.length).toBeGreaterThan(1);
+    for (const f of frames) {
+      expect(Buffer.byteLength(JSON.stringify(f), "utf8")).toBeLessThan(4 * 1024 * 1024);
+    }
+    const inners = frames.map((f) => JSON.parse(f.data as string) as Record<string, unknown>);
+    const assembled = JSON.parse(
+      inners
+        .sort((a, b) => (a.chunk as number) - (b.chunk as number))
+        .map((i) => i.data as string)
+        .join(""),
+    ) as Record<string, unknown>;
+    expect(assembled).toMatchObject({ seq: 11, ok: true });
+    // No torn surrogate/CJK sequences: the reassembled JSON parses and the
+    // CJK padding survives byte-exact.
+    const data = assembled.data as { scenes: Array<{ pad: string }> };
+    expect(data.scenes).toHaveLength(5000);
+    expect(data.scenes[0]!.pad).toBe("中".repeat(300));
   });
 });
