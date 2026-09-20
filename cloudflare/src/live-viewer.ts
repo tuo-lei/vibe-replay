@@ -17,11 +17,14 @@ function esc(s: string): string {
 
 export function renderLiveViewerPage(boxId: string): string {
   const safeBoxId = esc(boxId);
+  // Embed as JSON but neutralize `<` so a hostile box id can never break out
+  // of the inline <script> block (repo rule: no `</` inside inline scripts).
+  const boxIdJson = JSON.stringify(boxId).replace(/</g, "\\x3c");
   // NOTE: inside the inline script we avoid `</` sequences entirely
   // (repo rule: browsers would close the script tag).
   const script = `
 "use strict";
-var BOX_ID = ${JSON.stringify(boxId)};
+var BOX_ID = ${boxIdJson};
 var keyB64 = (location.hash || "").replace(/^#/, "");
 var key = null;
 var ws = null;
@@ -119,7 +122,7 @@ function sceneBody(sc) {
       if (!arg) { try { arg = JSON.stringify(sc.input).slice(0, 300); } catch (e) { arg = ""; } }
     } else if (typeof sc.input === "string") { arg = sc.input.slice(0, 300); }
     var res = typeof sc.result === "string" ? sc.result : "";
-    return head + (arg ? " " + arg : "") + (res ? "\n" + res : "");
+    return head + (arg ? " " + arg : "") + (res ? "\\n" + res : "");
   }
   if (typeof sc.content === "string") return sc.content;
   if (typeof sc.result === "string") return sc.result;
