@@ -408,4 +408,39 @@ describe("shipper dead-box retry exit", () => {
       vi.restoreAllMocks();
     }
   });
+
+  it("a transient drop on a long-lived connection retries instead of exiting", async () => {
+    // Regression: the outage clock used to start when the connection was
+    // *established*, so a deploy blip on a 9-minute-old connection exited
+    // immediately instead of riding the normal reconnect path.
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    const exits = mockExits();
+    try {
+      vi.useFakeTimers();
+      const t0 = Date.now();
+      // The connection lived 559 s, then dropped (deploy restart / proxy).
+      vi.setSystemTime(t0 + 559_000);
+      expect(() => sock.onclose!()).not.toThrow();
+      expect(exits).toEqual([]);
+      // It dials again with the same box id instead of giving up.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(FakeSocket.instances.length).toBe(2);
+      // The retry connects: the outage clock resets and the box survives.
+      const retrySock = FakeSocket.instances[1]!;
+      vi.setSystemTime(t0 + 562_000);
+      retrySock.onopen!();
+      expect(exits).toEqual([]);
+      // A later drop starts a fresh outage clock (no exit for a short blip).
+      vi.setSystemTime(t0 + 900_000);
+      expect(() => retrySock.onclose!()).not.toThrow();
+      expect(exits).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
 });
