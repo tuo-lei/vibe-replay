@@ -263,3 +263,42 @@ async function encryptFrameFor(key: CryptoKey, boxId: string, payload: unknown) 
   );
   return { t: "frame", iv: b64urlEncode(iv), data: b64urlEncode(new Uint8Array(ct)) };
 }
+
+describe("LiveClient presence generation guard", () => {
+  it("an older broadcast finishing later never overwrites a newer roster", async () => {
+    const { LiveClient } = await import("./protocol");
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const fakeWs = { send: () => {}, close: () => {}, readyState: 1 };
+    // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+    const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+    // Controllable decryptions: each call parks until its resolver fires.
+    const resolvers: Array<() => void> = [];
+    client.decryptName = (v: unknown) =>
+      new Promise<string>((res) => {
+        resolvers.push(() => res(typeof v === "string" ? v : "Guest"));
+      });
+    const seen: unknown[][] = [];
+    client.onPresence((viewers: unknown) => {
+      seen.push(viewers as unknown[]);
+    });
+
+    // Two broadcasts handled concurrently (ws.onmessage never awaits).
+    const p1 = client.handleMessage({
+      data: JSON.stringify({ t: "presence", viewers: [{ vid: "v1", name: "old" }] }),
+    });
+    const p2 = client.handleMessage({
+      data: JSON.stringify({ t: "presence", viewers: [{ vid: "v2", name: "new" }] }),
+    });
+    // Finish the NEWER broadcast first, then the older one.
+    resolvers[1]!();
+    await p2;
+    resolvers[0]!();
+    await p1;
+
+    const roster = seen[seen.length - 1]!;
+    expect(roster).toEqual([{ vid: "v2", name: "new" }]);
+  });
+});

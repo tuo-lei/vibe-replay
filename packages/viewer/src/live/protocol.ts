@@ -149,6 +149,9 @@ export class LiveClient implements LiveRelay {
   private presence: ViewerPresence[] = [];
   /** Our own viewer id, from the relay's `welcome`. Null until it arrives. */
   private selfVid: string | null = null;
+  /** Generation counter: concurrent presence handlers must not let an older
+   *  broadcast's async decryptions overwrite a newer roster. */
+  private presenceGen = 0;
   /** In-flight chunked command responses, keyed by command seq. */
   private chunkBufs = new Map<number, { chunks: number; parts: string[]; received: number }>();
   private closed = false;
@@ -344,7 +347,10 @@ export class LiveClient implements LiveRelay {
     }
     if (outer.t === "presence" && Array.isArray(outer.viewers)) {
       // Roster names arrive as ciphertext ({iv, data}) the relay forwarded
-      // verbatim; decrypt each locally with the fragment key.
+      // verbatim; decrypt each locally with the fragment key. Handlers run
+      // concurrently per message, so a generation guard keeps an older
+      // broadcast from overwriting a newer roster after slow decryptions.
+      const gen = ++this.presenceGen;
       const roster: ViewerPresence[] = [];
       for (const v of outer.viewers) {
         if (typeof v !== "object" || v === null || typeof v.vid !== "string") continue;
@@ -353,6 +359,7 @@ export class LiveClient implements LiveRelay {
           name: await this.decryptName((v as Record<string, unknown>).name),
         });
       }
+      if (gen !== this.presenceGen) return; // superseded by a newer broadcast
       this.presence = roster;
       this.emitPresence();
       return;

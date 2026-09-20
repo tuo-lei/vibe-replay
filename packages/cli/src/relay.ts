@@ -220,7 +220,10 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
     const outer = JSON.stringify({ t: "frame", ...frame, ...(via ? { via } : {}) });
-    if (outer.length > MAX_FRAME_BYTES) return false;
+    // Measured in UTF-8 bytes like the relay does: outer.length counts
+    // UTF-16 code units and would let multi-byte text slip a >4MiB frame
+    // past this gate (the relay would then kill the socket with 1009).
+    if (Buffer.byteLength(outer, "utf8") > MAX_FRAME_BYTES) return false;
     try {
       ws.send(outer);
     } catch {
@@ -234,15 +237,33 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
    * encrypted chunks. Each chunk carries `{seq, chunk, chunks, data}` inside
    * its encrypted payload (the relay strips any outer plaintext beyond
    * iv/data/via, so chunk metadata must live inside the ciphertext); the
-   * viewer reassembles by seq. Keeps every frame far under MAX_FRAME_BYTES
+   * viewer reassembles by seq. Chunks are measured in UTF-8 bytes and split
+   * on code-point boundaries, so multi-byte text is never torn
+   * mid-character. Keeps every frame far under MAX_FRAME_BYTES
    * no matter how large a session is.
    */
   const sendChunked = async (payload: Record<string, unknown>, via?: string): Promise<boolean> => {
     const json = JSON.stringify(payload);
+    // Measured in UTF-8 bytes (not UTF-16 code units) and split on
+    // code-point boundaries, so multi-byte text is never torn mid-character
+    // and the documented size cap holds for non-ASCII transcripts too.
     const parts: string[] = [];
-    for (let i = 0; i < json.length; i += CHUNK_PLAINTEXT_BYTES) {
-      parts.push(json.slice(i, i + CHUNK_PLAINTEXT_BYTES));
+    let cur = "";
+    let curBytes = 0;
+    for (const ch of json) {
+      // UTF-8 byte length of one code point via arithmetic (far cheaper
+      // than Buffer.byteLength per character on multi-MB payloads).
+      const cp = ch.codePointAt(0) as number;
+      const b = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+      if (curBytes + b > CHUNK_PLAINTEXT_BYTES && cur.length > 0) {
+        parts.push(cur);
+        cur = "";
+        curBytes = 0;
+      }
+      cur += ch;
+      curBytes += b;
     }
+    if (cur.length > 0) parts.push(cur);
     if (parts.length === 0 || parts.length > MAX_CHUNKS) return false;
     for (let i = 0; i < parts.length; i++) {
       const ok = await sendFrame(
@@ -359,7 +380,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
           if (results.every(Boolean)) {
             tail.sceneCount = current.scenes.length;
             tail.dirty = false;
-          } else if (JSON.stringify(payload).length > MAX_FRAME_BYTES) {
+          } else if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_FRAME_BYTES) {
             // Oversized batches can never be delivered; skip with a visible
             // gap marker instead of retrying forever.
             tail.sceneCount = current.scenes.length;
