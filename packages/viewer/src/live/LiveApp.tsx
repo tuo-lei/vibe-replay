@@ -9,6 +9,7 @@ import {
   type RelaySearchHit,
   type RelaySessionSummary,
   type TailEvent,
+  type ViewerPresence,
 } from "./protocol";
 
 /** Full-fidelity transcript: same defaults as the local viewer's "all" mode. */
@@ -29,7 +30,19 @@ const SCENE_PAGE = 5000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 
 /** Failures that will never succeed on retry — surface immediately. */
-const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url", "replaced"]);
+const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url"]);
+
+/** localStorage key for the remembered display name. */
+const NAME_STORAGE_KEY = "vibe-replay:viewer-name";
+
+function readStoredName(): string | null {
+  try {
+    const v = window.localStorage.getItem(NAME_STORAGE_KEY);
+    return v && v.trim() ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -46,8 +59,6 @@ function friendlyError(e: unknown): string {
   switch (m) {
     case "invalid-share-url":
       return "Invalid share URL: missing encryption key in #fragment.";
-    case "replaced":
-      return "This link was opened in another tab or device — this view is now inactive.";
     case "connection-error":
     case "connection-timeout":
       return "Connection error — the shipper may be offline. Reload to retry.";
@@ -64,7 +75,7 @@ type View = { name: "list" } | { name: "detail"; summary: RelaySessionSummary };
 
 interface Props {
   /** Defaults to LiveClient.connect; tests inject a fake relay. */
-  createClient?: (boxId: string) => Promise<LiveRelay>;
+  createClient?: (boxId: string, name: string) => Promise<LiveRelay>;
   /** Defaults to window.location.pathname; tests inject a path. */
   pathname?: string;
 }
@@ -72,6 +83,11 @@ interface Props {
 export default function LiveApp({ createClient = LiveClient.connect, pathname }: Props) {
   const [status, setStatus] = useState("Starting…");
   const [fatal, setFatal] = useState<string | null>(null);
+  /** Display name for the presence roster; null until the user picks one. */
+  const [myName, setMyName] = useState<string | null>(readStoredName);
+  /** Relay-broadcast viewer roster (Excalidraw-style presence). */
+  const [presence, setPresence] = useState<ViewerPresence[]>([]);
+  const [selfVid, setSelfVid] = useState<string | null>(null);
   const [sessions, setSessions] = useState<RelaySessionSummary[] | null>(null);
   const [hits, setHits] = useState<RelaySearchHit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -88,6 +104,9 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   /** The share path (prop in tests, window.location in production). */
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
+  /** Latest display name (rename reconnects, so callbacks read via ref). */
+  const myNameRef = useRef(myName);
+  myNameRef.current = myName;
   /** True while a disconnect-triggered re-establish is in flight. */
   const reconnectingRef = useRef(false);
   /** Set when the component unmounts; in-flight reconnects must not touch state. */
@@ -146,6 +165,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const connectAndList = useCallback(
     async (
       boxId: string,
+      name: string,
       isCancelled: () => boolean,
     ): Promise<{ client: LiveRelay; sessions: RelaySessionSummary[] }> => {
       let lastError: unknown = new Error("unreachable");
@@ -154,7 +174,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         let client: LiveRelay | null = null;
         try {
           setStatus(attempt === 0 ? "Connecting…" : `Retrying… (attempt ${attempt + 1})`);
-          client = await createClient(boxId);
+          client = await createClient(boxId, name);
           if (isCancelled()) {
             client.close();
             throw new Error("cancelled");
@@ -291,15 +311,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         }
         applyTailEvent(ev);
       });
-      client.onDisconnect((info) => {
-        if (info.code === 1000 && info.reason === "replaced") {
-          // The same link was opened in another tab/device and the relay
-          // displaced this viewer. Reconnecting would just evict the other
-          // side back and forth forever — go terminal instead.
-          setFatal(friendlyError(new Error("replaced")));
-          return;
-        }
+      client.onDisconnect((_info) => {
         void handleDisconnectRef.current();
+      });
+      client.onPresence((viewers, self) => {
+        if (unmountedRef.current) return;
+        setPresence(viewers);
+        setSelfVid(self);
       });
     },
     [applyTailEvent],
@@ -318,10 +336,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     const summary = viewRef.current.name === "detail" ? viewRef.current.summary : null;
     const wasWatching = watchingRef.current;
     const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
+    const name = myNameRef.current;
     setWatching(false);
     setLoadingScenes(false);
-    if (!boxId) throw new Error("invalid-share-url");
-    const { client, sessions } = await connectAndList(boxId, () => unmountedRef.current);
+    setPresence([]); // stale roster: the relay re-broadcasts on rejoin
+    setSelfVid(null);
+    if (!boxId || !name) throw new Error("invalid-share-url");
+    const { client, sessions } = await connectAndList(boxId, name, () => unmountedRef.current);
     if (unmountedRef.current) {
       // Unmounted while re-establishing: drop the fresh socket, it has no UI.
       client.close();
@@ -383,15 +404,17 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   useEffect(() => {
     unmountedRef.current = false;
     const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
+    const name = myNameRef.current;
     if (!boxId) {
       setFatal("Invalid share URL: unrecognized /live/<id> path.");
       return;
     }
+    if (!name) return; // name gate: wait for the user to pick a display name
     let cancelled = false;
     let client: LiveRelay | null = null;
     (async () => {
       try {
-        const established = await connectAndList(boxId, () => cancelled);
+        const established = await connectAndList(boxId, name, () => cancelled);
         if (cancelled) {
           established.client.close();
           return;
@@ -413,7 +436,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       (clientRef.current ?? client)?.close();
       clientRef.current = null;
     };
-  }, [connectAndList]);
+  }, [connectAndList, myName]);
 
   const openSession = useCallback(
     async (summary: RelaySessionSummary) => {
@@ -495,11 +518,68 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     [sessions, openSession],
   );
 
+  const rename = useCallback(() => {
+    try {
+      window.localStorage.removeItem(NAME_STORAGE_KEY);
+    } catch {
+      // storage unavailable — the gate still shows
+    }
+    setMyName(null);
+  }, []);
+
+  const submitName = useCallback((raw: string) => {
+    const name = raw.trim().slice(0, 32) || "Guest";
+    try {
+      window.localStorage.setItem(NAME_STORAGE_KEY, name);
+    } catch {
+      // storage unavailable — the name still applies to this visit
+    }
+    setMyName(name);
+  }, []);
+
+  if (!myName) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-terminal-bg px-4 font-sans text-terminal-text">
+        <form
+          className="w-full max-w-sm rounded-2xl border border-terminal-border-subtle bg-terminal-surface px-6 py-8"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const input = e.currentTarget.querySelector("input");
+            submitName(input?.value ?? "");
+          }}
+        >
+          <div className="text-lg font-semibold">👋 先报个名字</div>
+          <p className="mt-2 text-sm text-terminal-dim">
+            和 Excalidraw 一样，其他正在看的人会看到你在线。
+          </p>
+          <input
+            placeholder="比如：Lei"
+            maxLength={32}
+            className="mt-4 w-full rounded-lg bg-terminal-bg px-3 py-2 text-sm text-terminal-text ring-1 ring-terminal-border-subtle placeholder:text-terminal-dimmer focus:outline-none focus:ring-terminal-green/40"
+          />
+          <button
+            type="submit"
+            className="mt-4 w-full rounded-lg bg-terminal-green px-3 py-2 text-sm font-medium text-terminal-bg transition-opacity hover:opacity-90"
+          >
+            进入直播
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   if (fatal) {
     return (
       <div className="min-h-screen bg-terminal-bg px-4 py-6 font-sans text-terminal-text">
         <div className="mx-auto max-w-3xl">
-          <Header query={query} setQuery={setQuery} onSearch={doSearch} />
+          <Header
+            query={query}
+            setQuery={setQuery}
+            onSearch={doSearch}
+            presence={presence}
+            selfVid={selfVid}
+            onRename={rename}
+          />
           <div className="mt-8 rounded-xl border border-terminal-red/40 bg-terminal-red-subtle px-5 py-4 text-sm">
             {fatal}
           </div>
@@ -511,7 +591,14 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   return (
     <div className="min-h-screen bg-terminal-bg font-sans text-terminal-text">
       <div className="mx-auto max-w-5xl px-4 py-5">
-        <Header query={query} setQuery={setQuery} onSearch={doSearch} />
+        <Header
+          query={query}
+          setQuery={setQuery}
+          onSearch={doSearch}
+          presence={presence}
+          selfVid={selfVid}
+          onRename={rename}
+        />
         <div className="mb-4 text-xs text-terminal-dim">{status}</div>
 
         {view.name === "list" && (
@@ -571,14 +658,90 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   );
 }
 
+const AVATAR_COLORS = [
+  "#e2574c",
+  "#e8833a",
+  "#d9a441",
+  "#4caf6d",
+  "#3aa7a3",
+  "#4c8de2",
+  "#7b6ff0",
+  "#b45fd0",
+];
+
+function avatarColor(vid: string): string {
+  let h = 0;
+  for (let i = 0; i < vid.length; i++) h = (h * 31 + vid.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
+}
+
+/** Excalidraw-style presence: overlapping avatars, self first. Click to rename. */
+function PresenceRoster({
+  presence,
+  selfVid,
+  onRename,
+}: {
+  presence: ViewerPresence[];
+  selfVid: string | null;
+  onRename: () => void;
+}) {
+  if (presence.length === 0) return null;
+  const ordered = [...presence].sort((a, b) =>
+    a.vid === selfVid ? -1 : b.vid === selfVid ? 1 : a.vid.localeCompare(b.vid),
+  );
+  const shown = ordered.slice(0, 5);
+  const extra = ordered.length - shown.length;
+  return (
+    <button
+      type="button"
+      onClick={onRename}
+      title="点击改名"
+      className="flex items-center rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-terminal-surface"
+    >
+      <span className="flex -space-x-1.5">
+        {shown.map((v) => (
+          <span
+            key={v.vid}
+            title={v.name + (v.vid === selfVid ? "（我）" : "")}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-terminal-bg"
+            style={{ backgroundColor: avatarColor(v.vid) }}
+          >
+            {v.name.trim().charAt(0) || "?"}
+          </span>
+        ))}
+        {extra > 0 && (
+          <span
+            className="flex h-6 items-center justify-center rounded-full bg-terminal-surface px-1.5 text-[10px] text-terminal-dim ring-2 ring-terminal-bg"
+            title={ordered
+              .slice(5)
+              .map((v) => v.name)
+              .join("、")}
+          >
+            +{extra}
+          </span>
+        )}
+      </span>
+      <span className="ml-1.5 max-w-24 truncate text-xs text-terminal-dim">
+        {ordered.length} 人在线
+      </span>
+    </button>
+  );
+}
+
 function Header({
   query,
   setQuery,
   onSearch,
+  presence,
+  selfVid,
+  onRename,
 }: {
   query: string;
   setQuery: (q: string) => void;
   onSearch: () => void;
+  presence: ViewerPresence[];
+  selfVid: string | null;
+  onRename: () => void;
 }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -586,6 +749,7 @@ function Header({
         vibe-replay <span className="text-terminal-green">live</span>
       </span>
       <span className="flex-1" />
+      <PresenceRoster presence={presence} selfVid={selfVid} onRename={onRename} />
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}

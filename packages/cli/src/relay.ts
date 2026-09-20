@@ -38,7 +38,7 @@ const SEARCH_SESSION_CAP = 40;
 const SEARCH_SNIPPET_CHARS = 160;
 const TAIL_POLL_MS = 2000;
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
-/** Max concurrent live-tail subscriptions (one viewer, one command source). */
+/** Max sessions with an active live-tail poll loop (shared by all viewers). */
 const MAX_TAILS = 8;
 /** Re-resolve a tailed session's files this often — /resume continuations
  *  land in a new file, and discovery is the only way to learn about it. */
@@ -167,6 +167,9 @@ interface TailState {
   polling: boolean;
   /** A batch failed to send (socket down): re-parse and retry next poll. */
   dirty: boolean;
+  /** Relay-assigned ids of the viewers subscribed to this session. One poll
+   *  loop serves every subscriber; new scenes fan out to each of them. */
+  viewers: Set<string>;
 }
 
 export interface RelayOptions {
@@ -204,11 +207,15 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   let reconnectDelayMs = 2000;
 
   /** Returns false when the socket is down or the frame is oversized — the
-   *  caller decides whether to retry or send a smaller correlated error. */
-  const sendFrame = async (payload: unknown): Promise<boolean> => {
+   *  caller decides whether to retry or send a smaller correlated error.
+   *  `via` is the relay-visible routing tag: the relay attaches the
+   *  requesting viewer's id to inbound frames, the shipper echoes it back,
+   *  and the relay routes the reply to that viewer. Omitted for
+   *  viewer-independent traffic (keepalive), which the relay broadcasts. */
+  const sendFrame = async (payload: unknown, via?: string): Promise<boolean> => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
-    const outer = JSON.stringify({ t: "frame", ...frame });
+    const outer = JSON.stringify({ t: "frame", ...frame, ...(via ? { via } : {}) });
     if (outer.length > MAX_FRAME_BYTES) return false;
     try {
       ws.send(outer);
@@ -234,9 +241,12 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   // Don't hold the process open for the timer alone (Ctrl+C path aside).
   keepaliveTimer.unref?.();
 
-  const stopTail = (sessionId: string): void => {
+  /** Unsubscribe one viewer (or everyone when `via` is omitted, e.g. shutdown). */
+  const stopTail = (sessionId: string, via?: string): void => {
     const tail = tails.get(sessionId);
-    if (tail) {
+    if (!tail) return;
+    if (via) tail.viewers.delete(via);
+    if (!via || tail.viewers.size === 0) {
       clearInterval(tail.timer);
       tails.delete(sessionId);
     }
@@ -254,8 +264,14 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     return mtimes;
   };
 
-  const startTail = async (sessionId: string): Promise<number> => {
-    stopTail(sessionId);
+  const startTail = async (sessionId: string, via?: string): Promise<number> => {
+    const subscriber = via ?? "legacy";
+    const existing = tails.get(sessionId);
+    if (existing) {
+      // Already polling this session: just add the viewer to the fan-out.
+      existing.viewers.add(subscriber);
+      return existing.sceneCount;
+    }
     const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const info = await findSessionInfo(sessionId);
     const filePaths = info?.filePaths ?? [];
@@ -296,7 +312,10 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
             newScenes,
             totalScenes: current.scenes.length,
           };
-          if (await sendFrame(payload)) {
+          const fanOut = (p: unknown) =>
+            Promise.all([...tail.viewers].map((v) => sendFrame(p, v === "legacy" ? undefined : v)));
+          const results = await fanOut(payload);
+          if (results.every(Boolean)) {
             tail.sceneCount = current.scenes.length;
             tail.dirty = false;
           } else if (JSON.stringify(payload).length > MAX_FRAME_BYTES) {
@@ -304,15 +323,15 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
             // gap marker instead of retrying forever.
             tail.sceneCount = current.scenes.length;
             tail.dirty = false;
-            await sendFrame({
+            await fanOut({
               event: "tail-gap",
               id: sessionId,
               skipped: newScenes.length,
               totalScenes: current.scenes.length,
             });
           } else {
-            // Socket down mid-poll: retry the same delta next poll instead of
-            // advancing past it.
+            // Socket down mid-poll: retry the same delta next poll instead
+            // of advancing past it.
             tail.dirty = true;
           }
         } else if (current.scenes.length < tail.sceneCount) {
@@ -333,11 +352,15 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       polls: 0,
       polling: false,
       dirty: false,
+      viewers: new Set([subscriber]),
     });
     return replay.scenes.length;
   };
 
-  const handleCommand = async (msg: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  const handleCommand = async (
+    msg: Record<string, unknown>,
+    via?: string,
+  ): Promise<Record<string, unknown>> => {
     const { seq, cmd } = msg;
     if (typeof cmd !== "string" || !ALLOWED_COMMANDS.has(cmd)) {
       return { seq, ok: false, error: `unknown command: ${String(cmd)}` };
@@ -367,13 +390,13 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
           if (!tails.has(id) && tails.size >= MAX_TAILS) {
             return { seq, ok: false, error: "too many live tails" };
           }
-          const totalScenes = await startTail(id);
+          const totalScenes = await startTail(id, via);
           return { seq, ok: true, data: { subscribed: true, totalScenes } };
         }
         case "untail": {
           const id = msg.id;
           if (typeof id !== "string") return { seq, ok: false, error: "missing id" };
-          stopTail(id);
+          stopTail(id, via);
           return { seq, ok: true, data: { subscribed: false } };
         }
         case "ping":
@@ -386,8 +409,8 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     }
   };
 
-  // Serialize command handling: one viewer, one command source — concurrent
-  // parse/discovery work has no backpressure otherwise.
+  // Serialize command handling: concurrent parse/discovery work from
+  // several viewers has no backpressure otherwise.
   let commandChain: Promise<void> = Promise.resolve();
 
   const onMessage = async (event: MessageEvent): Promise<void> => {
@@ -397,8 +420,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     } catch {
       return;
     }
-    if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
+    // Plaintext relay control: a viewer left. Drop its id from every tail
+    // fan-out; tails with no subscribers left stop their poll loop.
+    if (outer.t === "viewer-left" && typeof outer.via === "string") {
+      for (const id of tails.keys()) stopTail(id, outer.via);
       return;
+    }
+    if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
+      return; // Relay-visible routing tag: which viewer sent this frame. Echoed back on
+    // the response so the relay can route it to the right viewer.
+    const via = typeof outer.via === "string" ? outer.via : undefined;
     let inner: Record<string, unknown>;
     try {
       inner = JSON.parse(await decryptFrame(key, boxId, { iv: outer.iv, data: outer.data }));
@@ -406,11 +437,11 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       return; // not for us — ignore
     }
     const run = commandChain.then(async () => {
-      const response = await handleCommand(inner);
-      if (!(await sendFrame(response))) {
+      const response = await handleCommand(inner, via);
+      if (!(await sendFrame(response, via))) {
         // Oversized response or dead socket: send a small correlated error so
         // the viewer doesn't wait out the full timeout on a dropped reply.
-        await sendFrame({ seq: inner.seq, ok: false, error: "response too large to relay" });
+        await sendFrame({ seq: inner.seq, ok: false, error: "response too large to relay" }, via);
       }
     });
     commandChain = run.catch(() => {});

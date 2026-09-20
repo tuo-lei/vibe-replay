@@ -9,9 +9,15 @@ import type { LiveRelay, RelaySessionSummary, TailEvent } from "./protocol";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.removeItem("vibe-replay:viewer-name");
 });
 
-beforeEach(stubBrowserAPIs);
+beforeEach(() => {
+  stubBrowserAPIs();
+  // Most tests exercise the connected app; the name gate is covered by its
+  // own tests, which clear this first.
+  window.localStorage.setItem("vibe-replay:viewer-name", "Tester");
+});
 
 const sessions: RelaySessionSummary[] = [
   {
@@ -51,6 +57,7 @@ function makeFake(overrides: Partial<LiveRelay> = {}): LiveRelay {
     untail: async () => {},
     onTail: () => () => {},
     onDisconnect: () => () => {},
+    onPresence: () => () => {},
     close: () => {},
     ...overrides,
   };
@@ -103,7 +110,9 @@ describe("LiveApp", () => {
 
   it("shows a fatal error when the key is missing", async () => {
     const { LiveClient } = await import("./protocol");
-    render(<LiveApp createClient={(boxId) => LiveClient.connect(boxId)} pathname={PATH} />);
+    render(
+      <LiveApp createClient={(boxId, name) => LiveClient.connect(boxId, name)} pathname={PATH} />,
+    );
     // jsdom has no #fragment key → invalid-share-url
     expect(await screen.findByText(/missing encryption key/)).toBeTruthy();
   });
@@ -212,41 +221,40 @@ describe("LiveApp", () => {
     expect(createClient).toHaveBeenCalledTimes(2);
   }, 25000);
 
-  it("does not reconnect when displaced by another viewer (1000/replaced)", async () => {
+  it("reconnects through a relay-initiated close (viewers are never displaced)", async () => {
     let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
-    const fake = makeFake({
+    const fake1 = makeFake({
       onDisconnect: (h) => {
         disconnectHandler = h;
         return () => {};
       },
     });
-    const createClient = vi.fn().mockResolvedValue(fake);
+    const fake2 = makeFake();
+    const createClient = vi.fn().mockResolvedValueOnce(fake1).mockResolvedValue(fake2);
     render(<LiveApp createClient={createClient} pathname={PATH} />);
     await screen.findByText("First session");
 
-    // The same link was opened elsewhere; the relay displaced this viewer.
+    // Even a clean 1000 close is treated as transient now: the relay never
+    // evicts viewers for opening the same link twice, so reconnecting can't
+    // start an eviction war.
     disconnectHandler?.({ code: 1000, reason: "replaced" });
-
-    // No reconnect attempt — reconnecting would evict the other side back
-    // and forth. The view goes terminal with an explanatory message.
-    expect(createClient).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/opened in another tab or device/)).toBeTruthy();
-    await new Promise((r) => setTimeout(r, 300));
-    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("E2E-encrypted · 2 sessions")).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(2);
   }, 25000);
 
-  it("fails fast when the relay displaces the viewer during the initial list", async () => {
-    // A second viewer opened the same link while this one was still listing:
-    // the relay closed our socket with 1000/"replaced" and the pending list()
-    // rejects with "replaced" instead of a generic "disconnected".
+  it("retries when the initial list fails with a transient drop", async () => {
+    // The pending list() rejects with a generic "disconnected" — no special
+    // "replaced" case exists anymore — so the app retries with backoff.
     const createClient = vi
       .fn()
-      .mockResolvedValue(makeFake({ list: () => Promise.reject(new Error("replaced")) }));
+      .mockRejectedValueOnce(new Error("disconnected"))
+      .mockResolvedValue(makeFake());
     render(<LiveApp createClient={createClient} pathname={PATH} />);
-    await screen.findByText(/opened in another tab/);
-    // No retry war against the other viewer: exactly one connect attempt.
-    expect(createClient).toHaveBeenCalledTimes(1);
-  });
+    expect(
+      await screen.findByText("E2E-encrypted · 2 sessions", {}, { timeout: 15000 }),
+    ).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(2);
+  }, 25000);
 
   it("runs another reconnect pass when a drop interrupts the restore", async () => {
     let disconnectHandler1: ((info: { code: number; reason: string }) => void) | undefined;
@@ -362,4 +370,102 @@ describe("LiveApp", () => {
     expect(screen.queryByText("Explain this change")).toBeNull();
     expect(createClient).toHaveBeenCalledTimes(2);
   }, 25000);
+
+  it("shows the name gate on first visit and remembers the name", async () => {
+    window.localStorage.removeItem("vibe-replay:viewer-name");
+    const createClient = vi.fn().mockResolvedValue(makeFake());
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+
+    // No stored name: the gate shows and no connection is attempted.
+    expect(await screen.findByText(/先报个名字/)).toBeTruthy();
+    expect(createClient).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText("比如：Lei"), { target: { value: "  Wendy  " } });
+    fireEvent.click(screen.getByText("进入直播"));
+
+    // The trimmed name is stored and handed to the relay on connect.
+    expect(window.localStorage.getItem("vibe-replay:viewer-name")).toBe("Wendy");
+    expect(await screen.findByText("E2E-encrypted · 2 sessions")).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(createClient).toHaveBeenCalledWith(expect.any(String), "Wendy");
+  });
+
+  it("renders the presence roster and keeps it across a reconnect", async () => {
+    let presenceHandler:
+      | ((viewers: Array<{ vid: string; name: string }>, selfVid: string | null) => void)
+      | undefined;
+    const fake1 = makeFake({
+      onPresence: (h) => {
+        presenceHandler = h;
+        return () => {};
+      },
+    });
+    let presenceHandler2:
+      | ((viewers: Array<{ vid: string; name: string }>, selfVid: string | null) => void)
+      | undefined;
+    const fake2 = makeFake({
+      onPresence: (h) => {
+        presenceHandler2 = h;
+        return () => {};
+      },
+    });
+    let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
+    const fake1WithDisconnect = makeFake({
+      onPresence: fake1.onPresence,
+      onDisconnect: (h) => {
+        disconnectHandler = h;
+        return () => {};
+      },
+    });
+    const createClient = vi
+      .fn()
+      .mockResolvedValueOnce(fake1WithDisconnect)
+      .mockResolvedValue(fake2);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+
+    act(() => {
+      presenceHandler?.(
+        [
+          { vid: "v1", name: "Tester" },
+          { vid: "v2", name: "Wendy" },
+        ],
+        "v1",
+      );
+    });
+    expect(await screen.findByText("2 人在线")).toBeTruthy();
+
+    // Drop and reconnect with the same remembered name: the roster refreshes
+    // on the new connection instead of showing the stale one.
+    disconnectHandler?.({ code: 1006, reason: "" });
+    await waitFor(() => expect(screen.queryByText("2 人在线")).toBeNull());
+    act(() => {
+      presenceHandler2?.([{ vid: "v3", name: "Tester" }], "v3");
+    });
+    expect(await screen.findByText("1 人在线")).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(createClient).toHaveBeenNthCalledWith(2, expect.any(String), "Tester");
+  });
+
+  it("clicking the roster clears the remembered name and shows the gate", async () => {
+    let presenceHandler:
+      | ((viewers: Array<{ vid: string; name: string }>, selfVid: string | null) => void)
+      | undefined;
+    const fake = makeFake({
+      onPresence: (h) => {
+        presenceHandler = h;
+        return () => {};
+      },
+    });
+    renderApp(fake);
+    await screen.findByText("First session");
+    act(() => {
+      presenceHandler?.([{ vid: "v1", name: "Tester" }], "v1");
+    });
+    expect(await screen.findByText("1 人在线")).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle("点击改名"));
+    expect(window.localStorage.getItem("vibe-replay:viewer-name")).toBeNull();
+    expect(await screen.findByText(/先报个名字/)).toBeTruthy();
+  });
 });
