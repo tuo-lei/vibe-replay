@@ -143,10 +143,16 @@ export class LiveRelay {
 
   private viewers(): Array<{ ws: WebSocket; vid: string; name: NameCipher | null }> {
     const out: Array<{ ws: WebSocket; vid: string; name: NameCipher | null }> = [];
+    const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
         if (att?.role === "viewer" && att.vid) {
+          // Skip sockets the sweep has deemed dead: even if ws.close() hasn't
+          // taken effect yet (half-open TCP), they must not appear in the roster.
+          if (typeof att.lastSeen === "number" && now - att.lastSeen > PRESENCE_SWEEP_AFTER_MS) {
+            continue;
+          }
           out.push({ ws, vid: att.vid, name: att.name ?? null });
         }
       } catch {
@@ -220,6 +226,7 @@ export class LiveRelay {
   async alarm(): Promise<void> {
     const now = Date.now();
     let live = 0;
+    let reaped = 0;
     for (const ws of this.ctx.getWebSockets()) {
       let att: Attachment | null = null;
       try {
@@ -240,10 +247,15 @@ export class LiveRelay {
       }
       if (now - att.lastSeen > timeout) {
         this.closeQuietly(ws, 1001, "idle timeout");
+        reaped++;
         continue;
       }
       live++;
     }
+    // If we reaped ghosts, push the shrunken roster now: ws.close() on a
+    // half-open socket may not trigger webSocketClose promptly, but viewers()
+    // already filters stale sockets, so the broadcast will be correct.
+    if (reaped > 0) this.broadcastPresence();
     if (live > 0) {
       this.ensureSweepAlarm();
     } else {

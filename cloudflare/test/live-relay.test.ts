@@ -344,6 +344,27 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(h.alarmAt()).toBeGreaterThan(Date.now());
   });
 
+  it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
+    const h = makeAlarmRelay();
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b goes silent for over the 45 s viewer timeout.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    // Clear sent buffers so we only see what the alarm broadcasts.
+    a.ws.sent.length = 0;
+    b.ws.sent.length = 0;
+
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+
+    // The sweep reaps b but the runtime hasn't delivered webSocketClose yet
+    // (b.ws is still in getWebSockets). The alarm must have pushed a roster
+    // that already excludes the ghost, via the viewers() staleness filter.
+    const roster = lastPresence(a.ws)?.viewers;
+    expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
+  });
+
   it("migrates legacy attachments without lastSeen, then sweeps them if they stay silent", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);
