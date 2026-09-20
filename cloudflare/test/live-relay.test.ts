@@ -178,6 +178,27 @@ describe("LiveRelay multi-viewer", () => {
     expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
   });
 
+  it("excludes the closing socket when the runtime still lists it on webSocketClose", async () => {
+    // Production behavior (observed 2026-09-20): the closing socket is
+    // still in getWebSockets() when webSocketClose fires — it even
+    // receives the broadcast — and its lastSeen is fresh, so the 45 s
+    // presence filter would not drop it. Without an explicit exclusion
+    // the survivor's roster never shrinks on a clean leave.
+    const h = makeRelay();
+    helloVm(h);
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b's socket is NOT removed: the close event fires first.
+    const bPresenceBefore = presenceFrames(b.ws).length;
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+
+    const roster = lastPresence(a.ws)?.viewers;
+    expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
+    // The closing socket must not receive the shrunken roster either.
+    expect(presenceFrames(b.ws)).toHaveLength(bPresenceBefore);
+  });
+
   it("tells the shipper which viewer left so it can drop their tails", async () => {
     const h = makeRelay();
     const { ws: vm } = helloVm(h);
