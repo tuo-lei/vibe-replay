@@ -453,9 +453,9 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     store: Map<string, unknown>;
   }
 
-  function makeStorageRelay(): StorageHarness {
+  function makeStorageRelay(existingStore?: Map<string, unknown>): StorageHarness {
     const sockets: MockSocket[] = [];
-    const store = new Map<string, unknown>();
+    const store = existingStore ?? new Map<string, unknown>();
     let alarmAt: number | null = null;
     const ctx = {
       getWebSockets: () => [...sockets],
@@ -597,27 +597,79 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.alarmAt()).toBeNull();
   });
 
-  it("serves the box liveness probe: unknown / live / ended", async () => {
+  it("serves the box liveness probe: ended / live / unknown / ended", async () => {
     const h = makeStorageRelay();
     const probe = () =>
       h.relay
         .fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"))
         .then((r) => r.json() as Promise<{ status: string }>);
 
-    // Box never existed.
-    expect(await probe()).toEqual({ status: "unknown" });
+    // Box never had a shipper: permanently dead, not "unknown".
+    expect(await probe()).toEqual({ status: "ended" });
 
     // Shipper attached.
     const { ws: vm, p } = helloVm(h);
     await p;
     expect(await probe()).toEqual({ status: "live" });
 
-    // Shipper said goodbye.
+    // Shipper lost uncleanly: inside the end grace it may still come back.
+    await h.relay.webSocketClose(vm as unknown as WebSocket, 1006, "boom");
+    h.sockets.splice(h.sockets.indexOf(vm), 1);
+    expect(await probe()).toEqual({ status: "unknown" });
+
+    // Shipper said goodbye: permanently dead.
+    const { ws: vm2, p: p2 } = helloVm(h);
+    await p2;
     await h.relay.webSocketMessage(
-      vm as unknown as WebSocket,
+      vm2 as unknown as WebSocket,
       JSON.stringify({ t: "goodbye", role: "vm" }),
     );
     expect(await probe()).toEqual({ status: "ended" });
+  });
+
+  it("a viewer hello for a box that never had a shipper fails fast with session-ended", async () => {
+    const h = makeStorageRelay();
+    const ws = mockSocket();
+    h.sockets.push(ws);
+    await h.relay.webSocketMessage(
+      ws as unknown as WebSocket,
+      JSON.stringify({ t: "hello", role: "viewer", name: LEI_CIPHER }),
+    );
+    // No welcome, no hanging on "Connecting…" through the retry budget.
+    expect(sessionEndedFrames(ws)).toHaveLength(1);
+    expect(ws.closed).toEqual([{ code: 1000, reason: "box unknown" }]);
+    expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "welcome")).toBe(false);
+  });
+
+  it("a viewer joining inside the shipper-loss grace is not fast-ended", async () => {
+    const h = makeStorageRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    // Unclean shipper loss: close without goodbye; the socket is gone the
+    // way production removes it from getWebSockets().
+    await h.relay.webSocketClose(vm as unknown as WebSocket, 1006, "boom");
+    h.sockets.splice(h.sockets.indexOf(vm), 1);
+    expect(h.store.get("vmSeen")).toBe(true);
+
+    // The box may still come back — the viewer gets a normal welcome and
+    // rides the reconnect path, never a false ended page.
+    const v = await helloViewer(h, LEI_CIPHER);
+    expect(sessionEndedFrames(v.ws)).toHaveLength(0);
+    expect(v.ws.closed).toEqual([]);
+  });
+
+  it("a DO restart does not fast-end viewers before the shipper re-hellos", async () => {
+    const h1 = makeStorageRelay();
+    const { p } = helloVm(h1);
+    await p;
+    expect(h1.store.get("vmSeen")).toBe(true);
+
+    // New DO instance, same durable storage, no sockets yet: this is what
+    // a deploy restart looks like. vmSeen survived in storage.
+    const h2 = makeStorageRelay(h1.store);
+    const v = await helloViewer(h2, LEI_CIPHER);
+    expect(sessionEndedFrames(v.ws)).toHaveLength(0);
+    expect(v.ws.closed).toEqual([]);
   });
 
   it("non-status non-websocket fetches still get 426", async () => {
