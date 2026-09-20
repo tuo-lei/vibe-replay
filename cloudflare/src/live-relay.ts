@@ -17,9 +17,11 @@
  *   the shipper echoes it back on its response so the relay can route the
  *   reply to the right viewer. Frames from the VM without `via` (the
  *   shipper's keepalive no-ops) are broadcast to all viewers.
- * - presence: each viewer announces a display name in its hello; the relay
- *   broadcasts `{t:"presence", viewers:[{vid,name}]}` to all viewers
- *   whenever someone joins or leaves.
+ * - presence: each viewer announces its display name AES-GCM-encrypted with
+ *   the share URL fragment key (the same key as the command frames) in its
+ *   hello; the relay stores and broadcasts the ciphertext verbatim and can
+ *   never see the plaintext. Viewers decrypt names locally with the fragment
+ *   key.
  *
  * Uses the Hibernation API, so an idle box (VM holding its socket open with
  * nobody watching) costs ~zero duration billing: the runtime answers
@@ -33,21 +35,55 @@
 
 type Role = "vm" | "viewer";
 
+/**
+ * Encrypted display name carried in a viewer's hello and in presence
+ * broadcasts. AES-GCM ciphertext (`{iv, data}`, base64url) produced in the
+ * browser with the share URL fragment key — opaque to the relay.
+ */
+export interface NameCipher {
+  iv: string;
+  data: string;
+}
+
 interface Attachment {
   role: Role;
   /** Viewer only: relay-assigned routing id, handed out in `welcome`. */
   vid?: string;
-  /** Viewer only: sanitized display name shown in the presence roster. */
-  name?: string;
+  /**
+   * Viewer only: AES-GCM-encrypted display name (`{iv, data}`, base64url),
+   * encrypted in the browser with the share URL fragment key. The relay
+   * stores and forwards it verbatim — never the plaintext. Null when the
+   * hello carried no usable ciphertext; viewers render those as "Guest".
+   */
+  name?: NameCipher | null;
 }
 
 /** Max relay-visible envelope size. Well under the 32 MiB WS message limit. */
 const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
-/** Display names are relay-visible metadata: keep them short. */
-const MAX_NAME_CHARS = 32;
+/** Ciphertext shape guard: an encrypted 32-char name is ~16 + ~88 chars; the
+ *  cap is generous headroom, not a plaintext length check (the relay cannot
+ *  see the plaintext). */
+const MAX_CIPHER_CHARS = 2048;
+const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
+}
+
+/**
+ * Accept only a well-formed encrypted name; anything else (missing fields,
+ * wrong types, absurd lengths, non-base64url chars, legacy plaintext)
+ * becomes null so viewers render "Guest". The relay must never treat a
+ * display name as readable text.
+ */
+function sanitizeNameCipher(v: unknown): NameCipher | null {
+  if (!isRecord(v)) return null;
+  const { iv, data } = v;
+  if (typeof iv !== "string" || typeof data !== "string") return null;
+  if (iv.length < 1 || data.length < 1) return null;
+  if (iv.length > MAX_CIPHER_CHARS || data.length > MAX_CIPHER_CHARS) return null;
+  if (!B64URL_RE.test(iv) || !B64URL_RE.test(data)) return null;
+  return { iv, data };
 }
 
 /** Random viewer id (12 base64url chars). Routing metadata, not a secret. */
@@ -56,13 +92,6 @@ function newVid(): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** Clamp a viewer-supplied display name to safe, short, printable text. */
-function sanitizeName(v: unknown): string {
-  if (typeof v !== "string") return "Guest";
-  const cleaned = v.replace(/\p{Cc}/gu, "").trim();
-  return cleaned.slice(0, MAX_NAME_CHARS) || "Guest";
 }
 
 export class LiveRelay {
@@ -83,13 +112,13 @@ export class LiveRelay {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private viewers(): Array<{ ws: WebSocket; vid: string; name: string }> {
-    const out: Array<{ ws: WebSocket; vid: string; name: string }> = [];
+  private viewers(): Array<{ ws: WebSocket; vid: string; name: NameCipher | null }> {
+    const out: Array<{ ws: WebSocket; vid: string; name: NameCipher | null }> = [];
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
         if (att?.role === "viewer" && att.vid) {
-          out.push({ ws, vid: att.vid, name: att.name ?? "Guest" });
+          out.push({ ws, vid: att.vid, name: att.name ?? null });
         }
       } catch {
         // attachment unreadable — treat as unregistered
@@ -167,8 +196,9 @@ export class LiveRelay {
     }
 
     // First message on a fresh socket must be the plaintext hello.
-    // (Plaintext role/name are routing metadata, like Excalidraw's room id —
-    // the encrypted payloads that follow stay opaque.)
+    // (Plaintext role is routing metadata, like Excalidraw's room id; the
+    // display name travels as ciphertext and the encrypted payloads that
+    // follow stay opaque.)
     if (!attachment || (attachment.role !== "vm" && attachment.role !== "viewer")) {
       if (msg.t === "hello" && (msg.role === "vm" || msg.role === "viewer")) {
         if (msg.role === "vm") {
@@ -181,7 +211,7 @@ export class LiveRelay {
         // Viewers are never displaced: any number of viewers may watch the
         // same box at once, Excalidraw-style.
         const vid = newVid();
-        const name = sanitizeName(msg.name);
+        const name = sanitizeNameCipher(msg.name);
         ws.serializeAttachment({ role: "viewer", vid, name } satisfies Attachment);
         this.sendQuietly(ws, JSON.stringify({ t: "welcome", vid }));
         this.broadcastPresence();

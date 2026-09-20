@@ -72,7 +72,9 @@ async function helloViewer(h: Harness, name?: unknown): Promise<{ ws: MockSocket
   return { ws, vid: welcome.vid as string };
 }
 
-function presenceFrames(ws: MockSocket): Array<{ viewers: Array<{ vid: string; name: string }> }> {
+function presenceFrames(
+  ws: MockSocket,
+): Array<{ viewers: Array<{ vid: string; name: { iv: string; data: string } | null }> }> {
   return ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "presence");
 }
 
@@ -81,12 +83,16 @@ function lastPresence(ws: MockSocket) {
   return frames[frames.length - 1];
 }
 
+/** Fake encrypted display names (base64url `{iv, data}` — the relay can't read them). */
+const LEI_CIPHER = { iv: "bGVpLWl2", data: "bGVpLWRhdGE" };
+const WENDY_CIPHER = { iv: "d2VuZHktaXY", data: "d2VuZHktZGF0YQ" };
+
 describe("LiveRelay multi-viewer", () => {
   it("lets two viewers watch the same box without displacing each other", async () => {
     const h = makeRelay();
     helloVm(h);
-    const a = await helloViewer(h, "Lei");
-    const b = await helloViewer(h, "Wendy");
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
 
     expect(a.ws.closed).toEqual([]);
     expect(b.ws.closed).toEqual([]);
@@ -94,8 +100,8 @@ describe("LiveRelay multi-viewer", () => {
 
     const roster = lastPresence(a.ws)?.viewers;
     expect(roster).toHaveLength(2);
-    expect(roster).toContainEqual({ vid: a.vid, name: "Lei" });
-    expect(roster).toContainEqual({ vid: b.vid, name: "Wendy" });
+    expect(roster).toContainEqual({ vid: a.vid, name: LEI_CIPHER });
+    expect(roster).toContainEqual({ vid: b.vid, name: WENDY_CIPHER });
     // The late joiner sees the full roster too.
     expect(lastPresence(b.ws)?.viewers).toHaveLength(2);
   });
@@ -103,8 +109,8 @@ describe("LiveRelay multi-viewer", () => {
   it("routes VM responses back to the requesting viewer only", async () => {
     const h = makeRelay();
     const { ws: vm } = helloVm(h);
-    const a = await helloViewer(h, "Lei");
-    const b = await helloViewer(h, "Wendy");
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
 
     // A viewer frame is tagged with the sender's vid on the way to the VM.
     await h.relay.webSocketMessage(
@@ -139,8 +145,8 @@ describe("LiveRelay multi-viewer", () => {
   it("broadcasts untagged VM frames (keepalive) to every viewer", async () => {
     const h = makeRelay();
     const { ws: vm } = helloVm(h);
-    const a = await helloViewer(h, "Lei");
-    const b = await helloViewer(h, "Wendy");
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
 
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
@@ -155,22 +161,22 @@ describe("LiveRelay multi-viewer", () => {
   it("pushes a shrunken roster when a viewer leaves", async () => {
     const h = makeRelay();
     helloVm(h);
-    const a = await helloViewer(h, "Lei");
-    const b = await helloViewer(h, "Wendy");
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
 
     // Simulate the runtime removing the closed socket, then the close event.
     h.sockets.splice(h.sockets.indexOf(b.ws), 1);
     await h.relay.webSocketClose(b.ws as unknown as WebSocket);
 
     const roster = lastPresence(a.ws)?.viewers;
-    expect(roster).toEqual([{ vid: a.vid, name: "Lei" }]);
+    expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
   });
 
   it("tells the shipper which viewer left so it can drop their tails", async () => {
     const h = makeRelay();
     const { ws: vm } = helloVm(h);
-    const a = await helloViewer(h, "Lei");
-    await helloViewer(h, "Wendy");
+    const a = await helloViewer(h, LEI_CIPHER);
+    await helloViewer(h, WENDY_CIPHER);
 
     h.sockets.splice(h.sockets.indexOf(a.ws), 1);
     await h.relay.webSocketClose(a.ws as unknown as WebSocket);
@@ -179,17 +185,44 @@ describe("LiveRelay multi-viewer", () => {
     expect(notices).toContainEqual({ t: "viewer-left", via: a.vid });
   });
 
-  it("sanitizes display names: truncates, strips control chars, defaults to Guest", async () => {
+  it("forwards encrypted display names verbatim and never sees plaintext", async () => {
     const h = makeRelay();
     helloVm(h);
-    const a = await helloViewer(h, "x".repeat(100));
-    const b = await helloViewer(h, undefined);
-    await helloViewer(h, "  ab  ");
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // The relay only ever handles ciphertext: the pretend plaintext behind
+    // these ciphers ("Lei"/"Wendy") must appear nowhere in anything the
+    // relay sent or stored.
+    const allSent = [...a.ws.sent, ...b.ws.sent].join("\n");
+    expect(allSent).not.toContain("Lei");
+    expect(allSent).not.toContain("Wendy");
+    expect(JSON.stringify(a.ws.attachment)).not.toContain("Lei");
 
     const roster = lastPresence(a.ws)?.viewers ?? [];
+    expect(roster).toContainEqual({ vid: a.vid, name: LEI_CIPHER });
+    expect(roster).toContainEqual({ vid: b.vid, name: WENDY_CIPHER });
+  });
+
+  it("degrades malformed name ciphertext to null (viewers render Guest)", async () => {
+    const h = makeRelay();
+    helloVm(h);
+    const bad: unknown[] = [
+      "Lei", // legacy plaintext is no longer accepted
+      undefined, // missing
+      { iv: "aXY" }, // missing data
+      { data: "aXY" }, // missing iv
+      { iv: "", data: "aXY" }, // empty iv
+      { iv: "aXY", data: "!!!" }, // non-base64url chars
+      { iv: "aXY", data: "z".repeat(3000) }, // absurd length
+    ];
+    const vids: string[] = [];
+    for (const name of bad) vids.push((await helloViewer(h, name)).vid);
+
+    const roster = lastPresence(h.sockets[h.sockets.length - 1])?.viewers ?? [];
     const byVid = new Map(roster.map((v) => [v.vid, v.name]));
-    expect(byVid.get(a.vid)).toBe("x".repeat(32));
-    expect(byVid.get(b.vid)).toBe("Guest");
+    expect(roster).toHaveLength(bad.length);
+    for (const vid of vids) expect(byVid.get(vid)).toBeNull();
   });
 
   it("still displaces the previous VM shipper", async () => {
@@ -215,7 +248,7 @@ describe("LiveRelay multi-viewer", () => {
 
   it("drops viewer frames when the shipper is away", async () => {
     const h = makeRelay();
-    const a = await helloViewer(h, "Lei");
+    const a = await helloViewer(h, LEI_CIPHER);
     await h.relay.webSocketMessage(
       a.ws as unknown as WebSocket,
       JSON.stringify({ t: "frame", iv: "i", data: "d" }),
