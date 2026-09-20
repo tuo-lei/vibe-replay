@@ -33,7 +33,7 @@ class_name = "LiveRelay"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["LiveRelay"]
+new_sqlite_classes = ["LiveRelay"]
 
 [triggers]
 crons = ["0 */6 * * *"]
