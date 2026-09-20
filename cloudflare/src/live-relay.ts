@@ -100,11 +100,27 @@ const ENDED_KEY = "ended";
 const VM_GONE_AT_KEY = "vmGoneAt";
 /**
  * Set once a shipper first claims this box (never deleted). Lets a viewer
- * hello distinguish "this box never had a shipper" (fail fast — it can
- * never come back) from "the shipper died and may reconnect inside the end
- * grace" or "the DO restarted and the shipper hasn't re-hello'd yet".
+ * hello distinguish "this box never had a shipper" (fail fast after a
+ * bounded wait for an in-flight hello — it can never come back) from "the
+ * shipper died and may reconnect inside the end grace" or "the DO restarted
+ * and the shipper hasn't re-hello'd yet".
  */
 const VM_SEEN_KEY = "vmSeen";
+/**
+ * How long a viewer hello waits for a shipper hello that may still be in
+ * flight (or moments away — e.g. the shipper re-helloing after a deploy
+ * evicted the DO) before concluding the box never had a shipper. A missing
+ * key alone is not proof the box is permanently dead: the CLI prints the
+ * share URL only after its first hello is acked, but a viewer can still win
+ * the race against a re-hello in the seconds after a restart. Bounded and
+ * short — a truly dead box still fails in seconds, not the full retry
+ * budget.
+ */
+let neverSeenWaitMs = 5000;
+/** Test hook: shrink the never-seen wait so unit tests don't sleep. */
+export function __setNeverSeenWaitMs(ms: number): void {
+  neverSeenWaitMs = ms;
+}
 
 /** Max relay-visible envelope size. Well under the 32 MiB WS message limit. */
 const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
@@ -145,15 +161,48 @@ function newVid(): string {
 export class LiveRelay {
   private ctx: DurableObjectState;
   /**
-   * Set while a shipper hello is being processed (released in a finally).
-   * A viewer hello that finds no VM socket waits for this before deciding
-   * the box never had a shipper — closes the race where the two hellos
-   * interleave.
+   * Resolvers for viewer hellos waiting on a possibly-imminent shipper
+   * hello. Drained (notified) every time a shipper hello finishes — the
+   * waiter then re-checks box state instead of concluding the box never
+   * had a shipper. This closes both the hello/hello interleave race and
+   * the race where a viewer arrives while the shipper is re-helloing
+   * after a deploy evicted the DO.
    */
-  private vmClaimPending: Promise<void> | null = null;
+  private shipperHelloWaiters: Array<() => void> = [];
 
   constructor(ctx: DurableObjectState) {
     this.ctx = ctx;
+  }
+
+  /** Durable "a shipper once claimed this box" flag; false on any storage trouble. */
+  private async vmSeen(): Promise<boolean> {
+    try {
+      const p = this.ctx.storage?.get<boolean>(VM_SEEN_KEY);
+      return p ? (await p) === true : false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Resolve when a shipper hello completes, or after neverSeenWaitMs —
+   * whichever comes first. Lets a viewer hello that found no VM socket
+   * give a possibly-imminent shipper hello a bounded moment before
+   * declaring the box permanently dead.
+   */
+  private waitForShipperHello(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        const i = this.shipperHelloWaiters.indexOf(done);
+        if (i >= 0) this.shipperHelloWaiters.splice(i, 1);
+        resolve();
+      }, neverSeenWaitMs);
+      this.shipperHelloWaiters.push(done);
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -175,24 +224,16 @@ export class LiveRelay {
         } catch {
           // ignore
         }
-        // "ended" means permanently dead: declared dead, or (on positive
-        // storage knowledge) never had a shipper at all — the shipper
-        // always hellos before the share URL exists, so such a box can
-        // never come back. "unknown" means it may still come back — the
-        // shipper died inside the end grace, or the DO restarted and the
-        // shipper hasn't re-hello'd yet.
-        let storageOk = false;
-        let seen = false;
-        try {
-          const p = this.ctx.storage?.get<boolean>(VM_SEEN_KEY);
-          if (p) {
-            seen = (await p) === true;
-            storageOk = true;
-          }
-        } catch {
-          // storage best-effort
-        }
-        const dead = ended || (storageOk && !live && !seen);
+        // "ended" means permanently dead: the shipper declared it dead.
+        // "unknown" covers everything else — the shipper died inside the
+        // end grace, the DO restarted and the shipper hasn't re-hello'd
+        // yet, or the box never had a shipper. The probe stays
+        // conservative on purpose: an absent vmSeen key alone is not proof
+        // the box can never come back (a shipper hello may still be on its
+        // way), and a false "ended" here is terminal for the viewer page.
+        // A viewer websocket that finds no shipper gets the fast
+        // session-ended instead of hanging on "Connecting…".
+        const dead = ended;
         return Response.json({ status: dead ? "ended" : live ? "live" : "unknown" });
       }
       return new Response("expected websocket", { status: 426 });
@@ -409,19 +450,13 @@ export class LiveRelay {
     }
 
     // First message on a fresh socket must be the plaintext hello.
-    // (Plaintext role is routing metadata, like Excalidraw's room id; the
-    // display name travels as ciphertext and the encrypted payloads that
-    // follow stay opaque.)
+    // (Plaintext role is routing metadata only; the display name travels
+    // as ciphertext and the encrypted payloads that follow stay opaque.)
     if (!attachment || (attachment.role !== "vm" && attachment.role !== "viewer")) {
       if (msg.t === "hello" && (msg.role === "vm" || msg.role === "viewer")) {
         if (msg.role === "vm") {
-          // Claim the box synchronously (before the first await): a viewer
-          // hello racing this one waits for the claim to settle instead of
-          // concluding the box never had a shipper.
-          let releaseClaim!: () => void;
-          this.vmClaimPending = new Promise<void>((resolve) => {
-            releaseClaim = resolve;
-          });
+          // A viewer hello racing this claim waits on the waiter list
+          // instead of concluding the box never had a shipper.
           try {
             // A box declared ended never revives: restarts mint fresh box
             // ids. A shipper helloing for an ended box is a zombie — tell it
@@ -445,9 +480,15 @@ export class LiveRelay {
             }
             this.ensureSweepAlarm();
           } finally {
-            this.vmClaimPending = null;
-            releaseClaim();
+            // Wake any waiting viewer hellos: they re-check box state now
+            // that the claim (and its durable vmSeen write) has landed.
+            for (const w of this.shipperHelloWaiters.splice(0)) w();
           }
+          // The claim landed — ack so the shipper knows it may print the
+          // share URL. Viewers can therefore never open the URL before the
+          // relay knows the shipper. (A zombie hello returned early above
+          // and gets no ack; its CLI exits on the session-ended instead.)
+          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok" }));
           return;
         }
         // A viewer joining a dead box learns it immediately instead of
@@ -457,20 +498,12 @@ export class LiveRelay {
           this.closeQuietly(ws, 1000, "session ended");
           return;
         }
-        // A box that never had a shipper can never come back either: the
-        // shipper always hellos before the share URL exists. Fail the
-        // viewer fast instead of burning the whole connect/retry budget on
-        // timeouts. A box whose shipper died keeps the normal path — it
-        // may reconnect inside the end grace, and a DO restart must not
-        // strand its viewers with a false ended page (VM_SEEN_KEY is
-        // durable storage, so it survives restarts).
-        if (!this.vmSocket()) {
-          // A shipper hello may still be in flight — its attachment and
-          // storage writes haven't landed. Wait for it rather than falsely
-          // concluding the box never existed.
-          const claim = this.vmClaimPending;
-          if (claim) await claim;
-        }
+        // A box that never had a shipper can never come back either: fail
+        // the viewer fast instead of burning the whole connect/retry
+        // budget on timeouts. A box whose shipper died keeps the normal
+        // path — it may reconnect inside the end grace, and a DO restart
+        // must not strand its viewers with a false ended page (VM_SEEN_KEY
+        // is durable storage, so it survives restarts).
         if (!this.vmSocket()) {
           // Fail fast only on positive knowledge: storage available and the
           // box never had a shipper. Without storage (some harnesses) we
@@ -487,9 +520,17 @@ export class LiveRelay {
             // storage best-effort
           }
           if (storageOk && !seen) {
-            this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
-            this.closeQuietly(ws, 1000, "box unknown");
-            return;
+            // …but an absent key is not proof the box can never come back:
+            // a shipper hello may be in flight, or moments away (a viewer
+            // racing a re-hello after a deploy evicted the DO). Give it a
+            // bounded moment, then re-check before declaring the box
+            // permanently dead.
+            await this.waitForShipperHello();
+            if (!this.vmSocket() && !(await this.vmSeen())) {
+              this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
+              this.closeQuietly(ws, 1000, "box unknown");
+              return;
+            }
           }
         }
         // Viewers are never displaced: any number of viewers may watch the

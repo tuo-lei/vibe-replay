@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LiveRelay } from "../src/live-relay";
+import { LiveRelay, __setNeverSeenWaitMs } from "../src/live-relay";
 
 /**
  * Unit tests for the LiveRelay Durable Object: multi-viewer coexistence,
@@ -119,11 +119,12 @@ describe("LiveRelay multi-viewer", () => {
     const b = await helloViewer(h, WENDY_CIPHER);
 
     // A viewer frame is tagged with the sender's vid on the way to the VM.
+    // (The vm socket also got its hello-ok ack — filter to routed frames.)
     await h.relay.webSocketMessage(
       a.ws as unknown as WebSocket,
       JSON.stringify({ t: "frame", iv: "i1", data: "d1" }),
     );
-    const toVm = vm.sent.map((s) => JSON.parse(s));
+    const toVm = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "frame");
     expect(toVm).toHaveLength(1);
     expect(toVm[0]).toMatchObject({ t: "frame", iv: "i1", data: "d1", via: a.vid });
 
@@ -535,6 +536,17 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(ws.closed).toEqual([{ code: 1000, reason: "box ended" }]);
     // The box stays ended — the zombie hello must not clear it.
     expect(h.store.get("ended")).toBe(true);
+    // …and a zombie gets no hello-ok: the CLI must not print a URL for it.
+    expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "hello-ok")).toBe(false);
+  });
+
+  it("acks a shipper hello once the claim landed", async () => {
+    const h = makeStorageRelay();
+    const { ws, p } = helloVm(h);
+    await p;
+    // The CLI prints the share URL only after this ack, so no viewer can
+    // open the URL before the relay knows the shipper.
+    expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "hello-ok")).toBe(true);
   });
 
   it("a goodbye from a viewer never ends the box", async () => {
@@ -597,15 +609,17 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.alarmAt()).toBeNull();
   });
 
-  it("serves the box liveness probe: ended / live / unknown / ended", async () => {
+  it("serves the box liveness probe: unknown / live / unknown / ended", async () => {
     const h = makeStorageRelay();
     const probe = () =>
       h.relay
         .fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"))
         .then((r) => r.json() as Promise<{ status: string }>);
 
-    // Box never had a shipper: permanently dead, not "unknown".
-    expect(await probe()).toEqual({ status: "ended" });
+    // Box never had a shipper: "unknown", not "ended" — the probe stays
+    // conservative (a shipper hello may still be on its way); the viewer
+    // websocket gets the fast session-ended instead of hanging.
+    expect(await probe()).toEqual({ status: "unknown" });
 
     // Shipper attached.
     const { ws: vm, p } = helloVm(h);
@@ -628,17 +642,48 @@ describe("LiveRelay box lifecycle (session ended)", () => {
   });
 
   it("a viewer hello for a box that never had a shipper fails fast with session-ended", async () => {
-    const h = makeStorageRelay();
-    const ws = mockSocket();
-    h.sockets.push(ws);
-    await h.relay.webSocketMessage(
-      ws as unknown as WebSocket,
-      JSON.stringify({ t: "hello", role: "viewer", name: LEI_CIPHER }),
-    );
-    // No welcome, no hanging on "Connecting…" through the retry budget.
-    expect(sessionEndedFrames(ws)).toHaveLength(1);
-    expect(ws.closed).toEqual([{ code: 1000, reason: "box unknown" }]);
-    expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "welcome")).toBe(false);
+    __setNeverSeenWaitMs(25);
+    try {
+      const h = makeStorageRelay();
+      const ws = mockSocket();
+      h.sockets.push(ws);
+      await h.relay.webSocketMessage(
+        ws as unknown as WebSocket,
+        JSON.stringify({ t: "hello", role: "viewer", name: LEI_CIPHER }),
+      );
+      // No welcome, no hanging on "Connecting…" through the retry budget.
+      expect(sessionEndedFrames(ws)).toHaveLength(1);
+      expect(ws.closed).toEqual([{ code: 1000, reason: "box unknown" }]);
+      expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "welcome")).toBe(false);
+    } finally {
+      __setNeverSeenWaitMs(5000);
+    }
+  });
+
+  it("a viewer hello waits briefly for a shipper hello that lands just after", async () => {
+    // The race Codex flagged: the viewer must not conclude "box unknown"
+    // while a shipper hello is still on its way (e.g. re-helloing after a
+    // deploy evicted the DO).
+    __setNeverSeenWaitMs(2000);
+    try {
+      const h = makeStorageRelay();
+      const ws = mockSocket();
+      h.sockets.push(ws);
+      const viewerDone = h.relay.webSocketMessage(
+        ws as unknown as WebSocket,
+        JSON.stringify({ t: "hello", role: "viewer", name: LEI_CIPHER }),
+      );
+      // Let the viewer hello reach its wait, then land the shipper hello.
+      await new Promise((r) => setTimeout(r, 100));
+      const { p: vmDone } = helloVm(h);
+      await vmDone;
+      await viewerDone;
+      expect(sessionEndedFrames(ws)).toHaveLength(0);
+      expect(ws.closed).toEqual([]);
+      expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "welcome")).toBe(true);
+    } finally {
+      __setNeverSeenWaitMs(5000);
+    }
   });
 
   it("a viewer joining inside the shipper-loss grace is not fast-ended", async () => {
