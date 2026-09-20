@@ -208,6 +208,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   const tails = new Map<string, TailState>();
   let ws: WebSocket | null = null;
   let stopped = false;
+  /**
+   * Resolves when the relay acks our first hello. The share URL is printed
+   * only after this: the relay's durable "this box had a shipper" write has
+   * landed by then, so no viewer can ever open the URL first and lose a
+   * race against the shipper's hello.
+   */
+  let resolveHelloOk!: () => void;
+  const helloOk = new Promise<void>((resolve) => {
+    resolveHelloOk = resolve;
+  });
   let reconnectDelayMs = 2000;
   /**
    * Whether the shipper ever held a working relay connection. The relay
@@ -499,6 +509,15 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     } catch {
       return;
     }
+    // The relay acks our hello once the box claim (and its durable write)
+    // has landed. The share URL is printed only after this ack, so a
+    // viewer can never open the URL before the relay knows the shipper —
+    // an opener can never race the shipper's first hello into a false
+    // "session ended". (Acks on reconnects are harmless no-ops.)
+    if (outer.t === "hello-ok") {
+      resolveHelloOk();
+      return;
+    }
     // Plaintext relay control: a viewer left. Drop its id from every tail
     // fan-out; tails with no subscribers left stop their poll loop.
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
@@ -627,11 +646,17 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   });
 
   console.log(`\n  ${"vibe-replay relay"} — E2E-encrypted live session sharing\n`);
+  console.log("  Connecting to relay…");
+  connect();
+  // The URL is only real once the relay has acked our hello: until then no
+  // viewer could reach this box anyway, and printing earlier would let a
+  // fast opener race the shipper's first hello. If the relay is down, this
+  // simply waits — connect() keeps retrying in the background.
+  await helloOk;
   console.log("  Share this URL (it contains the encryption key — treat it like a password):");
   console.log(`\n  ${shareUrl}\n`);
   console.log("  The relay only forwards ciphertext; it can never read your sessions.");
   console.log("  Press Ctrl+C to stop — the URL dies immediately.\n");
-  connect();
   // Keep the process alive; the WS + timers hold the event loop.
   await new Promise(() => {});
 }

@@ -444,3 +444,32 @@ describe("shipper dead-box retry exit", () => {
     }
   });
 });
+
+describe("shipper hello gating", () => {
+  it("prints the share URL only after the relay acks the hello", async () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      void startRelay({ relayOrigin: "http://localhost:1" });
+      await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+      const sock = FakeSocket.instances[0]!;
+      sock.onopen!();
+      expect(JSON.parse(sock.sent[0] ?? "{}")).toMatchObject({ t: "hello", role: "vm" });
+      // The relay hasn't acked the hello yet: no share URL may be printed.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(logs.some((l) => l.includes("Share this URL"))).toBe(false);
+      // The relay acks the hello → now the URL is printed.
+      sock.onmessage!({ data: JSON.stringify({ t: "hello-ok" }) });
+      await waitFor(
+        () => logs.some((l) => l.includes("Share this URL")),
+        "URL printed after hello-ok",
+      );
+      expect(logs.join("\n")).toMatch(/live\/[A-Za-z0-9_-]+#/);
+    } finally {
+      console.log = origLog;
+    }
+  });
+});
