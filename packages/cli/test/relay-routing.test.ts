@@ -1,0 +1,214 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * The relay tags each viewer→VM frame with a plaintext `via` (the sender's
+ * viewer id); the shipper must echo it back on its response so the relay can
+ * route the reply to the right viewer. Crypto is mocked as a passthrough so
+ * the test can craft inbound frames directly.
+ */
+vi.mock("../src/relay-crypto.js", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../src/relay-crypto.js")>();
+  return {
+    ...orig,
+    encryptFrame: async (_key: unknown, _box: string, plaintext: string) => ({
+      iv: "mock-iv",
+      data: plaintext,
+    }),
+    decryptFrame: async (_key: unknown, _box: string, frame: { data: string }) => frame.data,
+  };
+});
+
+// Fake provider/transform so tail commands don't touch the real filesystem.
+const providerState = vi.hoisted(() => ({ discoverCalls: 0 }));
+vi.mock("../src/providers/index.js", () => ({
+  getAllProviders: () => [
+    {
+      name: "fake",
+      discover: async () => {
+        providerState.discoverCalls++;
+        return [{ sessionId: "sess-1", provider: "fake", filePaths: [] as string[] }];
+      },
+      parse: async () => ({}),
+    },
+  ],
+  deduplicateSessionsByProvider: (xs: unknown) => xs,
+}));
+vi.mock("../src/transform.js", () => ({
+  transformToReplay: () => ({ scenes: [], meta: { stats: {} } }),
+}));
+
+class FakeSocket {
+  static OPEN = 1;
+  static instances: FakeSocket[] = [];
+  readyState = FakeSocket.OPEN;
+  sent: string[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(_url: string) {
+    FakeSocket.instances.push(this);
+  }
+  send(data: string) {
+    this.sent.push(data);
+  }
+  close() {
+    this.readyState = 3;
+  }
+}
+
+vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
+
+const { startRelay } = await import("../src/relay.js");
+
+afterEach(() => {
+  FakeSocket.instances = [];
+});
+
+function lastOuter(sock: FakeSocket) {
+  return JSON.parse(sock.sent[sock.sent.length - 1] ?? "{}") as Record<string, unknown>;
+}
+
+async function waitFor(fn: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 10));
+  expect(fn(), label).toBe(true);
+}
+
+describe("shipper viewer routing", () => {
+  it("echoes the relay's `via` tag on command responses", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+    expect(JSON.parse(sock.sent[0] ?? "{}")).toMatchObject({ t: "hello", role: "vm" });
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 7, cmd: "ping" }),
+        via: "viewer-abc",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "response sent");
+
+    const outer = lastOuter(sock);
+    expect(outer.via).toBe("viewer-abc");
+    expect(JSON.parse(outer.data as string)).toMatchObject({ seq: 7, ok: true });
+  });
+
+  it("echoes `via` on error responses too", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 3, cmd: "get" }),
+        via: "viewer-xyz",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "error response sent");
+
+    const outer = lastOuter(sock);
+    expect(outer.via).toBe("viewer-xyz");
+    expect(JSON.parse(outer.data as string)).toMatchObject({ seq: 3, ok: false });
+  });
+
+  it("omits `via` when the inbound frame had none (legacy single viewer)", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 1, cmd: "ping" }),
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "response sent");
+
+    const outer = lastOuter(sock);
+    expect("via" in outer).toBe(false);
+    expect(JSON.parse(outer.data as string)).toMatchObject({ seq: 1, ok: true });
+  });
+
+  it("shares one tail poll loop between two viewers, keyed by `via`", async () => {
+    providerState.discoverCalls = 0;
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    const tail = (seq: number, via: string) =>
+      sock.onmessage!({
+        data: JSON.stringify({
+          t: "frame",
+          iv: "mock-iv",
+          data: JSON.stringify({ seq, cmd: "tail", id: "sess-1" }),
+          via,
+        }),
+      });
+
+    tail(1, "viewer-a");
+    await waitFor(() => sock.sent.length > 1, "first tail subscribed");
+    expect(JSON.parse(lastOuter(sock).data as string)).toMatchObject({
+      seq: 1,
+      ok: true,
+      data: { subscribed: true },
+    });
+    const afterFirstTail = providerState.discoverCalls;
+    expect(afterFirstTail).toBeGreaterThan(0);
+
+    // A second viewer tails the same session: no new poll loop, and the
+    // response is routed back to the second viewer only.
+    tail(2, "viewer-b");
+    await waitFor(() => sock.sent.length > 2, "second tail subscribed");
+    const outer = lastOuter(sock);
+    expect(outer.via).toBe("viewer-b");
+    expect(JSON.parse(outer.data as string)).toMatchObject({ seq: 2, ok: true });
+    expect(providerState.discoverCalls).toBe(afterFirstTail);
+  });
+
+  it("drops a departed viewer's tails on `viewer-left`", async () => {
+    providerState.discoverCalls = 0;
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 1, cmd: "tail", id: "sess-1" }),
+        via: "viewer-gone",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "tail subscribed");
+    const afterFirstTail = providerState.discoverCalls;
+    expect(afterFirstTail).toBeGreaterThan(0);
+
+    // The relay tells the shipper the viewer went away.
+    sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "viewer-gone" }) });
+
+    // A later tail for the same session starts a fresh poll loop instead of
+    // rejoining a loop that still fans out to the departed viewer.
+    await new Promise((r) => setTimeout(r, 50));
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 2, cmd: "tail", id: "sess-1" }),
+        via: "viewer-new",
+      }),
+    });
+    await waitFor(() => sock.sent.length > 2, "re-subscribed");
+    expect(providerState.discoverCalls).toBeGreaterThan(afterFirstTail);
+  });
+});

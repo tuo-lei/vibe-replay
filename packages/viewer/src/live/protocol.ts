@@ -37,6 +37,12 @@ export type TailEvent =
   | { event: "tail"; id: string; newScenes: Scene[] }
   | { event: "tail-gap"; id: string; skipped: number };
 
+/** One entry of the relay-broadcast presence roster. */
+export interface ViewerPresence {
+  vid: string;
+  name: string;
+}
+
 export const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
 export const BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -78,11 +84,16 @@ export interface LiveRelay {
   untail(sessionId: string): Promise<void>;
   onTail(handler: (ev: TailEvent) => void): () => void;
   /**
+   * Fired when the relay broadcasts the viewer roster (on join/leave) and
+   * right after connect with our own vid. `selfVid` is null until the
+   * relay's `welcome` arrives.
+   */
+  onPresence(handler: (viewers: ViewerPresence[], selfVid: string | null) => void): () => void;
+  /**
    * Fired when the socket drops unexpectedly (not via close()). The app uses
    * it to re-establish the session automatically instead of stranding the
-   * viewer on a terminal error. The close code/reason are included so the
-   * app can tell a transient outage apart from an intentional displacement
-   * by the relay (1000/"replaced" — another tab opened the same link).
+   * viewer on a terminal error. The close code/reason are included for
+   * diagnostics.
    */
   onDisconnect(handler: (info: DisconnectInfo) => void): () => void;
   close(): void;
@@ -102,6 +113,11 @@ export class LiveClient implements LiveRelay {
   private pending = new Map<number, Pending>();
   private tailHandlers = new Set<(ev: TailEvent) => void>();
   private disconnectHandlers = new Set<(info: DisconnectInfo) => void>();
+  private presenceHandlers = new Set<(viewers: ViewerPresence[], selfVid: string | null) => void>();
+  /** Roster from the last relay `presence` broadcast. */
+  private presence: ViewerPresence[] = [];
+  /** Our own viewer id, from the relay's `welcome`. Null until it arrives. */
+  private selfVid: string | null = null;
   private closed = false;
   /** True once close() was called — suppresses the disconnect handlers. */
   private intentionalClose = false;
@@ -114,10 +130,11 @@ export class LiveClient implements LiveRelay {
 
   /**
    * Connect as a viewer. Reads the content key from `location.hash`, opens
-   * the WebSocket to the same host, and says hello. Throws on a missing or
+   * the WebSocket to the same host, and says hello with the display name
+   * (shown in the presence roster, Excalidraw-style). Throws on a missing or
    * malformed key, or when the socket cannot be established.
    */
-  static async connect(boxId: string): Promise<LiveClient> {
+  static async connect(boxId: string, name: string): Promise<LiveClient> {
     const keyB64 = (location.hash || "").replace(/^#/, "");
     if (!KEY_RE.test(keyB64)) throw new Error("invalid-share-url");
     const raw = b64urlDecode(keyB64);
@@ -148,7 +165,7 @@ export class LiveClient implements LiveRelay {
         clearTimeout(timer);
         ws.onopen = null;
         ws.onerror = null;
-        ws.send(JSON.stringify({ t: "hello", role: "viewer" }));
+        ws.send(JSON.stringify({ t: "hello", role: "viewer", name }));
         resolve();
       };
       ws.onerror = () => fail(new Error("connection-error"));
@@ -185,11 +202,41 @@ export class LiveClient implements LiveRelay {
     return JSON.parse(new TextDecoder().decode(pt)) as Record<string, unknown>;
   }
 
+  private emitPresence(): void {
+    const snapshot = this.presence.map((v) => ({ ...v }));
+    for (const h of this.presenceHandlers) {
+      try {
+        h(snapshot, this.selfVid);
+      } catch {
+        // a failing handler must not break the others
+      }
+    }
+  }
+
   private async handleMessage(e: MessageEvent): Promise<void> {
     let outer: Record<string, unknown>;
     try {
       outer = JSON.parse(String(e.data)) as Record<string, unknown>;
     } catch {
+      return;
+    }
+    // Plaintext relay control frames (routing metadata, like the hello).
+    if (outer.t === "welcome" && typeof outer.vid === "string") {
+      this.selfVid = outer.vid;
+      this.emitPresence();
+      return;
+    }
+    if (outer.t === "presence" && Array.isArray(outer.viewers)) {
+      this.presence = outer.viewers
+        .filter(
+          (v): v is Record<string, unknown> =>
+            typeof v === "object" && v !== null && typeof v.vid === "string",
+        )
+        .map((v) => ({
+          vid: (v.vid as string).slice(0, 64),
+          name: typeof v.name === "string" ? (v.name as string).slice(0, 32) : "Guest",
+        }));
+      this.emitPresence();
       return;
     }
     if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
@@ -215,14 +262,7 @@ export class LiveClient implements LiveRelay {
   private handleClose(info: DisconnectInfo): void {
     if (this.closed) return;
     this.closed = true;
-    // A relay-driven replacement (the same link was opened elsewhere) must
-    // not look like a transient drop: reject pendings with "replaced" so
-    // callers fail fast instead of retrying and evicting the other viewer.
-    const err =
-      info.code === 1000 && info.reason === "replaced"
-        ? new Error("replaced")
-        : new Error("disconnected");
-    for (const [, p] of this.pending) p.reject(err);
+    for (const [, p] of this.pending) p.reject(new Error("disconnected"));
     this.pending.clear();
     if (this.intentionalClose) return;
     for (const h of this.disconnectHandlers) {
@@ -311,6 +351,11 @@ export class LiveClient implements LiveRelay {
   onTail(handler: (ev: TailEvent) => void): () => void {
     this.tailHandlers.add(handler);
     return () => this.tailHandlers.delete(handler);
+  }
+
+  onPresence(handler: (viewers: ViewerPresence[], selfVid: string | null) => void): () => void {
+    this.presenceHandlers.add(handler);
+    return () => this.presenceHandlers.delete(handler);
   }
 
   onDisconnect(handler: (info: DisconnectInfo) => void): () => void {
