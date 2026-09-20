@@ -77,7 +77,21 @@ export interface LiveRelay {
   tail(sessionId: string): Promise<{ totalScenes: number }>;
   untail(sessionId: string): Promise<void>;
   onTail(handler: (ev: TailEvent) => void): () => void;
+  /**
+   * Fired when the socket drops unexpectedly (not via close()). The app uses
+   * it to re-establish the session automatically instead of stranding the
+   * viewer on a terminal error. The close code/reason are included so the
+   * app can tell a transient outage apart from an intentional displacement
+   * by the relay (1000/"replaced" — another tab opened the same link).
+   */
+  onDisconnect(handler: (info: DisconnectInfo) => void): () => void;
   close(): void;
+}
+
+/** What the relay reported when the socket closed. */
+export interface DisconnectInfo {
+  code: number;
+  reason: string;
 }
 
 export class LiveClient implements LiveRelay {
@@ -87,7 +101,10 @@ export class LiveClient implements LiveRelay {
   private seq = 0;
   private pending = new Map<number, Pending>();
   private tailHandlers = new Set<(ev: TailEvent) => void>();
+  private disconnectHandlers = new Set<(info: DisconnectInfo) => void>();
   private closed = false;
+  /** True once close() was called — suppresses the disconnect handlers. */
+  private intentionalClose = false;
 
   private constructor(ws: WebSocket, key: CryptoKey, boxId: string) {
     this.ws = ws;
@@ -137,8 +154,8 @@ export class LiveClient implements LiveRelay {
       ws.onerror = () => fail(new Error("connection-error"));
     });
     ws.onmessage = (e) => void client.handleMessage(e);
-    ws.onclose = () => client.handleClose();
-    ws.onerror = () => client.handleClose();
+    ws.onclose = (ev) => client.handleClose({ code: ev.code, reason: ev.reason });
+    ws.onerror = () => client.handleClose({ code: 0, reason: "" });
     return client;
   }
 
@@ -195,12 +212,26 @@ export class LiveClient implements LiveRelay {
     }
   }
 
-  private handleClose(): void {
+  private handleClose(info: DisconnectInfo): void {
     if (this.closed) return;
     this.closed = true;
-    const err = new Error("disconnected");
+    // A relay-driven replacement (the same link was opened elsewhere) must
+    // not look like a transient drop: reject pendings with "replaced" so
+    // callers fail fast instead of retrying and evicting the other viewer.
+    const err =
+      info.code === 1000 && info.reason === "replaced"
+        ? new Error("replaced")
+        : new Error("disconnected");
     for (const [, p] of this.pending) p.reject(err);
     this.pending.clear();
+    if (this.intentionalClose) return;
+    for (const h of this.disconnectHandlers) {
+      try {
+        h(info);
+      } catch {
+        // a failing handler must not break the others
+      }
+    }
   }
 
   private cmd<T>(obj: Record<string, unknown>): Promise<T> {
@@ -282,8 +313,14 @@ export class LiveClient implements LiveRelay {
     return () => this.tailHandlers.delete(handler);
   }
 
+  onDisconnect(handler: (info: DisconnectInfo) => void): () => void {
+    this.disconnectHandlers.add(handler);
+    return () => this.disconnectHandlers.delete(handler);
+  }
+
   close(): void {
-    this.handleClose();
+    this.intentionalClose = true;
+    this.handleClose({ code: 1000, reason: "closed" });
     try {
       this.ws.close();
     } catch {

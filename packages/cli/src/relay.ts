@@ -218,6 +218,22 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     return true;
   };
 
+  /**
+   * Idle WebSocket connections get reaped by middleboxes (the egress proxy
+   * kills ours after ~5 minutes of silence), which makes every viewer that
+   * loads during the reconnect window hang until its command times out.
+   * Send a tiny encrypted no-op frame on a timer to keep the path alive.
+   * The relay drops it when no viewer is attached; a connected viewer
+   * decrypts it and ignores the unknown payload. Never goes through cmd()
+   * (no seq, no pending entry) — it is one-way traffic, not a request.
+   */
+  const KEEPALIVE_MS = 45_000;
+  const keepaliveTimer = setInterval(() => {
+    void sendFrame({ keepalive: true });
+  }, KEEPALIVE_MS);
+  // Don't hold the process open for the timer alone (Ctrl+C path aside).
+  keepaliveTimer.unref?.();
+
   const stopTail = (sessionId: string): void => {
     const tail = tails.get(sessionId);
     if (tail) {
@@ -428,6 +444,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
 
   const shutdown = (): void => {
     stopped = true;
+    clearInterval(keepaliveTimer);
     for (const id of tails.keys()) stopTail(id);
     try {
       ws?.close(1000, "shutdown");
