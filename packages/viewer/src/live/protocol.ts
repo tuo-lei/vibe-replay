@@ -355,6 +355,17 @@ export class LiveClient implements LiveRelay {
 
   onPresence(handler: (viewers: ViewerPresence[], selfVid: string | null) => void): () => void {
     this.presenceHandlers.add(handler);
+    // Replay the latest roster immediately: it usually arrives during the
+    // initial list() round-trip, before the UI subscribes. Without this the
+    // roster would stay empty until the next join/leave broadcast.
+    try {
+      handler(
+        this.presence.map((v) => ({ ...v })),
+        this.selfVid,
+      );
+    } catch {
+      // a failing handler must not break the subscription
+    }
     return () => this.presenceHandlers.delete(handler);
   }
 

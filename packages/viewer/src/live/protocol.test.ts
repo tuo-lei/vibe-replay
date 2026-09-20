@@ -46,3 +46,62 @@ describe("key/box id shapes", () => {
     expect(BOX_ID_RE.test("x2KJPqQxznNNftBLSHV5j")).toBe(false);
   });
 });
+
+describe("LiveClient presence replay", () => {
+  it("replays the latest roster to a subscriber that arrives after the broadcast", async () => {
+    const { LiveClient } = await import("./protocol");
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const fakeWs = { send: () => {}, close: () => {} };
+    // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+    const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+    // The relay broadcasts welcome + presence while the UI is still awaiting
+    // the initial list(), i.e. before it subscribes to onPresence.
+    await client.handleMessage({
+      data: JSON.stringify({ t: "welcome", vid: "v-self" }),
+    });
+    await client.handleMessage({
+      data: JSON.stringify({
+        t: "presence",
+        viewers: [
+          { vid: "v-self", name: "Lei" },
+          { vid: "v-other", name: "Wendy" },
+        ],
+      }),
+    });
+    const calls: Array<{ viewers: unknown; self: unknown }> = [];
+    client.onPresence((viewers: unknown, self: unknown) => {
+      calls.push({ viewers, self });
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.self).toBe("v-self");
+    expect(calls[0]!.viewers).toEqual([
+      { vid: "v-self", name: "Lei" },
+      { vid: "v-other", name: "Wendy" },
+    ]);
+  });
+
+  it("still emits later broadcasts to existing subscribers", async () => {
+    const { LiveClient } = await import("./protocol");
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const fakeWs = { send: () => {}, close: () => {} };
+    // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+    const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+    const seen: unknown[][] = [];
+    client.onPresence((viewers: unknown) => {
+      seen.push(viewers as unknown[]);
+    });
+    // Immediate replay of the (empty) initial roster.
+    expect(seen).toHaveLength(1);
+    await client.handleMessage({
+      data: JSON.stringify({ t: "presence", viewers: [{ vid: "v1", name: "Lei" }] }),
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toEqual([{ vid: "v1", name: "Lei" }]);
+  });
+});
