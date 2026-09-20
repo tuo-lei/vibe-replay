@@ -2401,8 +2401,10 @@ app.get("/live/:boxId", async (c) => {
     const stub = c.env.LIVE_RELAY.get(id);
     return stub.fetch(c.req.raw);
   }
-  // Plain GET → serve the E2E viewer page (key comes from the URL fragment).
-  return c.html(renderLiveViewerPage(boxId));
+  // Plain GET → serve the E2E viewer shell (key comes from the URL fragment).
+  // Cache-bust the live bundle with the deployment id so browsers never run
+  // a stale viewer against a new relay.
+  return c.html(renderLiveViewerPage(c.env.CF_VERSION_METADATA?.id ?? "dev"));
 });
 
 // ---------------------------------------------------------------------------
