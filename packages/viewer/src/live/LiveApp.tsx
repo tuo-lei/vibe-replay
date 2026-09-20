@@ -29,7 +29,7 @@ const SCENE_PAGE = 5000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 
 /** Failures that will never succeed on retry — surface immediately. */
-const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url"]);
+const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url", "replaced"]);
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -46,6 +46,8 @@ function friendlyError(e: unknown): string {
   switch (m) {
     case "invalid-share-url":
       return "Invalid share URL: missing encryption key in #fragment.";
+    case "replaced":
+      return "This link was opened in another tab or device — this view is now inactive.";
     case "connection-error":
     case "connection-timeout":
       return "Connection error — the shipper may be offline. Reload to retry.";
@@ -90,6 +92,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const reconnectingRef = useRef(false);
   /** Set when the component unmounts; in-flight reconnects must not touch state. */
   const unmountedRef = useRef(false);
+  /**
+   * Set by the disconnect wrapper when a drop lands while a re-establish
+   * pass is running (the guard above discards the nested call). The pass
+   * notices it when its restore throws and runs another pass instead of
+   * going fatal on a transient second interruption.
+   */
+  const interruptedRef = useRef(false);
   /**
    * Remote scene cursor: how many scenes the shipper has for the open
    * session. Stays ahead of `scenes.length` when a tail-gap skips scenes we
@@ -287,7 +296,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
           // The same link was opened in another tab/device and the relay
           // displaced this viewer. Reconnecting would just evict the other
           // side back and forth forever — go terminal instead.
-          setFatal("This link was opened in another tab or device — this view is now inactive.");
+          setFatal(friendlyError(new Error("replaced")));
           return;
         }
         void handleDisconnectRef.current();
@@ -298,55 +307,77 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   attachClientRef.current = attachClient;
 
   /**
-   * The socket dropped mid-session (not via close()). Re-establish with the
-   * same retry loop as the initial connect, then restore whatever the user
-   * was looking at — list, open session, or watch-live. Only surfaces a
-   * fatal error when re-establishing itself is impossible.
+   * One re-establish pass: park user actions, reconnect with the same retry
+   * loop as the initial connect, then restore whatever the user was looking
+   * at — list, open session, or watch-live.
    */
-  const handleDisconnect = useCallback(async () => {
-    if (unmountedRef.current) return;
-    if (reconnectingRef.current) return;
-    reconnectingRef.current = true;
+  const reestablishOnce = useCallback(async () => {
     // Park user actions: the old client is dead, the new one isn't ready.
     clientRef.current = null;
     loadGenRef.current++; // invalidate any in-flight scene load
     const summary = viewRef.current.name === "detail" ? viewRef.current.summary : null;
     const wasWatching = watchingRef.current;
     const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
-    try {
-      setWatching(false);
-      setLoadingScenes(false);
-      if (!boxId) throw new Error("invalid-share-url");
-      const { client, sessions } = await connectAndList(boxId, () => unmountedRef.current);
-      if (unmountedRef.current) {
-        // Unmounted while re-establishing: drop the fresh socket, it has no UI.
-        client.close();
-        return;
-      }
-      attachClientRef.current(client);
-      setSessions(sessions);
-      setHits(null);
-      if (summary) {
-        const v = viewRef.current;
-        if (v.name === "detail" && v.summary.sessionId === summary.sessionId) {
-          await loadScenes(client, summary);
-          if (wasWatching && viewRef.current.name === "detail") {
-            await startWatching(client, summary);
-          }
-        } else {
-          // The user navigated away during the outage (e.g. back to the
-          // list) — don't drag them back into the old session.
-          setStatus(`E2E-encrypted · ${sessions.length} sessions`);
+    setWatching(false);
+    setLoadingScenes(false);
+    if (!boxId) throw new Error("invalid-share-url");
+    const { client, sessions } = await connectAndList(boxId, () => unmountedRef.current);
+    if (unmountedRef.current) {
+      // Unmounted while re-establishing: drop the fresh socket, it has no UI.
+      client.close();
+      return;
+    }
+    attachClientRef.current(client);
+    setSessions(sessions);
+    setHits(null);
+    if (summary) {
+      const v = viewRef.current;
+      if (v.name === "detail" && v.summary.sessionId === summary.sessionId) {
+        await loadScenes(client, summary);
+        if (wasWatching && viewRef.current.name === "detail") {
+          await startWatching(client, summary);
         }
       } else {
+        // The user navigated away during the outage (e.g. back to the
+        // list) — don't drag them back into the old session.
         setStatus(`E2E-encrypted · ${sessions.length} sessions`);
       }
-    } catch (e) {
-      if (!unmountedRef.current) setFatal(friendlyError(e));
+    } else {
+      setStatus(`E2E-encrypted · ${sessions.length} sessions`);
+    }
+  }, [connectAndList, loadScenes, startWatching]);
+
+  /**
+   * The socket dropped mid-session (not via close()). Re-establish, then
+   * restore the view. Only surfaces a fatal error when re-establishing
+   * itself is impossible. A second drop that lands while a pass is restoring
+   * the view is retried with another pass (bounded) instead of stranding
+   * the page on a terminal error.
+   */
+  const handleDisconnect = useCallback(async () => {
+    if (unmountedRef.current) return;
+    if (reconnectingRef.current) {
+      interruptedRef.current = true;
+      return;
+    }
+    reconnectingRef.current = true;
+    try {
+      for (let attempt = 0; ; attempt++) {
+        interruptedRef.current = false;
+        try {
+          await reestablishOnce();
+          return;
+        } catch (e) {
+          const interrupted = interruptedRef.current;
+          if (interrupted && attempt < 2 && !unmountedRef.current) continue;
+          if (!unmountedRef.current) setFatal(friendlyError(e));
+          return;
+        }
+      }
     } finally {
       reconnectingRef.current = false;
     }
-  }, [connectAndList, loadScenes, startWatching]);
+  }, [reestablishOnce]);
   handleDisconnectRef.current = handleDisconnect;
 
   useEffect(() => {

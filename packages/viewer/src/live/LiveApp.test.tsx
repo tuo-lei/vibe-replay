@@ -235,6 +235,59 @@ describe("LiveApp", () => {
     expect(createClient).toHaveBeenCalledTimes(1);
   }, 25000);
 
+  it("fails fast when the relay displaces the viewer during the initial list", async () => {
+    // A second viewer opened the same link while this one was still listing:
+    // the relay closed our socket with 1000/"replaced" and the pending list()
+    // rejects with "replaced" instead of a generic "disconnected".
+    const createClient = vi
+      .fn()
+      .mockResolvedValue(makeFake({ list: () => Promise.reject(new Error("replaced")) }));
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText(/opened in another tab/);
+    // No retry war against the other viewer: exactly one connect attempt.
+    expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs another reconnect pass when a drop interrupts the restore", async () => {
+    let disconnectHandler1: ((info: { code: number; reason: string }) => void) | undefined;
+    const fake1 = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler1 = h;
+        return () => {};
+      },
+    });
+    let disconnectHandler2: ((info: { code: number; reason: string }) => void) | undefined;
+    let getCalls = 0;
+    const fake2 = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler2 = h;
+        return () => {};
+      },
+      get: async () => {
+        getCalls++;
+        if (getCalls === 1) {
+          // A second drop lands while the first pass is restoring scenes.
+          disconnectHandler2?.({ code: 1006, reason: "" });
+          throw new Error("disconnected");
+        }
+        return { scenes, totalScenes: scenes.length, offset: 0 };
+      },
+    });
+    const createClient = vi.fn().mockResolvedValueOnce(fake1).mockResolvedValue(fake2);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("Explain this change");
+
+    disconnectHandler1?.({ code: 1006, reason: "" });
+
+    // Pass 2 runs (a third connect) and completes the restore instead of
+    // stranding the page on a terminal error.
+    await waitFor(() => expect(createClient).toHaveBeenCalledTimes(3));
+    await screen.findByText("Explain this change");
+    expect(screen.queryByText(/opened in another tab/)).toBeNull();
+  }, 25000);
+
   it("resumes watch-live on the replacement client after a mid-session drop", async () => {
     let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
     const fake1 = makeFake({

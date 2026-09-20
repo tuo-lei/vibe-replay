@@ -215,7 +215,13 @@ export class LiveClient implements LiveRelay {
   private handleClose(info: DisconnectInfo): void {
     if (this.closed) return;
     this.closed = true;
-    const err = new Error("disconnected");
+    // A relay-driven replacement (the same link was opened elsewhere) must
+    // not look like a transient drop: reject pendings with "replaced" so
+    // callers fail fast instead of retrying and evicting the other viewer.
+    const err =
+      info.code === 1000 && info.reason === "replaced"
+        ? new Error("replaced")
+        : new Error("disconnected");
     for (const [, p] of this.pending) p.reject(err);
     this.pending.clear();
     if (this.intentionalClose) return;
