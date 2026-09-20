@@ -14,6 +14,12 @@ afterEach(() => {
 
 beforeEach(() => {
   stubBrowserAPIs();
+  // The mount probe hits /live/:boxId/status: default to a live box so tests
+  // exercise the normal flow; individual tests override for the ended path.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: "live" }) }),
+  );
   // Most tests exercise the connected app; the name gate is covered by its
   // own tests, which clear this first.
   window.localStorage.setItem("vibe-replay:viewer-name", "Tester");
@@ -58,6 +64,7 @@ function makeFake(overrides: Partial<LiveRelay> = {}): LiveRelay {
     onTail: () => () => {},
     onDisconnect: () => () => {},
     onPresence: () => () => {},
+    onSessionEnded: () => () => {},
     close: () => {},
     ...overrides,
   };
@@ -377,11 +384,11 @@ describe("LiveApp", () => {
     render(<LiveApp createClient={createClient} pathname={PATH} />);
 
     // No stored name: the gate shows and no connection is attempted.
-    expect(await screen.findByText(/先报个名字/)).toBeTruthy();
+    expect(await screen.findByText("Pick a display name")).toBeTruthy();
     expect(createClient).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByPlaceholderText("比如：Lei"), { target: { value: "  Wendy  " } });
-    fireEvent.click(screen.getByText("进入直播"));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Lei"), { target: { value: "  Wendy  " } });
+    fireEvent.click(screen.getByText("Watch live"));
 
     // The trimmed name is stored and handed to the relay on connect.
     expect(window.localStorage.getItem("vibe-replay:viewer-name")).toBe("Wendy");
@@ -433,16 +440,16 @@ describe("LiveApp", () => {
         "v1",
       );
     });
-    expect(await screen.findByText("2 人在线")).toBeTruthy();
+    expect(await screen.findByText("2 online")).toBeTruthy();
 
     // Drop and reconnect with the same remembered name: the roster refreshes
     // on the new connection instead of showing the stale one.
     disconnectHandler?.({ code: 1006, reason: "" });
-    await waitFor(() => expect(screen.queryByText("2 人在线")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("2 online")).toBeNull());
     act(() => {
       presenceHandler2?.([{ vid: "v3", name: "Tester" }], "v3");
     });
-    expect(await screen.findByText("1 人在线")).toBeTruthy();
+    expect(await screen.findByText("1 online")).toBeTruthy();
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(createClient).toHaveBeenNthCalledWith(2, expect.any(String), "Tester");
   });
@@ -462,10 +469,71 @@ describe("LiveApp", () => {
     act(() => {
       presenceHandler?.([{ vid: "v1", name: "Tester" }], "v1");
     });
-    expect(await screen.findByText("1 人在线")).toBeTruthy();
+    expect(await screen.findByText("1 online")).toBeTruthy();
 
-    fireEvent.click(screen.getByTitle("点击改名"));
+    fireEvent.click(screen.getByTitle("Rename"));
     expect(window.localStorage.getItem("vibe-replay:viewer-name")).toBeNull();
-    expect(await screen.findByText(/先报个名字/)).toBeTruthy();
+    expect(await screen.findByText("Pick a display name")).toBeTruthy();
+  });
+
+  it("shows the ended page (not a retry loop) when the relay kills the box mid-session", async () => {
+    let endedHandler: (() => void) | undefined;
+    const fake = makeFake({
+      onSessionEnded: (h) => {
+        endedHandler = h;
+        return () => {};
+      },
+    });
+    const createClient = vi.fn().mockResolvedValue(fake);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+
+    act(() => {
+      endedHandler?.();
+    });
+    expect(await screen.findByText("This live session has ended")).toBeTruthy();
+    expect(screen.getByText(/this link no longer works and will not come back/i)).toBeTruthy();
+    // No reconnect is attempted: this box id will never come back.
+    expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the ended page without retrying when connect fails with session-ended", async () => {
+    const createClient = vi.fn().mockRejectedValue(new Error("session-ended"));
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    expect(await screen.findByText("This live session has ended")).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the ended page before the name gate when the status probe says ended", async () => {
+    window.localStorage.removeItem("vibe-replay:viewer-name");
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: "ended" }),
+    } as Response);
+    const createClient = vi.fn().mockResolvedValue(makeFake());
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    expect(await screen.findByText("This live session has ended")).toBeTruthy();
+    expect(screen.queryByText("Pick a display name")).toBeNull();
+    expect(createClient).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      expect.stringContaining("/live/x2KJPqQxznNNftBLSHV5jA/status"),
+      expect.anything(),
+    );
+  });
+
+  it("renders the name gate in English and explains encryption without product analogies", async () => {
+    window.localStorage.removeItem("vibe-replay:viewer-name");
+    const { container } = render(
+      <LiveApp createClient={vi.fn().mockResolvedValue(makeFake())} pathname={PATH} />,
+    );
+    await screen.findByText("Pick a display name");
+    const gateText = container.textContent ?? "";
+    // No Chinese characters anywhere in the gate.
+    expect(gateText).not.toMatch(/[\u4e00-\u9fff]/);
+    // Direct explanation of the security property, not "like <product>".
+    expect(gateText).toMatch(/end-to-end encrypted/i);
+    expect(gateText).not.toMatch(/Excalidraw/i);
+    expect(screen.getByPlaceholderText("e.g. Lei")).toBeTruthy();
+    expect(screen.getByText("Watch live")).toBeTruthy();
   });
 });

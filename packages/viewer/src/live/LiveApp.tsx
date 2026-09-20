@@ -31,7 +31,7 @@ const SCENE_PAGE = 5000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 
 /** Failures that will never succeed on retry — surface immediately. */
-const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url"]);
+const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url", "session-ended"]);
 
 /** localStorage key for the remembered display name. */
 const NAME_STORAGE_KEY = "vibe-replay:viewer-name";
@@ -60,6 +60,8 @@ function friendlyError(e: unknown): string {
   switch (m) {
     case "invalid-share-url":
       return "Invalid share URL: missing encryption key in #fragment.";
+    case "session-ended":
+      return "This live session has ended. Ask the host for a new link.";
     case "connection-error":
     case "connection-timeout":
       return "Connection error — the shipper may be offline. Reload to retry.";
@@ -70,6 +72,11 @@ function friendlyError(e: unknown): string {
     default:
       return `Error: ${m}`;
   }
+}
+
+/** The relay answered hello with session-ended (the box is dead). */
+function isSessionEnded(e: unknown): boolean {
+  return e instanceof Error && e.message === "session-ended";
 }
 
 type View = { name: "list" } | { name: "detail"; summary: RelaySessionSummary };
@@ -84,6 +91,9 @@ interface Props {
 export default function LiveApp({ createClient = LiveClient.connect, pathname }: Props) {
   const [status, setStatus] = useState("Starting…");
   const [fatal, setFatal] = useState<string | null>(null);
+  /** The relay declared this box permanently dead — render the ended page. */
+  const [ended, setEnded] = useState(false);
+  const endedRef = useRef(false);
   /** Display name for the presence roster; null until the user picks one. */
   const [myName, setMyName] = useState<string | null>(readStoredName);
   /** Relay-broadcast viewer roster (Excalidraw-style presence). */
@@ -298,6 +308,18 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const handleDisconnectRef = useRef<() => Promise<void>>(async () => {});
   const attachClientRef = useRef<(client: LiveRelay) => void>(() => {});
 
+  /**
+   * Switch to the "session ended" page. The box is permanently dead — never
+   * revive it, and never leave the user on "Connecting…" again. Idempotent:
+   * both the pre-connect probe and the relay's session-ended frame call it.
+   */
+  const markEnded = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    setEnded(true);
+    setFatal(null);
+  }, []);
+
   const attachClient = useCallback(
     (client: LiveRelay) => {
       clientRef.current = client;
@@ -315,13 +337,18 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       client.onDisconnect((_info) => {
         void handleDisconnectRef.current();
       });
+      // The relay declared this box permanently dead — show the ended page
+      // and stop: reconnecting to this box can never succeed.
+      client.onSessionEnded(() => {
+        markEnded();
+      });
       client.onPresence((viewers, self) => {
         if (unmountedRef.current) return;
         setPresence(viewers);
         setSelfVid(self);
       });
     },
-    [applyTailEvent],
+    [applyTailEvent, markEnded],
   );
   attachClientRef.current = attachClient;
 
@@ -392,15 +419,42 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         } catch (e) {
           const interrupted = interruptedRef.current;
           if (interrupted && attempt < 2 && !unmountedRef.current) continue;
-          if (!unmountedRef.current) setFatal(friendlyError(e));
+          // The box died while we were disconnected: the unmistakable ended
+          // page, not the generic fatal box — and no more retries.
+          if (!unmountedRef.current) {
+            if (isSessionEnded(e)) markEnded();
+            else setFatal(friendlyError(e));
+          }
           return;
         }
       }
     } finally {
       reconnectingRef.current = false;
     }
-  }, [reestablishOnce]);
+  }, [reestablishOnce, markEnded]);
   handleDisconnectRef.current = handleDisconnect;
+
+  // Probe box liveness before the name gate: a dead box shows the ended page
+  // immediately instead of stranding the user on "Connecting…". The probe
+  // is best-effort — if it fails, the normal connect flow surfaces errors.
+  useEffect(() => {
+    const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
+    if (!boxId) return; // the connect effect surfaces the bad path as fatal
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/live/${boxId}/status`, { cache: "no-store" });
+        if (cancelled || !res.ok) return;
+        const data = (await res.json()) as { status?: string };
+        if (data.status === "ended") markEnded();
+      } catch {
+        // probe failed — the normal connect flow surfaces real errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [markEnded]);
 
   useEffect(() => {
     unmountedRef.current = false;
@@ -426,7 +480,12 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         setHits(null);
         setStatus(`E2E-encrypted · ${established.sessions.length} sessions`);
       } catch (e) {
-        if (!cancelled) setFatal(friendlyError(e));
+        // The relay answered hello with session-ended: same unmistakable
+        // ended page as the probe path, not the generic fatal box.
+        if (!cancelled) {
+          if (isSessionEnded(e)) markEnded();
+          else setFatal(friendlyError(e));
+        }
       }
     })();
     return () => {
@@ -437,7 +496,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       (clientRef.current ?? client)?.close();
       clientRef.current = null;
     };
-  }, [connectAndList, myName]);
+  }, [connectAndList, myName, markEnded]);
 
   // Best-effort prompt leave: tell the relay the viewer is going away when
   // the page hides (tab close, navigation). Close frames don't reliably
@@ -554,6 +613,23 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     setMyName(name);
   }, []);
 
+  // A dead box gets the unmistakable ended page — even before the name gate.
+  // No retry: this box id will never come back.
+  if (ended) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-terminal-bg px-4 font-sans text-terminal-text">
+        <div className="w-full max-w-sm rounded-2xl border border-terminal-red/50 bg-terminal-surface px-6 py-8 text-center">
+          <div className="text-4xl">📡</div>
+          <div className="mt-3 text-xl font-bold">This live session has ended</div>
+          <p className="mt-2 text-sm text-terminal-dim">
+            The host stopped the live share, so this link no longer works and will not come back.
+            Ask the host for a new link.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!myName) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-terminal-bg px-4 font-sans text-terminal-text">
@@ -565,12 +641,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
             submitName(input?.value ?? "");
           }}
         >
-          <div className="text-lg font-semibold">👋 先报个名字</div>
+          <div className="text-lg font-semibold">Pick a display name</div>
           <p className="mt-2 text-sm text-terminal-dim">
-            和 Excalidraw 一样，其他正在看的人会看到你在线。
+            This page is end-to-end encrypted — the relay can't read anything here. Other people
+            watching will see your display name.
           </p>
           <input
-            placeholder="比如：Lei"
+            placeholder="e.g. Lei"
             maxLength={32}
             className="mt-4 w-full rounded-lg bg-terminal-bg px-3 py-2 text-sm text-terminal-text ring-1 ring-terminal-border-subtle placeholder:text-terminal-dimmer focus:outline-none focus:ring-terminal-green/40"
           />
@@ -578,7 +655,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
             type="submit"
             className="mt-4 w-full rounded-lg bg-terminal-green px-3 py-2 text-sm font-medium text-terminal-bg transition-opacity hover:opacity-90"
           >
-            进入直播
+            Watch live
           </button>
         </form>
       </div>
@@ -712,14 +789,14 @@ function PresenceRoster({
     <button
       type="button"
       onClick={onRename}
-      title="点击改名"
+      title="Rename"
       className="flex items-center rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-terminal-surface"
     >
       <span className="flex -space-x-1.5">
         {shown.map((v) => (
           <span
             key={v.vid}
-            title={v.name + (v.vid === selfVid ? "（我）" : "")}
+            title={v.name + (v.vid === selfVid ? " (you)" : "")}
             className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-terminal-bg"
             style={{ backgroundColor: avatarColor(v.vid) }}
           >
@@ -732,14 +809,14 @@ function PresenceRoster({
             title={ordered
               .slice(5)
               .map((v) => v.name)
-              .join("、")}
+              .join(", ")}
           >
             +{extra}
           </span>
         )}
       </span>
       <span className="ml-1.5 max-w-24 truncate text-xs text-terminal-dim">
-        {ordered.length} 人在线
+        {ordered.length} online
       </span>
     </button>
   );

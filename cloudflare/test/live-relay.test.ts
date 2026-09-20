@@ -419,3 +419,189 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(vm.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
   });
 });
+
+/**
+ * Box lifecycle: a clean shipper goodbye — or a shipper gone past the end
+ * grace — declares the box permanently dead. Late joiners and the /status
+ * probe learn it instantly instead of hanging on "Connecting…". The relay
+ * still only persists the lifecycle flag; session content stays opaque.
+ */
+describe("LiveRelay box lifecycle (session ended)", () => {
+  interface StorageHarness extends Harness {
+    alarmAt: () => number | null;
+    store: Map<string, unknown>;
+  }
+
+  function makeStorageRelay(): StorageHarness {
+    const sockets: MockSocket[] = [];
+    const store = new Map<string, unknown>();
+    let alarmAt: number | null = null;
+    const ctx = {
+      getWebSockets: () => [...sockets],
+      acceptWebSocket: (ws: MockSocket) => {
+        sockets.push(ws);
+      },
+      storage: {
+        get: (k: string) => Promise.resolve(store.get(k)),
+        put: (k: string, v: unknown) => {
+          store.set(k, v);
+          return Promise.resolve();
+        },
+        delete: (k: string) => {
+          store.delete(k);
+          return Promise.resolve();
+        },
+        setAlarm: (at: number) => {
+          alarmAt = at;
+          return Promise.resolve();
+        },
+        getAlarm: () => Promise.resolve(alarmAt),
+        deleteAlarm: () => {
+          alarmAt = null;
+          return Promise.resolve();
+        },
+      },
+    } as unknown as DurableObjectState;
+    return { relay: new LiveRelay(ctx), sockets, alarmAt: () => alarmAt, store };
+  }
+
+  const sessionEndedFrames = (ws: MockSocket) =>
+    ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "session-ended");
+
+  it("a clean shipper goodbye ends the box immediately for attached viewers", async () => {
+    const h = makeStorageRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm" }),
+    );
+
+    expect(h.store.get("ended")).toBe(true);
+    for (const v of [a, b]) {
+      expect(sessionEndedFrames(v.ws)).toHaveLength(1);
+      expect(v.ws.closed).toEqual([{ code: 1000, reason: "session ended" }]);
+    }
+    // No plaintext leaked into anything the relay sent or stored.
+    const allSent = [...a.ws.sent, ...b.ws.sent].join("\n");
+    expect(allSent).not.toContain("Lei");
+    expect(allSent).not.toContain("Wendy");
+  });
+
+  it("a viewer joining a dead box learns it immediately, with no welcome", async () => {
+    const h = makeStorageRelay();
+    h.store.set("ended", true);
+    const ws = mockSocket();
+    h.sockets.push(ws);
+    await h.relay.webSocketMessage(
+      ws as unknown as WebSocket,
+      JSON.stringify({ t: "hello", role: "viewer", name: LEI_CIPHER }),
+    );
+    expect(sessionEndedFrames(ws)).toHaveLength(1);
+    expect(ws.closed).toEqual([{ code: 1000, reason: "session ended" }]);
+    expect(ws.sent.map((s) => JSON.parse(s)).some((m) => m.t === "welcome")).toBe(false);
+  });
+
+  it("a shipper helloing for an ended box is told to exit, not revived", async () => {
+    const h = makeStorageRelay();
+    h.store.set("ended", true);
+    const { ws, p } = helloVm(h);
+    await p;
+    expect(sessionEndedFrames(ws)).toHaveLength(1);
+    expect(ws.closed).toEqual([{ code: 1000, reason: "box ended" }]);
+    // The box stays ended — the zombie hello must not clear it.
+    expect(h.store.get("ended")).toBe(true);
+  });
+
+  it("a goodbye from a viewer never ends the box", async () => {
+    const h = makeStorageRelay();
+    const { p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "viewer" }),
+    );
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {
+    const h = makeStorageRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    // Shipper socket dies without goodbye: grace starts, box not ended.
+    h.sockets.splice(h.sockets.indexOf(vm), 1);
+    await h.relay.webSocketClose(vm as unknown as WebSocket);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+    expect(h.store.get("ended")).toBeUndefined();
+
+    // Sweep inside the grace: nobody is told the session ended.
+    await h.relay.alarm();
+    expect(h.store.get("ended")).toBeUndefined();
+    expect(sessionEndedFrames(a.ws)).toHaveLength(0);
+    expect(a.ws.closed).toEqual([]);
+
+    // Shipper reconnects inside the grace (same box id): grace cancelled.
+    const { p: p2 } = helloVm(h);
+    await p2;
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    await h.relay.alarm();
+    expect(h.store.get("ended")).toBeUndefined();
+    expect(a.ws.closed).toEqual([]);
+  });
+
+  it("the box ends when the grace expires with no reconnect", async () => {
+    const h = makeStorageRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    h.sockets.splice(h.sockets.indexOf(vm), 1);
+    await h.relay.webSocketClose(vm as unknown as WebSocket);
+    // Fast-forward past the grace (90 s).
+    h.store.set("vmGoneAt", Date.now() - 120_000);
+
+    await h.relay.alarm();
+    expect(h.store.get("ended")).toBe(true);
+    expect(sessionEndedFrames(a.ws)).toHaveLength(1);
+    expect(a.ws.closed).toEqual([{ code: 1000, reason: "session ended" }]);
+    // The sweep disarms once the box is dead and nobody is attached.
+    h.sockets.splice(h.sockets.indexOf(a.ws), 1);
+    await h.relay.webSocketClose(a.ws as unknown as WebSocket);
+    expect(h.alarmAt()).toBeNull();
+  });
+
+  it("serves the box liveness probe: unknown / live / ended", async () => {
+    const h = makeStorageRelay();
+    const probe = () =>
+      h.relay
+        .fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"))
+        .then((r) => r.json() as Promise<{ status: string }>);
+
+    // Box never existed.
+    expect(await probe()).toEqual({ status: "unknown" });
+
+    // Shipper attached.
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    expect(await probe()).toEqual({ status: "live" });
+
+    // Shipper said goodbye.
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm" }),
+    );
+    expect(await probe()).toEqual({ status: "ended" });
+  });
+
+  it("non-status non-websocket fetches still get 426", async () => {
+    const h = makeStorageRelay();
+    const res = await h.relay.fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA"));
+    expect(res.status).toBe(426);
+  });
+});
