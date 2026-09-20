@@ -33,12 +33,24 @@ const sessions: RelaySessionSummary[] = [
     project: "/tmp/proj",
     timestamp: "2026-09-19T19:00:00.000Z",
     promptCount: 3,
+    toolCallCount: 12,
+    editCountEst: 4,
+    durationMsEst: 2700000,
+    compactionCount: 2,
+    gitBranch: "feat/live-filters",
+    gitRepo: "tuo-lei/vibe-replay",
+    model: "claude-sonnet-4-20250514",
+    lineCount: 100,
+    fileSize: 4096,
   },
   {
     provider: "codex",
     sessionId: "sess-2",
+    title: "Second session",
     project: "/tmp/other",
     timestamp: "2026-09-19T18:00:00.000Z",
+    lineCount: 50,
+    fileSize: 2048,
   },
 ];
 
@@ -81,8 +93,77 @@ describe("LiveApp", () => {
     renderApp(makeFake());
     expect(await screen.findByText("E2E-encrypted · 2 sessions")).toBeTruthy();
     expect(screen.getByText("First session")).toBeTruthy();
-    expect(screen.getByText("muse")).toBeTruthy();
-    expect(screen.getByText("3 prompts")).toBeTruthy();
+    // Provider facet chip (shared filter UI with the dashboard).
+    expect(screen.getByRole("button", { name: "muse1" })).toBeTruthy();
+    // The card's shared activity status row renders exact values.
+    const statusRow = screen.getByText("First session").closest("button")!;
+    expect(statusRow.textContent).toContain("3 prompts");
+    expect(statusRow.textContent).toContain("12 tools");
+  });
+
+  it("filters the list by provider facet", async () => {
+    renderApp(makeFake());
+    await screen.findByText("E2E-encrypted · 2 sessions");
+    fireEvent.click(screen.getByRole("button", { name: "muse1" }));
+    expect(await screen.findByText("E2E-encrypted · 1 of 2 sessions")).toBeTruthy();
+    expect(screen.getByText("First session")).toBeTruthy();
+    expect(screen.queryByText("Second session")).toBeNull();
+    // Toggling the chip off restores the full list.
+    fireEvent.click(screen.getByRole("button", { name: "muse1" }));
+    expect(await screen.findByText("E2E-encrypted · 2 sessions")).toBeTruthy();
+    expect(screen.getByText("Second session")).toBeTruthy();
+  });
+
+  it("filters the list by project and by text", async () => {
+    renderApp(makeFake());
+    await screen.findByText("E2E-encrypted · 2 sessions");
+    fireEvent.change(screen.getByLabelText("Filter by project"), {
+      target: { value: "/tmp/other" },
+    });
+    expect(await screen.findByText("E2E-encrypted · 1 of 2 sessions")).toBeTruthy();
+    expect(screen.queryByText("First session")).toBeNull();
+    expect(screen.getByText("Second session")).toBeTruthy();
+    // Clearing the project select, then filtering by text instead.
+    fireEvent.change(screen.getByLabelText("Filter by project"), {
+      target: { value: "__all__" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Filter list…"), {
+      target: { value: "first" },
+    });
+    expect(await screen.findByText("E2E-encrypted · 1 of 2 sessions")).toBeTruthy();
+    expect(screen.getByText("First session")).toBeTruthy();
+    expect(screen.queryByText("Second session")).toBeNull();
+    // "No sessions match" empty state when nothing matches.
+    fireEvent.change(screen.getByPlaceholderText("Filter list…"), {
+      target: { value: "zzz-no-match" },
+    });
+    expect(await screen.findByText("No sessions match the current filters.")).toBeTruthy();
+    // Clear all restores everything.
+    fireEvent.click(screen.getByText("Clear all"));
+    expect(await screen.findByText("E2E-encrypted · 2 sessions")).toBeTruthy();
+  });
+
+  it("toggles the list sort order between newest and oldest", async () => {
+    renderApp(makeFake());
+    await screen.findByText("E2E-encrypted · 2 sessions");
+    const order = () => document.body.innerHTML;
+    // Shipper sends newest first: sess-1 (19:00) before sess-2 (18:00).
+    expect(order().indexOf("First session")).toBeLessThan(order().indexOf("Second session"));
+    fireEvent.click(screen.getByTitle("Newest first"));
+    expect(await screen.findByTitle("Oldest first")).toBeTruthy();
+    expect(order().indexOf("First session")).toBeGreaterThan(order().indexOf("Second session"));
+  });
+
+  it("shows discovery estimates with a tilde on the shared status row", async () => {
+    renderApp(makeFake());
+    await screen.findByText("First session");
+    const statusRow = screen.getByText("First session").closest("button")!;
+    // durationMsEst / editCountEst are estimates → "~" prefix, like the dashboard.
+    expect(statusRow.textContent).toContain("~45m");
+    expect(statusRow.textContent).toContain("~4 edits");
+    expect(statusRow.textContent).toContain("2 compacts");
+    expect(statusRow.textContent).toContain("feat/live-filters");
+    expect(statusRow.textContent).toContain("tuo-lei/vibe-replay");
   });
 
   it("opens a session and renders the transcript via ConversationView", async () => {

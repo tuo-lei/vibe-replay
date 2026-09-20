@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { deriveTokenUsageMetrics } from "@vibe-replay/types";
 import type { ReplaySession } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
-import { formatReplaySourceLabel } from "../utils/format";
+import { formatReplaySourceLabel, formatDuration as formatDurationUtil } from "../utils/format";
 import {
   DataQualityIndicator,
   getSessionDataQualityNotes,
@@ -602,13 +602,7 @@ export function fmtNum(n: number): string {
 }
 
 export function formatDuration(ms?: number): string {
-  if (!ms) return "";
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
+  return formatDurationUtil(ms);
 }
 
 /**

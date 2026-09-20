@@ -10,7 +10,7 @@ import {
 import type { ProjectIdentity, SessionLocation, SessionTranscriptStatus } from "@vibe-replay/types";
 import type { SessionSummary, SourceSession } from "../types";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe-storage";
-import { normalizePathForDisplay, shortName } from "../utils/format";
+import { formatCost as formatCostUtil, normalizePathForDisplay, shortName } from "../utils/format";
 
 // ─── Shared types ────────────────────────────────────────────────────
 
@@ -174,8 +174,7 @@ export function formatDate(iso: string): string {
 }
 
 export function formatCost(cost?: number): string {
-  if (!cost) return "";
-  return `$${cost.toFixed(2)}`;
+  return formatCostUtil(cost);
 }
 
 /** Shorten a full model ID to a human-friendly label, e.g. "claude-sonnet-4-20250514" → "Sonnet 4" */

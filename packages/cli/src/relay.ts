@@ -11,8 +11,9 @@
  * (`list`, `get`, `search`, `tail`, `ping`). Every payload is AES-256-GCM
  * encrypted with the content key from the URL fragment — the relay only ever
  * sees opaque `{t:"frame", iv, data}` envelopes and forwards them verbatim.
- * Killing this process invalidates the URL immediately (ephemeral, like
- * termpair sessions and Excalidraw live rooms).
+ * Killing this process invalidates the URL immediately (ephemeral by design:
+ * a new share always mints a fresh box id and key, and old URLs never come
+ * back).
  */
 
 import { statSync } from "node:fs";
@@ -28,6 +29,7 @@ import { getAllProviders, deduplicateSessionsByProvider } from "./providers/inde
 import { transformToReplay } from "./transform.js";
 import { CLI_VERSION } from "./version.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
+import type { RelaySessionSummary } from "@vibe-replay/types";
 
 export const DEFAULT_RELAY_ORIGIN = "https://vibe-replay.com";
 
@@ -48,19 +50,6 @@ const MAX_TAILS = 8;
  *  land in a new file, and discovery is the only way to learn about it. */
 const TAIL_REDISCOVER_EVERY = 15;
 
-interface RelaySessionSummary {
-  provider: string;
-  sessionId: string;
-  title?: string;
-  project: string;
-  timestamp: string;
-  lineCount: number;
-  fileSize: number;
-  promptCount?: number;
-  toolCallCount?: number;
-  model?: string;
-}
-
 function summarize(info: SessionInfo): RelaySessionSummary {
   return {
     provider: info.provider,
@@ -73,6 +62,11 @@ function summarize(info: SessionInfo): RelaySessionSummary {
     promptCount: info.promptCount,
     toolCallCount: info.toolCallCount,
     model: info.model,
+    gitRepo: info.gitRepo,
+    gitBranch: info.gitBranch,
+    compactionCount: info.compactionCount,
+    durationMsEst: info.durationMsEst,
+    editCountEst: info.editCountEst,
   };
 }
 
