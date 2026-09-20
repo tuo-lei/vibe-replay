@@ -328,3 +328,84 @@ describe("shipper chunked responses (UTF-8 bytes)", () => {
     expect(data.scenes[0]!.pad).toBe("中".repeat(300));
   });
 });
+
+describe("shipper dead-box retry exit", () => {
+  function mockExits() {
+    const exits: unknown[] = [];
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      exits.push(code);
+      throw new Error(`process.exit(${code})`);
+    }) as never);
+    return exits;
+  }
+
+  it("exits instead of retrying forever once a once-live box is certainly dead", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!(); // the box was live once
+
+    const exits = mockExits();
+    try {
+      vi.useFakeTimers();
+      const t0 = Date.now();
+      vi.setSystemTime(t0);
+      // The relay connection drops and never recovers.
+      sock.onclose!();
+      // Jump past the 150 s dead-box exit (the relay's end grace is 90 s).
+      vi.setSystemTime(t0 + 160_000);
+      await vi.advanceTimersByTimeAsync(60_000); // let pending retries fire
+      const retrySock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+      expect(retrySock).not.toBe(sock);
+      expect(() => retrySock.onclose!()).toThrow("process.exit(0)");
+      expect(exits).toEqual([0]);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("keeps retrying when it never connected (the relay may not be up yet)", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    // Never opens: no box existed yet, so there is nothing to declare dead.
+
+    const exits = mockExits();
+    try {
+      vi.useFakeTimers();
+      const t0 = Date.now();
+      vi.setSystemTime(t0);
+      sock.onclose!();
+      vi.setSystemTime(t0 + 600_000);
+      await vi.advanceTimersByTimeAsync(120_000);
+      const retrySock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+      expect(() => retrySock.onclose!()).not.toThrow();
+      expect(exits).toEqual([]);
+      // A retry was still attempted: the shipper keeps dialing.
+      expect(FakeSocket.instances.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a short outage keeps retrying with the same box id", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+
+    const exits = mockExits();
+    try {
+      vi.useFakeTimers();
+      const t0 = Date.now();
+      vi.setSystemTime(t0 + 10_000);
+      expect(() => sock.onclose!()).not.toThrow();
+      expect(exits).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+});

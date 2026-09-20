@@ -209,6 +209,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   let ws: WebSocket | null = null;
   let stopped = false;
   let reconnectDelayMs = 2000;
+  /**
+   * When the shipper last had a working relay connection (0 = never).
+   * The relay declares a shipperless box dead after 90 s, so a box id
+   * that stays unreachable far past that can never come back: retrying
+   * it forever is pointless. Past this threshold the shipper exits so
+   * the supervisor/watchdog mints a fresh URL. A shipper that never
+   * connected keeps retrying — the relay may simply not be up yet.
+   */
+  let lastConnectedAt = 0;
+  const DEAD_BOX_RETRY_EXIT_MS = 150_000;
 
   /** Returns false when the socket is down or the frame is oversized — the
    *  caller decides whether to retry or send a smaller correlated error.
@@ -488,6 +498,21 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       for (const id of tails.keys()) stopTail(id, outer.via);
       return;
     }
+    // The relay declared this box dead (we were swept as a ghost, or a
+    // duplicate shipper took over). This URL will never work again —
+    // exit so the supervisor/watchdog restarts with a fresh URL instead
+    // of sitting on a dead box id.
+    if (outer.t === "session-ended") {
+      console.log("\n  ✕ The relay ended this session (box expired). This URL is dead.");
+      console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+      stopped = true;
+      try {
+        ws?.close(1000, "box ended");
+      } catch {
+        // ignore
+      }
+      process.exit(0);
+    }
     if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
       return; // Relay-visible routing tag: which viewer sent this frame. Echoed back on
     // the response so the relay can route it to the right viewer.
@@ -512,12 +537,34 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     ws = socket;
     socket.onopen = () => {
       reconnectDelayMs = 2000;
+      lastConnectedAt = Date.now();
       socket.send(JSON.stringify({ t: "hello", role: "vm" }));
       console.log("  ✓ Connected to relay. Waiting for viewer…\n");
     };
     socket.onmessage = (event) => void onMessage(event);
-    socket.onclose = () => {
+    socket.onclose = (ev) => {
       if (stopped) return;
+      // The relay ended the box (goodbye raced a zombie, or the sweep
+      // declared us a ghost): reconnecting with this box id can never work.
+      // Exit instead of retrying so the supervisor restarts with a new URL.
+      const reason = typeof ev?.reason === "string" ? ev.reason : "";
+      if (reason === "session ended" || reason === "box ended") {
+        console.log("\n  ✕ The relay ended this session. This URL is dead.");
+        console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+        stopped = true;
+        process.exit(0);
+      }
+      // We once had this box, but the relay has been unreachable far past
+      // its 90 s end grace: this box id is dead for good. Exit so the
+      // supervisor restarts with a fresh URL instead of pointlessly
+      // retrying a box id the relay will only ever reject as a zombie.
+      if (lastConnectedAt > 0 && Date.now() - lastConnectedAt > DEAD_BOX_RETRY_EXIT_MS) {
+        const goneSec = Math.round((Date.now() - lastConnectedAt) / 1000);
+        console.log(`\n  ✕ Relay unreachable for ${goneSec}s — this box id is dead.`);
+        console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+        stopped = true;
+        process.exit(0);
+      }
       console.log(`  ↻ Relay connection lost — retrying in ${reconnectDelayMs / 1000}s…`);
       setTimeout(connect, reconnectDelayMs);
       reconnectDelayMs = Math.min(30000, reconnectDelayMs * 2);
@@ -535,16 +582,35 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     stopped = true;
     clearInterval(keepaliveTimer);
     for (const id of tails.keys()) stopTail(id);
+    // Tell the relay the box is dead so viewers see "session ended"
+    // immediately instead of waiting for the end grace. Best-effort: the
+    // grace path covers a lost goodbye.
     try {
-      ws?.close(1000, "shutdown");
+      ws?.send(JSON.stringify({ t: "goodbye", role: "vm" }));
     } catch {
-      // ignore
+      // socket not open — the grace path covers this
     }
+  };
+  const exitAfterFlush = (): void => {
+    // Give the goodbye a beat to flush before the socket closes.
+    setTimeout(() => {
+      try {
+        ws?.close(1000, "shutdown");
+      } catch {
+        // ignore
+      }
+      process.exit(0);
+    }, 300);
   };
   process.on("SIGINT", () => {
     console.log("\n  Relay stopped. The share URL is now dead.\n");
     shutdown();
-    process.exit(0);
+    exitAfterFlush();
+  });
+  process.on("SIGTERM", () => {
+    console.log("\n  Relay stopping (SIGTERM). The share URL is now dead.\n");
+    shutdown();
+    exitAfterFlush();
   });
 
   console.log(`\n  ${"vibe-replay relay"} — E2E-encrypted live session sharing\n`);

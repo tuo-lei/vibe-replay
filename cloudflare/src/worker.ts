@@ -2407,6 +2407,20 @@ app.get("/live/:boxId", async (c) => {
   return c.html(renderLiveViewerPage(c.env.CF_VERSION_METADATA?.id ?? "dev"));
 });
 
+// Box liveness probe for the viewer shell: "ended" (shipper gone for good),
+// "live" (shipper connected), or "unknown" (anything else). The viewer uses
+// it to show the ended page before the name gate; the relay only ever
+// exposes the lifecycle flag, never session content.
+app.get("/live/:boxId/status", async (c) => {
+  const boxId = c.req.param("boxId");
+  if (!LIVE_BOX_ID_RE.test(boxId)) {
+    return c.json({ status: "unknown" }, 404);
+  }
+  const id = c.env.LIVE_RELAY.idFromName(`live:${boxId}`);
+  const stub = c.env.LIVE_RELAY.get(id);
+  return stub.fetch(c.req.raw);
+});
+
 // ---------------------------------------------------------------------------
 // Fallback — serve static assets (Astro website)
 // ---------------------------------------------------------------------------

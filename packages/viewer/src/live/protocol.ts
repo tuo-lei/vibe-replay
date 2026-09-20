@@ -133,6 +133,13 @@ export interface LiveRelay {
    * diagnostics.
    */
   onDisconnect(handler: (info: DisconnectInfo) => void): () => void;
+  /**
+   * Fired when the relay declares the box permanently dead: the shipper is
+   * gone and won't come back (a restart mints a new box id, so the old URL
+   * never revives). The UI must show the "session ended" page and must NOT
+   * retry — reconnecting to this box can never succeed.
+   */
+  onSessionEnded(handler: () => void): () => void;
   close(): void;
 }
 
@@ -150,6 +157,7 @@ export class LiveClient implements LiveRelay {
   private pending = new Map<number, Pending>();
   private tailHandlers = new Set<(ev: TailEvent) => void>();
   private disconnectHandlers = new Set<(info: DisconnectInfo) => void>();
+  private sessionEndedHandlers = new Set<() => void>();
   private presenceHandlers = new Set<(viewers: ViewerPresence[], selfVid: string | null) => void>();
   /** Roster from the last relay `presence` broadcast. */
   private presence: ViewerPresence[] = [];
@@ -374,6 +382,12 @@ export class LiveClient implements LiveRelay {
       this.emitPresence();
       return;
     }
+    // The relay declared the box permanently dead (shipper gone for good).
+    // Reconnecting is pointless — the UI shows the "session ended" page.
+    if (outer.t === "session-ended") {
+      this.handleSessionEnded();
+      return;
+    }
     if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
       return;
     let inner: Record<string, unknown>;
@@ -397,6 +411,28 @@ export class LiveClient implements LiveRelay {
       this.chunkBufs.delete(inner.seq as number);
       p.resolve(inner);
     }
+  }
+
+  /**
+   * The relay declared the box permanently dead. Fail every in-flight
+   * command with the fatal "session-ended" marker (so the app's connect
+   * loop treats it like an invalid URL instead of retrying), notify the
+   * UI, and close the socket — no reconnect is scheduled.
+   */
+  private handleSessionEnded(): void {
+    if (this.closed) return;
+    this.intentionalClose = true;
+    for (const [, p] of this.pending) p.reject(new Error("session-ended"));
+    this.pending.clear();
+    this.chunkBufs.clear();
+    for (const h of this.sessionEndedHandlers) {
+      try {
+        h();
+      } catch {
+        // a failing handler must not break the others
+      }
+    }
+    this.close();
   }
 
   private handleClose(info: DisconnectInfo): void {
@@ -542,6 +578,11 @@ export class LiveClient implements LiveRelay {
   onDisconnect(handler: (info: DisconnectInfo) => void): () => void {
     this.disconnectHandlers.add(handler);
     return () => this.disconnectHandlers.delete(handler);
+  }
+
+  onSessionEnded(handler: () => void): () => void {
+    this.sessionEndedHandlers.add(handler);
+    return () => this.sessionEndedHandlers.delete(handler);
   }
 
   close(): void {

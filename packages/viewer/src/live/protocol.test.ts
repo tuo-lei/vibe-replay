@@ -346,3 +346,58 @@ describe("LiveClient heartbeat", () => {
     expect(HEARTBEAT_INTERVAL_MS * 2).toBeLessThan(45_000);
   });
 });
+
+describe("LiveClient session-ended", () => {
+  async function makeEndedClient() {
+    const { LiveClient } = await import("./protocol");
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const closed: string[] = [];
+    const fakeWs = {
+      send: () => {},
+      close: () => {
+        closed.push("closed");
+      },
+      readyState: 1,
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+    const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+    return { client, closed };
+  }
+
+  it("notifies handlers, fails in-flight commands with session-ended, and closes the socket", async () => {
+    const { client, closed } = await makeEndedClient();
+    const ended: string[] = [];
+    client.onSessionEnded(() => {
+      ended.push("ended");
+    });
+    // An in-flight command rejects with the fatal marker — never
+    // "disconnected", so the app treats it as fatal instead of retrying.
+    const pending = client.cmd({ cmd: "ping" });
+    const assertion = expect(pending).rejects.toThrow("session-ended");
+    const disconnects: unknown[] = [];
+    client.onDisconnect((info: unknown) => {
+      disconnects.push(info);
+    });
+    await client.handleMessage({ data: JSON.stringify({ t: "session-ended" }) });
+    await assertion;
+    expect(ended).toEqual(["ended"]);
+    // The socket closed intentionally: no disconnect handlers fire, so the
+    // app never schedules a reconnect to a dead box.
+    expect(disconnects).toEqual([]);
+    expect(closed).toEqual(["closed"]);
+  });
+
+  it("is idempotent — a second session-ended is ignored", async () => {
+    const { client } = await makeEndedClient();
+    let count = 0;
+    client.onSessionEnded(() => {
+      count++;
+    });
+    await client.handleMessage({ data: JSON.stringify({ t: "session-ended" }) });
+    await client.handleMessage({ data: JSON.stringify({ t: "session-ended" }) });
+    expect(count).toBe(1);
+  });
+});

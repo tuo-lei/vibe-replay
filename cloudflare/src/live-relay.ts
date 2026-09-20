@@ -86,6 +86,18 @@ const PRESENCE_SWEEP_AFTER_MS = 45_000;
 const VM_SWEEP_AFTER_MS = 150_000;
 /** How often the sweep alarm re-fires while any socket is attached. */
 const SWEEP_ALARM_EVERY_MS = 20_000;
+/**
+ * Grace after the shipper socket closes before the box is declared dead.
+ * The shipper's own retry loop reconnects with the same box id (backoff
+ * caps at 30 s), so a shipper gone longer than this is not coming back —
+ * a restart mints a fresh box id and the old URL stays dead. Only after
+ * this grace does the relay persist `ended` and tell viewers the session
+ * ended, so transient drops never flash a false "ended" page.
+ */
+const VM_GONE_GRACE_MS = 90_000;
+/** DO storage keys for the box lifecycle. */
+const ENDED_KEY = "ended";
+const VM_GONE_AT_KEY = "vmGoneAt";
 
 /** Max relay-visible envelope size. Well under the 32 MiB WS message limit. */
 const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
@@ -132,6 +144,25 @@ export class LiveRelay {
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
+      // Box liveness probe for the viewer shell: lets the viewer show the
+      // "session ended" page before the name gate instead of hanging on
+      // "Connecting…". Only the lifecycle flag is exposed — never content.
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/status")) {
+        let ended = false;
+        try {
+          ended = (await this.ctx.storage.get<boolean>(ENDED_KEY)) === true;
+        } catch {
+          // storage best-effort
+        }
+        let live = false;
+        try {
+          live = this.vmSocket() !== undefined;
+        } catch {
+          // ignore
+        }
+        return Response.json({ status: ended ? "ended" : live ? "live" : "unknown" });
+      }
       return new Response("expected websocket", { status: 426 });
     }
     const pair = new WebSocketPair();
@@ -155,6 +186,25 @@ export class LiveRelay {
           }
           out.push({ ws, vid: att.vid, name: att.name ?? null });
         }
+      } catch {
+        // attachment unreadable — treat as unregistered
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Every attached viewer-role socket, without the presence-liveness
+   * filter. Used when the box dies: a suspended mobile tab that missed
+   * heartbeats still holds a socket and must learn the session ended
+   * when it wakes — not silently rejoin a dead box.
+   */
+  private attachedViewers(): WebSocket[] {
+    const out: WebSocket[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const att = ws.deserializeAttachment() as Attachment | null;
+        if (att?.role === "viewer" && att.vid) out.push(ws);
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -256,7 +306,27 @@ export class LiveRelay {
     // half-open socket may not trigger webSocketClose promptly, but viewers()
     // already filters stale sockets, so the broadcast will be correct.
     if (reaped > 0) this.broadcastPresence();
-    if (live > 0) {
+    // Box-end grace: the shipper socket closed; if no shipper reattaches
+    // within VM_GONE_GRACE_MS the box is dead for good (restarts mint fresh
+    // box ids, so the old URL never revives).
+    let gracePending = false;
+    try {
+      const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
+      if (typeof vmGoneAt === "number") {
+        if (this.vmSocket()) {
+          // Shipper reconnected inside the grace — the box lives on.
+          await this.ctx.storage.delete(VM_GONE_AT_KEY);
+        } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
+          await this.endBox();
+          return;
+        } else {
+          gracePending = true;
+        }
+      }
+    } catch {
+      // storage best-effort (some harnesses lack it)
+    }
+    if (live > 0 || gracePending) {
       this.ensureSweepAlarm();
     } else {
       try {
@@ -304,15 +374,37 @@ export class LiveRelay {
     if (!attachment || (attachment.role !== "vm" && attachment.role !== "viewer")) {
       if (msg.t === "hello" && (msg.role === "vm" || msg.role === "viewer")) {
         if (msg.role === "vm") {
+          // A box declared ended never revives: restarts mint fresh box
+          // ids. A shipper helloing for an ended box is a zombie — tell it
+          // to exit so it restarts with a new URL instead of sitting on a
+          // dead box id.
+          if (await this.boxEnded()) {
+            this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
+            this.closeQuietly(ws, 1000, "box ended");
+            return;
+          }
           // One shipper per box: a new shipper takes over from the old one.
           const existing = this.vmSocket();
           if (existing && existing !== ws) this.closeQuietly(existing, 1000, "replaced");
           ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
+          // The shipper reconnected inside the end grace — cancel it.
+          try {
+            await this.ctx.storage.delete(VM_GONE_AT_KEY);
+          } catch {
+            // storage best-effort (some harnesses lack it)
+          }
           this.ensureSweepAlarm();
           return;
         }
+        // A viewer joining a dead box learns it immediately instead of
+        // hanging on "Connecting…" — this box can never come back.
+        if (await this.boxEnded()) {
+          this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
+          this.closeQuietly(ws, 1000, "session ended");
+          return;
+        }
         // Viewers are never displaced: any number of viewers may watch the
-        // same box at once, Excalidraw-style.
+        // same box at once.
         const vid = newVid();
         const name = sanitizeNameCipher(msg.name);
         ws.serializeAttachment({
@@ -330,6 +422,16 @@ export class LiveRelay {
       return;
     }
 
+    // The box is dead but this socket missed endBox (e.g. a suspended tab
+    // whose socket survived). It learns the session ended on its next
+    // message instead of silently rejoining a dead box — and its heartbeat
+    // must not refresh the sweep clock below.
+    if (attachment.role === "viewer" && (await this.boxEnded())) {
+      this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
+      this.closeQuietly(ws, 1000, "session ended");
+      return;
+    }
+
     // Plaintext liveness ping from a hello'd socket (viewer heartbeat or
     // anything the shipper sends outside frames). Refreshes the sweep clock.
     if (msg.t === "heartbeat") {
@@ -338,6 +440,14 @@ export class LiveRelay {
       } catch {
         // attachment unwritable — the sweep will eventually reap this socket
       }
+      return;
+    }
+
+    // Clean shipper shutdown: the box dies the moment the shipper says
+    // goodbye — no grace needed, since a clean shutdown never reconnects
+    // with this box id. Viewers learn it immediately.
+    if (msg.t === "goodbye" && attachment.role === "vm") {
+      await this.endBox();
       return;
     }
 
@@ -383,24 +493,86 @@ export class LiveRelay {
     // The closing socket may still carry its attachment: if it was a
     // viewer, tell the shipper so it can drop that viewer's tail
     // subscriptions instead of fanning out to a dead id.
+    let att: Attachment | null = null;
     try {
-      const att = ws.deserializeAttachment() as Attachment | null;
-      if (att?.role === "viewer") {
-        const vm = this.vmSocket();
-        if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-left", via: att.vid }));
-      }
+      att = ws.deserializeAttachment() as Attachment | null;
     } catch {
-      // attachment unreadable — nothing to clean up remotely
+      att = null;
+    }
+    if (att?.role === "viewer") {
+      const vm = this.vmSocket();
+      if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-left", via: att.vid }));
+    }
+    if (att?.role === "vm") {
+      // The shipper is gone. Its retry loop reconnects with the same box id
+      // (backoff caps at 30 s) — start the end grace; the sweep declares the
+      // box dead only if no shipper reattaches in time. Skip when the box
+      // already ended (the goodbye path handled it).
+      try {
+        const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
+        if (ended !== true) {
+          await this.ctx.storage.put(VM_GONE_AT_KEY, Date.now());
+          await this.ctx.storage.setAlarm(Date.now() + SWEEP_ALARM_EVERY_MS);
+        }
+      } catch {
+        // storage best-effort (some harnesses lack it)
+      }
     }
     // The closed socket is already removed from getWebSockets(): if it was
     // a viewer, push the shrunken roster to whoever remains.
     this.broadcastPresence();
     if (this.ctx.getWebSockets().length === 0) {
+      // Don't disarm while the end grace is pending — the alarm is what
+      // declares the box dead when the shipper never comes back.
+      let gracePending = false;
       try {
-        await this.ctx.storage.deleteAlarm();
+        gracePending = typeof (await this.ctx.storage.get(VM_GONE_AT_KEY)) === "number";
       } catch {
-        // ignore
+        // storage best-effort
       }
+      if (!gracePending) {
+        try {
+          await this.ctx.storage.deleteAlarm();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  /**
+   * Has this box been declared permanently dead? Best-effort: storage may
+   * be unavailable in some harnesses, in which case the answer is no.
+   */
+  private async boxEnded(): Promise<boolean> {
+    try {
+      return (await this.ctx.storage.get<boolean>(ENDED_KEY)) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Declare the box permanently dead: persist the flag so late joiners and
+   * the /status probe learn it instantly, notify attached viewers, and drop
+   * their sockets. A restart mints a fresh box id — this one never revives.
+   * The relay still sees no plaintext: only the lifecycle flag is stored.
+   */
+  private async endBox(): Promise<void> {
+    try {
+      await this.ctx.storage.put(ENDED_KEY, true);
+      await this.ctx.storage.delete(VM_GONE_AT_KEY);
+      await this.ctx.storage.deleteAlarm();
+    } catch {
+      // storage best-effort (some harnesses lack it)
+    }
+    const msg = JSON.stringify({ t: "session-ended" });
+    // Every attached viewer socket — not just the presence-filtered roster:
+    // a suspended tab that missed heartbeats still holds a socket and must
+    // learn the session ended when it wakes.
+    for (const ws of this.attachedViewers()) {
+      this.sendQuietly(ws, msg);
+      this.closeQuietly(ws, 1000, "session ended");
     }
   }
 
