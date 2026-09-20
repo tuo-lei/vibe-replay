@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveRelay } from "../src/live-relay";
 
 /**
@@ -57,7 +57,13 @@ function makeRelay(): Harness {
 const helloVm = (h: Harness) => {
   const ws = mockSocket();
   h.sockets.push(ws);
-  return { ws, p: h.relay.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ t: "hello", role: "vm" })) };
+  return {
+    ws,
+    p: h.relay.webSocketMessage(
+      ws as unknown as WebSocket,
+      JSON.stringify({ t: "hello", role: "vm" }),
+    ),
+  };
 };
 
 async function helloViewer(h: Harness, name?: unknown): Promise<{ ws: MockSocket; vid: string }> {
@@ -255,5 +261,123 @@ describe("LiveRelay multi-viewer", () => {
     );
     // No VM: nothing to forward to, viewer stays connected for a later retry.
     expect(a.ws.closed).toEqual([]);
+  });
+});
+
+/**
+ * Presence liveness: close frames are not reliably delivered (proxies,
+ * mobile radios, tab kills), so the relay sweeps sockets that stop proving
+ * liveness instead of letting them accumulate as roster ghosts.
+ */
+describe("LiveRelay presence liveness sweep", () => {
+  interface AlarmHarness extends Harness {
+    alarmAt: () => number | null;
+  }
+
+  function makeAlarmRelay(): AlarmHarness {
+    const sockets: MockSocket[] = [];
+    let alarmAt: number | null = null;
+    const ctx = {
+      getWebSockets: () => [...sockets],
+      acceptWebSocket: (ws: MockSocket) => {
+        sockets.push(ws);
+      },
+      storage: {
+        setAlarm: (at: number) => {
+          alarmAt = at;
+          return Promise.resolve();
+        },
+        getAlarm: () => Promise.resolve(alarmAt),
+        deleteAlarm: () => {
+          alarmAt = null;
+          return Promise.resolve();
+        },
+      },
+    } as unknown as DurableObjectState;
+    return { relay: new LiveRelay(ctx), sockets, alarmAt: () => alarmAt };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("arms the sweep alarm on hello", async () => {
+    const h = makeAlarmRelay();
+    expect(h.alarmAt()).toBeNull();
+    await helloViewer(h, LEI_CIPHER);
+    expect(h.alarmAt()).toBeGreaterThan(Date.now());
+  });
+
+  it("sweeps viewers that stop heartbeating; heartbeating viewers survive", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // a proves liveness; b goes silent for over the 45 s viewer timeout.
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(a.ws.closed).toEqual([]);
+    expect(vm.closed).toEqual([]);
+
+    // The runtime delivers the close: the roster shrinks to the survivor and
+    // the shipper is told to drop the dead viewer's tails.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const roster = lastPresence(a.ws)?.viewers;
+    expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
+    const notices = vm.sent.map((s) => JSON.parse(s));
+    expect(notices).toContainEqual({ t: "viewer-left", via: b.vid });
+
+    // A viewer remains, so the alarm stays armed.
+    expect(h.alarmAt()).toBeGreaterThan(Date.now());
+  });
+
+  it("disarms the alarm once the last socket is gone", async () => {
+    const h = makeAlarmRelay();
+    const a = await helloViewer(h, LEI_CIPHER);
+    expect(h.alarmAt()).not.toBeNull();
+    h.sockets.splice(h.sockets.indexOf(a.ws), 1);
+    await h.relay.webSocketClose(a.ws as unknown as WebSocket);
+    expect(h.alarmAt()).toBeNull();
+  });
+
+  it("rejects heartbeats from sockets that never said hello", async () => {
+    const h = makeAlarmRelay();
+    const ws = mockSocket();
+    h.sockets.push(ws);
+    await h.relay.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ t: "heartbeat" }));
+    expect(ws.closed).toEqual([{ code: 1003, reason: "hello first" }]);
+  });
+
+  it("reaps a shipper whose keepalives stopped; live keepalives refresh it", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+
+    // A keepalive no-op frame proves the shipper is alive.
+    (vm.attachment as { lastSeen: number }).lastSeen -= 100_000;
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "frame", iv: "k", data: "x" }),
+    );
+    await h.relay.alarm();
+    expect(vm.closed).toEqual([]);
+
+    // Silent past the VM timeout (shipper keepalive is every 45 s) → swept.
+    (vm.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    await h.relay.alarm();
+    expect(vm.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
   });
 });
