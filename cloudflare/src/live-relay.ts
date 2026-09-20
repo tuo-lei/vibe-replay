@@ -372,12 +372,7 @@ export class LiveRelay {
     // Viewer → VM: tag the frame with the sender's vid so the shipper can
     // echo it back and the relay can route the response to this viewer.
     const vm = this.vmSocket();
-    if (!vm) {
-      // DEBUG: tell the viewer why the frame was dropped
-      const dbg = JSON.stringify({ t: "frame", iv: "dbg", data: "novm" });
-      this.sendQuietly(ws, dbg);
-      return; // shipper not connected — drop (viewer re-issues commands)
-    }
+    if (!vm) return; // shipper not connected — drop (viewer re-issues commands)
     this.sendQuietly(
       vm,
       JSON.stringify({ t: "frame", iv: msg.iv, data: msg.data, via: attachment.vid }),
