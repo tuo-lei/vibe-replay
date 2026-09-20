@@ -235,6 +235,39 @@ describe("LiveApp", () => {
     expect(createClient).toHaveBeenCalledTimes(1);
   }, 25000);
 
+  it("resumes watch-live on the replacement client after a mid-session drop", async () => {
+    let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
+    const fake1 = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler = h;
+        return () => {};
+      },
+    });
+    const tailCalls2: string[] = [];
+    const fake2 = makeFake({
+      tail: async (id) => {
+        tailCalls2.push(id);
+        return { totalScenes: scenes.length };
+      },
+    });
+    const createClient = vi.fn().mockResolvedValueOnce(fake1).mockResolvedValue(fake2);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("Explain this change");
+    fireEvent.click(screen.getByText("Watch live"));
+    await screen.findByText(/live — new turns appear below/);
+
+    // Socket drops mid-watch; the app re-establishes on its own.
+    disconnectHandler?.({ code: 1006, reason: "" });
+
+    // The replacement client picks up the tail subscription for the session…
+    await waitFor(() => expect(tailCalls2).toEqual(["sess-1"]));
+    // …and the UI is back in watching state once catch-up completes.
+    await waitFor(() => expect(screen.getByText("Stop watching")).toBeTruthy());
+    expect(createClient).toHaveBeenCalledTimes(2);
+  }, 25000);
+
   it("does not drag the user back into the detail view after they navigated away during an outage", async () => {
     let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
     const fake1 = makeFake({

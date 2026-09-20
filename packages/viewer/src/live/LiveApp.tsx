@@ -88,6 +88,8 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   pathnameRef.current = pathname;
   /** True while a disconnect-triggered re-establish is in flight. */
   const reconnectingRef = useRef(false);
+  /** Set when the component unmounts; in-flight reconnects must not touch state. */
+  const unmountedRef = useRef(false);
   /**
    * Remote scene cursor: how many scenes the shipper has for the open
    * session. Stays ahead of `scenes.length` when a tail-gap skips scenes we
@@ -302,6 +304,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
    * fatal error when re-establishing itself is impossible.
    */
   const handleDisconnect = useCallback(async () => {
+    if (unmountedRef.current) return;
     if (reconnectingRef.current) return;
     reconnectingRef.current = true;
     // Park user actions: the old client is dead, the new one isn't ready.
@@ -314,7 +317,12 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       setWatching(false);
       setLoadingScenes(false);
       if (!boxId) throw new Error("invalid-share-url");
-      const { client, sessions } = await connectAndList(boxId, () => false);
+      const { client, sessions } = await connectAndList(boxId, () => unmountedRef.current);
+      if (unmountedRef.current) {
+        // Unmounted while re-establishing: drop the fresh socket, it has no UI.
+        client.close();
+        return;
+      }
       attachClientRef.current(client);
       setSessions(sessions);
       setHits(null);
@@ -334,7 +342,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         setStatus(`E2E-encrypted · ${sessions.length} sessions`);
       }
     } catch (e) {
-      setFatal(friendlyError(e));
+      if (!unmountedRef.current) setFatal(friendlyError(e));
     } finally {
       reconnectingRef.current = false;
     }
@@ -342,6 +350,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   handleDisconnectRef.current = handleDisconnect;
 
   useEffect(() => {
+    unmountedRef.current = false;
     const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
     if (!boxId) {
       setFatal("Invalid share URL: unrecognized /live/<id> path.");
@@ -367,7 +376,10 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     })();
     return () => {
       cancelled = true;
-      client?.close();
+      unmountedRef.current = true;
+      // Close the latest attached client: a reconnect may have replaced the
+      // initial one, and its onDisconnect could otherwise fire post-unmount.
+      (clientRef.current ?? client)?.close();
       clientRef.current = null;
     };
   }, [connectAndList]);
