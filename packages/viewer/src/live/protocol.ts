@@ -80,10 +80,18 @@ export interface LiveRelay {
   /**
    * Fired when the socket drops unexpectedly (not via close()). The app uses
    * it to re-establish the session automatically instead of stranding the
-   * viewer on a terminal error.
+   * viewer on a terminal error. The close code/reason are included so the
+   * app can tell a transient outage apart from an intentional displacement
+   * by the relay (1000/"replaced" — another tab opened the same link).
    */
-  onDisconnect(handler: () => void): () => void;
+  onDisconnect(handler: (info: DisconnectInfo) => void): () => void;
   close(): void;
+}
+
+/** What the relay reported when the socket closed. */
+export interface DisconnectInfo {
+  code: number;
+  reason: string;
 }
 
 export class LiveClient implements LiveRelay {
@@ -93,7 +101,7 @@ export class LiveClient implements LiveRelay {
   private seq = 0;
   private pending = new Map<number, Pending>();
   private tailHandlers = new Set<(ev: TailEvent) => void>();
-  private disconnectHandlers = new Set<() => void>();
+  private disconnectHandlers = new Set<(info: DisconnectInfo) => void>();
   private closed = false;
   /** True once close() was called — suppresses the disconnect handlers. */
   private intentionalClose = false;
@@ -146,8 +154,8 @@ export class LiveClient implements LiveRelay {
       ws.onerror = () => fail(new Error("connection-error"));
     });
     ws.onmessage = (e) => void client.handleMessage(e);
-    ws.onclose = () => client.handleClose();
-    ws.onerror = () => client.handleClose();
+    ws.onclose = (ev) => client.handleClose({ code: ev.code, reason: ev.reason });
+    ws.onerror = () => client.handleClose({ code: 0, reason: "" });
     return client;
   }
 
@@ -204,7 +212,7 @@ export class LiveClient implements LiveRelay {
     }
   }
 
-  private handleClose(): void {
+  private handleClose(info: DisconnectInfo): void {
     if (this.closed) return;
     this.closed = true;
     const err = new Error("disconnected");
@@ -213,7 +221,7 @@ export class LiveClient implements LiveRelay {
     if (this.intentionalClose) return;
     for (const h of this.disconnectHandlers) {
       try {
-        h();
+        h(info);
       } catch {
         // a failing handler must not break the others
       }
@@ -299,14 +307,14 @@ export class LiveClient implements LiveRelay {
     return () => this.tailHandlers.delete(handler);
   }
 
-  onDisconnect(handler: () => void): () => void {
+  onDisconnect(handler: (info: DisconnectInfo) => void): () => void {
     this.disconnectHandlers.add(handler);
     return () => this.disconnectHandlers.delete(handler);
   }
 
   close(): void {
     this.intentionalClose = true;
-    this.handleClose();
+    this.handleClose({ code: 1000, reason: "closed" });
     try {
       this.ws.close();
     } catch {

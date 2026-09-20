@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LiveApp from "./LiveApp";
 import { stubBrowserAPIs } from "../test-utils/jsdom-stubs";
@@ -188,7 +188,7 @@ describe("LiveApp", () => {
   }, 25000);
 
   it("reconnects and restores the open session after a mid-session drop", async () => {
-    let disconnectHandler: (() => void) | undefined;
+    let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
     const fake1 = makeFake({
       onDisconnect: (h) => {
         disconnectHandler = h;
@@ -203,12 +203,77 @@ describe("LiveApp", () => {
     await screen.findByText("Explain this change");
 
     // The socket drops unexpectedly; the app re-establishes on its own.
-    disconnectHandler?.();
+    disconnectHandler?.({ code: 1006, reason: "" });
     // The open session's scenes are reloaded on the fresh client.
     expect(await screen.findByText("Explain this change")).toBeTruthy();
     expect(
       await screen.findByText("E2E-encrypted · 2 scenes", {}, { timeout: 15000 }),
     ).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(2);
+  }, 25000);
+
+  it("does not reconnect when displaced by another viewer (1000/replaced)", async () => {
+    let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
+    const fake = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler = h;
+        return () => {};
+      },
+    });
+    const createClient = vi.fn().mockResolvedValue(fake);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+
+    // The same link was opened elsewhere; the relay displaced this viewer.
+    disconnectHandler?.({ code: 1000, reason: "replaced" });
+
+    // No reconnect attempt — reconnecting would evict the other side back
+    // and forth. The view goes terminal with an explanatory message.
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/opened in another tab or device/)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(createClient).toHaveBeenCalledTimes(1);
+  }, 25000);
+
+  it("does not drag the user back into the detail view after they navigated away during an outage", async () => {
+    let disconnectHandler: ((info: { code: number; reason: string }) => void) | undefined;
+    const fake1 = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler = h;
+        return () => {};
+      },
+    });
+    // Gate the reconnect's list() so the test can navigate mid-reconnect.
+    let releaseList!: () => void;
+    const listGate = new Promise<RelaySessionSummary[]>((resolve) => {
+      releaseList = () => resolve(sessions);
+    });
+    const fake2 = makeFake({ list: () => listGate });
+    const createClient = vi.fn().mockResolvedValueOnce(fake1).mockResolvedValue(fake2);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("Explain this change");
+
+    // Socket drops; the reconnect starts but its list() is gated. The user
+    // navigates back to the list while the outage is in progress.
+    disconnectHandler?.({ code: 1006, reason: "" });
+    await screen.findByText("Connecting…");
+    fireEvent.click(screen.getByText("← All sessions"));
+    // Back on the list view: detail-only content is gone (status still shows
+    // the in-flight reconnect).
+    await waitFor(() => {
+      expect(screen.queryByText("Explain this change")).toBeNull();
+      expect(screen.queryByText("← All sessions")).toBeNull();
+    });
+
+    // Now let the reconnect finish: the user stays on the list view and is
+    // not dragged back into the session they left.
+    releaseList();
+    expect(
+      await screen.findByText("E2E-encrypted · 2 sessions", {}, { timeout: 15000 }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Explain this change")).toBeNull();
     expect(createClient).toHaveBeenCalledTimes(2);
   }, 25000);
 });

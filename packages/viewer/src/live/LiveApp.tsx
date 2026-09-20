@@ -280,7 +280,14 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         }
         applyTailEvent(ev);
       });
-      client.onDisconnect(() => {
+      client.onDisconnect((info) => {
+        if (info.code === 1000 && info.reason === "replaced") {
+          // The same link was opened in another tab/device and the relay
+          // displaced this viewer. Reconnecting would just evict the other
+          // side back and forth forever — go terminal instead.
+          setFatal("This link was opened in another tab or device — this view is now inactive.");
+          return;
+        }
         void handleDisconnectRef.current();
       });
     },
@@ -312,9 +319,16 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       setSessions(sessions);
       setHits(null);
       if (summary) {
-        await loadScenes(client, summary);
-        if (wasWatching && viewRef.current.name === "detail") {
-          await startWatching(client, summary);
+        const v = viewRef.current;
+        if (v.name === "detail" && v.summary.sessionId === summary.sessionId) {
+          await loadScenes(client, summary);
+          if (wasWatching && viewRef.current.name === "detail") {
+            await startWatching(client, summary);
+          }
+        } else {
+          // The user navigated away during the outage (e.g. back to the
+          // list) — don't drag them back into the old session.
+          setStatus(`E2E-encrypted · ${sessions.length} sessions`);
         }
       } else {
         setStatus(`E2E-encrypted · ${sessions.length} sessions`);
