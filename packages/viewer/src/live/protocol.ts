@@ -13,17 +13,9 @@
  * reuses the exact same wire protocol.
  */
 import type { Scene } from "../types";
+import type { RelaySessionSummary } from "@vibe-replay/types";
 
-export interface RelaySessionSummary {
-  provider: string;
-  sessionId: string;
-  title?: string;
-  project: string;
-  timestamp: string;
-  promptCount?: number;
-  toolCallCount?: number;
-  model?: string;
-}
+export type { RelaySessionSummary };
 
 export interface RelayGetResult {
   scenes: Scene[];

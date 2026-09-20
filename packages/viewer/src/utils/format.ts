@@ -46,6 +46,31 @@ export function timeAgo(iso?: string, format: "short" | "long" = "short"): strin
   return `${Math.floor(hours / 24)}d`;
 }
 
+/**
+ * Compact duration ("45s", "3m 12s", "2h 5m"). Single canonical definition —
+ * previously lived in StatsPanel.tsx; kept re-exported there so existing
+ * imports keep working.
+ */
+export function formatDuration(ms?: number): string {
+  if (!ms) return "";
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
+/**
+ * Compact USD cost ("$1.23"). Single canonical definition — previously lived
+ * in dashboard-utils.ts; kept re-exported there so existing imports keep
+ * working.
+ */
+export function formatCost(cost?: number): string {
+  if (!cost) return "";
+  return `$${cost.toFixed(2)}`;
+}
+
 // For the single-session replay view (StatsPanel, SummaryView). The dashboard
 // uses a separate, context-aware formatter in dashboard-utils.ts that takes
 // hasSqlite into account — keep both in sync when adding new source types.

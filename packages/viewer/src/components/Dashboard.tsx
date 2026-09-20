@@ -95,6 +95,7 @@ import {
   sessionDataState,
 } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
+import { ActiveFilterChip, SessionStatusRow } from "./SessionCard";
 
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights" | "settings";
 
@@ -1851,28 +1852,6 @@ function sortedFacetEntries(counts: Map<string, number>) {
     if (b[1] !== a[1]) return b[1] - a[1];
     return facetSortLabel(a[0]).localeCompare(facetSortLabel(b[0]));
   });
-}
-
-function ActiveFilterChip({
-  label,
-  value,
-  onRemove,
-}: {
-  label: string;
-  value: string;
-  onRemove: () => void;
-}) {
-  return (
-    <button
-      onClick={onRemove}
-      className="ui-pill rounded-full bg-terminal-surface text-terminal-dim ring-1 ring-terminal-border-subtle pl-2.5 pr-2 py-1 hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
-      title={`Remove ${label}: ${value}`}
-    >
-      <span className="text-terminal-dimmer">{label}</span>
-      <span className="max-w-[220px] truncate">{value}</span>
-      <span className="text-terminal-dimmer">×</span>
-    </button>
-  );
 }
 
 function FacetHeader({ title, count }: { title: string; count?: number }) {
@@ -4029,66 +4008,28 @@ function SessionsPanel() {
                     </div>
 
                     {/* Row 4: activity — exact values, hairline-framed. Leads with the
-                        data-level icon (replaces the old "Scanned" chip next to the CTAs). */}
-                    <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
-                      <DataLevelIcon
-                        state={dataState}
-                        active={isPriorityEnriching}
-                        scannedAtLabel={scannedAtLabel}
-                      />
-                      {!!displayDurationMs && (
-                        <span className="text-terminal-text" title="Active duration">
-                          {scanData?.durationMs == null ? "~" : ""}
-                          {formatDuration(displayDurationMs)}
-                        </span>
-                      )}
-                      {!!displayPromptCount && (
-                        <span className="text-terminal-text">
-                          {displayPromptCount}{" "}
-                          <span className="text-terminal-dimmer">
-                            prompt{displayPromptCount !== 1 ? "s" : ""}
-                          </span>
-                        </span>
-                      )}
-                      {!!displayToolCount && (
-                        <span className="text-terminal-text">
-                          {displayToolCount} <span className="text-terminal-dimmer">tools</span>
-                        </span>
-                      )}
-                      {!!displayEditCount && (
-                        <span className="text-terminal-text" title="File edits">
-                          {scanData?.editCount == null ? "~" : ""}
-                          {displayEditCount} <span className="text-terminal-dimmer">edits</span>
-                        </span>
-                      )}
-                      {!!displayCost && (
-                        <span className="text-terminal-green" title={costTitle}>
-                          {formatCost(displayCost)}
-                        </span>
-                      )}
-                      {compactionCount > 0 && (
-                        <span
-                          className="text-terminal-context"
-                          title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
-                        >
-                          {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
-                        </span>
-                      )}
-                      {cleanRun ? (
-                        <span className="text-terminal-green" title="No API errors">
-                          ✓ no errors
-                        </span>
-                      ) : (
-                        errorCount > 0 && (
-                          <span
-                            className="text-terminal-red"
-                            title={`${errorCount} API error(s) during this session`}
-                          >
-                            {errorCount} error{errorCount !== 1 ? "s" : ""}
-                          </span>
-                        )
-                      )}
-                    </div>
+                        data-level icon (replaces the old "Scanned" chip next to the CTAs).
+                        Shared with the live viewer via SessionStatusRow. */}
+                    <SessionStatusRow
+                      leading={
+                        <DataLevelIcon
+                          state={dataState}
+                          active={isPriorityEnriching}
+                          scannedAtLabel={scannedAtLabel}
+                        />
+                      }
+                      durationMs={displayDurationMs}
+                      durationEstimated={scanData?.durationMs == null}
+                      promptCount={displayPromptCount}
+                      toolCallCount={displayToolCount}
+                      editCount={displayEditCount}
+                      editEstimated={scanData?.editCount == null}
+                      costEstimate={displayCost}
+                      costTitle={costTitle}
+                      compactionCount={compactionCount}
+                      errorCount={errorCount}
+                      cleanRun={cleanRun}
+                    />
 
                     <SessionUsageDetails
                       summary={scanData?.usageSummary}

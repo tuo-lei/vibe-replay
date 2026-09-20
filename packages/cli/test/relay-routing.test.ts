@@ -19,14 +19,35 @@ vi.mock("../src/relay-crypto.js", async (importOriginal) => {
 });
 
 // Fake provider/transform so tail commands don't touch the real filesystem.
-const providerState = vi.hoisted(() => ({ discoverCalls: 0, scenes: [] as unknown[] }));
+const providerState = vi.hoisted(() => ({
+  discoverCalls: 0,
+  scenes: [] as unknown[],
+  sessionInfo: {
+    sessionId: "sess-1",
+    provider: "fake",
+    filePaths: [] as string[],
+    title: "Fake session",
+    project: "/tmp/proj",
+    timestamp: "2026-09-20T00:00:00.000Z",
+    lineCount: 10,
+    fileSize: 512,
+    promptCount: 2,
+    toolCallCount: 5,
+    model: "fake-model",
+    gitRepo: "owner/repo",
+    gitBranch: "feat/x",
+    compactionCount: 1,
+    durationMsEst: 60000,
+    editCountEst: 3,
+  },
+}));
 vi.mock("../src/providers/index.js", () => ({
   getAllProviders: () => [
     {
       name: "fake",
       discover: async () => {
         providerState.discoverCalls++;
-        return [{ sessionId: "sess-1", provider: "fake", filePaths: [] as string[] }];
+        return [providerState.sessionInfo];
       },
       parse: async () => ({}),
     },
@@ -471,5 +492,49 @@ describe("shipper hello gating", () => {
     } finally {
       console.log = origLog;
     }
+  });
+});
+
+describe("shipper list summaries", () => {
+  it("ships the shared RelaySessionSummary fields (filter/card data)", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 9, cmd: "list" }),
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "list response sent");
+    const outer = lastOuter(sock);
+    const payload = JSON.parse(outer.data as string) as {
+      seq: number;
+      ok: boolean;
+      data: { sessions: Record<string, unknown>[] };
+    };
+    expect(payload).toMatchObject({ seq: 9, ok: true });
+    expect(payload.data.sessions).toHaveLength(1);
+    // The shared type lives in @vibe-replay/types; the shipper must populate
+    // the fields the live viewer's filters and cards render.
+    expect(payload.data.sessions[0]).toMatchObject({
+      provider: "fake",
+      sessionId: "sess-1",
+      title: "Fake session",
+      project: "/tmp/proj",
+      timestamp: "2026-09-20T00:00:00.000Z",
+      lineCount: 10,
+      fileSize: 512,
+      promptCount: 2,
+      toolCallCount: 5,
+      model: "fake-model",
+      gitRepo: "owner/repo",
+      gitBranch: "feat/x",
+      compactionCount: 1,
+      durationMsEst: 60000,
+      editCountEst: 3,
+    });
   });
 });

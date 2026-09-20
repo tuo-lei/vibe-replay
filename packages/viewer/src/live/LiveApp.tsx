@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConversationView from "../components/ConversationView";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene } from "../types";
@@ -12,6 +12,15 @@ import {
   type TailEvent,
   type ViewerPresence,
 } from "./protocol";
+import { LiveSessionCard } from "./LiveSessionCard";
+import {
+  ALL_PROJECTS,
+  EMPTY_FILTERS,
+  SessionFilterBar,
+  hasActiveFilters,
+  type LiveFilterState,
+} from "./SessionFilterBar";
+import { applyDashboardFacetFilters } from "../engine/dashboard-filtering";
 
 /** Full-fidelity transcript: same defaults as the local viewer's "all" mode. */
 const FULL_PREFS: EffectivePrefs = {
@@ -102,6 +111,8 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const [sessions, setSessions] = useState<RelaySessionSummary[] | null>(null);
   const [hits, setHits] = useState<RelaySearchHit[] | null>(null);
   const [query, setQuery] = useState("");
+  /** List filters (provider / project / text / sort) — same engine as the dashboard. */
+  const [filters, setFilters] = useState<LiveFilterState>(EMPTY_FILTERS);
   const [view, setView] = useState<View>({ name: "list" });
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [loadingScenes, setLoadingScenes] = useState(false);
@@ -140,6 +151,39 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   /** Non-null while watch-live catch-up pages the backlog; tail events that
    * arrive in that window are buffered and replayed in order afterwards. */
   const catchupRef = useRef<TailEvent[] | null>(null);
+
+  /**
+   * Filtered + sorted session list. The shipper sends newest-first; facet
+   * matching reuses the dashboard filter engine
+   * (`engine/dashboard-filtering.ts`) so behavior matches the local UI.
+   */
+  const filteredSessions = useMemo(() => {
+    if (!sessions) return null;
+    const q = filters.text.trim().toLowerCase();
+    let out = applyDashboardFacetFilters(sessions, {
+      selectedProviders: filters.providers,
+      selectedRepos: [],
+      selectedProjectKey: filters.project,
+      allProjectsKey: ALL_PROJECTS,
+      rollupProject: (p) => p,
+    });
+    if (q) {
+      out = out.filter(
+        (s) =>
+          (s.title ?? "").toLowerCase().includes(q) ||
+          s.project.toLowerCase().includes(q) ||
+          s.provider.toLowerCase().includes(q) ||
+          (s.model ?? "").toLowerCase().includes(q),
+      );
+    }
+    return filters.sortNewest ? out : out.toReversed();
+  }, [sessions, filters]);
+
+  /** Status line for the list view — reflects active filters ("N of M"). */
+  const listStatus = useMemo(() => {
+    if (!sessions || !filteredSessions || !hasActiveFilters(filters)) return status;
+    return `E2E-encrypted · ${filteredSessions.length} of ${sessions.length} sessions`;
+  }, [status, sessions, filteredSessions, filters]);
 
   const applyTailEvent = useCallback((ev: TailEvent) => {
     if (ev.event === "tail-gap") {
@@ -588,6 +632,8 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
           provider: hit.provider,
           project: "",
           timestamp: "",
+          lineCount: 0,
+          fileSize: 0,
         } satisfies RelaySessionSummary);
       void openSession(summary);
     },
@@ -693,10 +739,23 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
           selfVid={selfVid}
           onRename={rename}
         />
-        <div className="mb-4 text-xs text-terminal-dim">{status}</div>
+        <div className="mb-4 text-xs text-terminal-dim">
+          {view.name === "list" && !hits ? listStatus : status}
+        </div>
 
         {view.name === "list" && (
-          <SessionList sessions={sessions} hits={hits} onOpen={openSession} onOpenHit={openHit} />
+          <>
+            {!hits && sessions && (
+              <SessionFilterBar sessions={sessions} filters={filters} onChange={setFilters} />
+            )}
+            <SessionList
+              sessions={filteredSessions}
+              totalSessions={sessions?.length ?? 0}
+              hits={hits}
+              onOpen={openSession}
+              onOpenHit={openHit}
+            />
+          </>
         )}
 
         {view.name === "detail" && (
@@ -866,11 +925,13 @@ function Header({
 
 function SessionList({
   sessions,
+  totalSessions,
   hits,
   onOpen,
   onOpenHit,
 }: {
   sessions: RelaySessionSummary[] | null;
+  totalSessions: number;
   hits: RelaySearchHit[] | null;
   onOpen: (s: RelaySessionSummary) => void;
   onOpenHit: (h: RelaySearchHit) => void;
@@ -901,37 +962,15 @@ function SessionList({
   if (!sessions.length)
     return (
       <div className="py-10 text-center text-sm text-terminal-dimmer">
-        No sessions found on this machine.
+        {totalSessions > 0
+          ? "No sessions match the current filters."
+          : "No sessions found on this machine."}
       </div>
     );
   return (
     <div className="space-y-2">
       {sessions.map((s) => (
-        <button
-          key={s.sessionId}
-          type="button"
-          onClick={() => onOpen(s)}
-          className="block w-full rounded-xl border border-terminal-border-subtle bg-terminal-surface px-4 py-3 text-left transition-colors hover:border-terminal-border hover:bg-terminal-surface-hover"
-        >
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="truncate text-sm font-medium">
-              {s.title || `${s.sessionId.slice(0, 12)}…`}
-            </div>
-            {s.promptCount != null && (
-              <div className="shrink-0 text-[11px] text-terminal-dimmer">
-                {s.promptCount} prompts
-              </div>
-            )}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-terminal-dim">
-            <span className="rounded-full bg-terminal-surface-2 px-2 py-0.5 ring-1 ring-terminal-border-subtle">
-              {s.provider}
-            </span>
-            {s.project && <span className="truncate">{s.project}</span>}
-            {s.timestamp && <span>· {fmtTime(s.timestamp)}</span>}
-            {s.model && <span>· {s.model}</span>}
-          </div>
-        </button>
+        <LiveSessionCard key={s.sessionId} session={s} onOpen={onOpen} />
       ))}
     </div>
   );

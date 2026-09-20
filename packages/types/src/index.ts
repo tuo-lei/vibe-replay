@@ -708,3 +708,37 @@ export interface ReplaySession {
   scenes: Scene[];
   annotations?: Annotation[];
 }
+
+/**
+ * Session summary shipped by `vibe-replay relay` over the E2E-encrypted live
+ * channel (the `list` command). This is the single canonical definition —
+ * the CLI shipper (`packages/cli/src/relay.ts`) produces it and the live
+ * viewer (`packages/viewer/src/live/protocol.ts`) consumes it. Keep the two
+ * in sync by editing here, not in either copy.
+ *
+ * All fields are discovery-cheap: no transcript parsing is required to
+ * produce a summary, so `list` stays fast even with hundreds of sessions.
+ */
+export interface RelaySessionSummary {
+  provider: string;
+  sessionId: string;
+  title?: string;
+  project: string;
+  /** ISO string of last activity (most recent record / file mtime). */
+  timestamp: string;
+  lineCount: number;
+  fileSize: number;
+  promptCount?: number;
+  toolCallCount?: number;
+  /** Primary model (e.g. "claude-sonnet-4-20250514"). */
+  model?: string;
+  /** Normalized git remote origin (e.g. "tuo-lei/vibe-replay"). */
+  gitRepo?: string;
+  gitBranch?: string;
+  /** Context compactions counted during lightweight discovery. */
+  compactionCount?: number;
+  /** Sum of turn_duration durationMs values (estimate). */
+  durationMsEst?: number;
+  /** Count of file-editing tool_use blocks (estimate). */
+  editCountEst?: number;
+}
