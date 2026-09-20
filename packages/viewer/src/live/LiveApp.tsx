@@ -21,6 +21,18 @@ const FULL_PREFS: EffectivePrefs = {
 
 const SCENE_PAGE = 5000;
 
+/**
+ * Backoff between connection attempts when the relay or the VM shipper is
+ * briefly unreachable (the shipper reconnects in ~2s after a drop, so the
+ * first retries usually succeed). After the last delay the error surfaces.
+ */
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+
+/** Failures that will never succeed on retry — surface immediately. */
+const FATAL_CONNECT_ERRORS = new Set(["invalid-share-url"]);
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 function fmtTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString();
@@ -40,7 +52,7 @@ function friendlyError(e: unknown): string {
     case "disconnected":
       return "Disconnected — reload to retry.";
     case "timeout":
-      return "Request timed out — the shipper may be busy. Reload to retry.";
+      return "Request timed out — the shipper may be offline or this link may have expired.";
     default:
       return `Error: ${m}`;
   }
@@ -69,6 +81,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const clientRef = useRef<LiveRelay | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
+  const watchingRef = useRef(watching);
+  watchingRef.current = watching;
+  /** The share path (prop in tests, window.location in production). */
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  /** True while a disconnect-triggered re-establish is in flight. */
+  const reconnectingRef = useRef(false);
   /**
    * Remote scene cursor: how many scenes the shipper has for the open
    * session. Stays ahead of `scenes.length` when a tail-gap skips scenes we
@@ -95,68 +114,77 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     setScenes((prev) => [...prev, ...ev.newScenes]);
   }, []);
 
-  const refreshList = useCallback(async (client: LiveRelay, retried = false) => {
+  /**
+   * Fetch the session list once. Throws on failure — callers decide whether
+   * to retry (initial connect) or surface (user-initiated refresh).
+   */
+  const refreshList = useCallback(async (client: LiveRelay) => {
     setStatus("Loading sessions…");
-    try {
-      const list = await client.list();
-      setSessions(list);
-      setHits(null);
-      setStatus(`E2E-encrypted · ${list.length} sessions`);
-    } catch (e) {
-      // The VM socket may be mid-reconnect when the page opens and the relay
-      // drops the first frame — retry once before surfacing the error.
-      if (!retried) {
-        setStatus("Retrying…");
-        await new Promise((r) => setTimeout(r, 2000));
-        return refreshList(client, true);
-      }
-      setFatal(friendlyError(e));
-    }
+    const list = await client.list();
+    setSessions(list);
+    setHits(null);
+    setStatus(`E2E-encrypted · ${list.length} sessions`);
   }, []);
 
-  useEffect(() => {
-    const boxId = boxIdFromPath(pathname ?? window.location.pathname);
-    if (!boxId) {
-      setFatal("Invalid share URL: unrecognized /live/<id> path.");
+  /**
+   * Connect to the relay and fetch the session list, retrying with backoff
+   * through transient outages (shipper reconnect windows, relay hiccups).
+   * Resolves with a validated client; throws only when cancelled or when the
+   * attempts are exhausted (or the failure is known-fatal, e.g. a bad URL).
+   */
+  const connectAndList = useCallback(
+    async (
+      boxId: string,
+      isCancelled: () => boolean,
+    ): Promise<{ client: LiveRelay; sessions: RelaySessionSummary[] }> => {
+      let lastError: unknown = new Error("unreachable");
+      for (let attempt = 0; ; attempt++) {
+        if (isCancelled()) throw new Error("cancelled");
+        let client: LiveRelay | null = null;
+        try {
+          setStatus(attempt === 0 ? "Connecting…" : `Retrying… (attempt ${attempt + 1})`);
+          client = await createClient(boxId);
+          if (isCancelled()) {
+            client.close();
+            throw new Error("cancelled");
+          }
+          const sessions = await client.list();
+          return { client, sessions };
+        } catch (e) {
+          try {
+            client?.close();
+          } catch {
+            // ignore cleanup failures
+          }
+          lastError = e;
+          const fatalNow = e instanceof Error && FATAL_CONNECT_ERRORS.has(e.message);
+          if (fatalNow || attempt >= RETRY_DELAYS_MS.length || isCancelled()) break;
+          await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+      }
+      throw lastError;
+    },
+    [createClient],
+  );
+
+  /**
+   * Surface a user-action failure. An action that races a reconnect in
+   * progress must not kill the page — the reconnect flow owns surfacing.
+   */
+  const handleActionError = useCallback((e: unknown) => {
+    if (reconnectingRef.current) {
+      setStatus("Reconnecting…");
       return;
     }
-    let cancelled = false;
-    let client: LiveRelay | null = null;
-    (async () => {
-      try {
-        setStatus("Connecting…");
-        client = await createClient(boxId);
-        if (cancelled) {
-          client.close();
-          return;
-        }
-        clientRef.current = client;
-        client.onTail((ev: TailEvent) => {
-          const v = viewRef.current;
-          if (v.name !== "detail" || ev.id !== v.summary.sessionId) return;
-          // During watch-live catch-up, buffer events and replay them in
-          // arrival order after pagination so scenes never land out of order.
-          if (catchupRef.current) {
-            catchupRef.current.push(ev);
-            return;
-          }
-          applyTailEvent(ev);
-        });
-        await refreshList(client);
-      } catch (e) {
-        if (!cancelled) setFatal(friendlyError(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-      client?.close();
-      clientRef.current = null;
-    };
-  }, [createClient, pathname, refreshList, applyTailEvent]);
+    setFatal(friendlyError(e));
+  }, []);
 
-  const openSession = useCallback(async (summary: RelaySessionSummary) => {
-    const client = clientRef.current;
-    if (!client) return;
+  /**
+   * Load (or reload) a session's scenes into the detail view. Extracted from
+   * openSession so a reconnect can restore the open session the same way.
+   * Throws on failure; superseded loads return silently via the generation.
+   */
+  const loadScenes = useCallback(async (client: LiveRelay, summary: RelaySessionSummary) => {
     const gen = ++loadGenRef.current;
     setView({ name: "detail", summary });
     setScenes([]);
@@ -186,11 +214,162 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       setStatus(`E2E-encrypted · ${total} scenes`);
     } catch (e) {
       if (loadGenRef.current !== gen) return;
-      setFatal(friendlyError(e));
+      throw e;
     } finally {
       if (loadGenRef.current === gen) setLoadingScenes(false);
     }
   }, []);
+
+  /**
+   * Subscribe to live turns and backfill everything added since the session
+   * was opened. Extracted from toggleWatch so a reconnect can resume
+   * watch-live the same way. Throws on failure.
+   */
+  const startWatching = useCallback(
+    async (client: LiveRelay, summary: RelaySessionSummary) => {
+      setStatus("Watching live…");
+      // Buffer tail events that arrive while we page the backlog, then replay
+      // them in arrival order so scenes never land out of order.
+      const buffered: TailEvent[] = [];
+      catchupRef.current = buffered;
+      try {
+        const { totalScenes } = await client.tail(summary.sessionId);
+        // Fixed starting offset: fetch everything added between page load and
+        // subscribe. Page through: one `get` caps at SCENE_PAGE scenes.
+        let cursor = remoteCountRef.current;
+        while (cursor < totalScenes) {
+          const res = await client.get(
+            summary.sessionId,
+            cursor,
+            Math.min(SCENE_PAGE, totalScenes - cursor),
+          );
+          if (!res.scenes.length) break; // guard against stalls
+          setScenes((prev) => [...prev, ...res.scenes]);
+          cursor += res.scenes.length;
+        }
+        catchupRef.current = null;
+        if (viewRef.current.name !== "detail") return; // user navigated away
+        remoteCountRef.current = cursor;
+        for (const ev of buffered) applyTailEvent(ev);
+        setWatching(true);
+        setStatus("E2E-encrypted · live — new turns appear below");
+      } catch (e) {
+        catchupRef.current = null;
+        throw e;
+      }
+    },
+    [applyTailEvent],
+  );
+
+  // Latest-ref indirection: attachClient and handleDisconnect reference each
+  // other, so they call through refs instead of closing over one another.
+  const handleDisconnectRef = useRef<() => Promise<void>>(async () => {});
+  const attachClientRef = useRef<(client: LiveRelay) => void>(() => {});
+
+  const attachClient = useCallback(
+    (client: LiveRelay) => {
+      clientRef.current = client;
+      client.onTail((ev: TailEvent) => {
+        const v = viewRef.current;
+        if (v.name !== "detail" || ev.id !== v.summary.sessionId) return;
+        // During watch-live catch-up, buffer events and replay them in
+        // arrival order after pagination so scenes never land out of order.
+        if (catchupRef.current) {
+          catchupRef.current.push(ev);
+          return;
+        }
+        applyTailEvent(ev);
+      });
+      client.onDisconnect(() => {
+        void handleDisconnectRef.current();
+      });
+    },
+    [applyTailEvent],
+  );
+  attachClientRef.current = attachClient;
+
+  /**
+   * The socket dropped mid-session (not via close()). Re-establish with the
+   * same retry loop as the initial connect, then restore whatever the user
+   * was looking at — list, open session, or watch-live. Only surfaces a
+   * fatal error when re-establishing itself is impossible.
+   */
+  const handleDisconnect = useCallback(async () => {
+    if (reconnectingRef.current) return;
+    reconnectingRef.current = true;
+    // Park user actions: the old client is dead, the new one isn't ready.
+    clientRef.current = null;
+    loadGenRef.current++; // invalidate any in-flight scene load
+    const summary = viewRef.current.name === "detail" ? viewRef.current.summary : null;
+    const wasWatching = watchingRef.current;
+    const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
+    try {
+      setWatching(false);
+      setLoadingScenes(false);
+      if (!boxId) throw new Error("invalid-share-url");
+      const { client, sessions } = await connectAndList(boxId, () => false);
+      attachClientRef.current(client);
+      setSessions(sessions);
+      setHits(null);
+      if (summary) {
+        await loadScenes(client, summary);
+        if (wasWatching && viewRef.current.name === "detail") {
+          await startWatching(client, summary);
+        }
+      } else {
+        setStatus(`E2E-encrypted · ${sessions.length} sessions`);
+      }
+    } catch (e) {
+      setFatal(friendlyError(e));
+    } finally {
+      reconnectingRef.current = false;
+    }
+  }, [connectAndList, loadScenes, startWatching]);
+  handleDisconnectRef.current = handleDisconnect;
+
+  useEffect(() => {
+    const boxId = boxIdFromPath(pathnameRef.current ?? window.location.pathname);
+    if (!boxId) {
+      setFatal("Invalid share URL: unrecognized /live/<id> path.");
+      return;
+    }
+    let cancelled = false;
+    let client: LiveRelay | null = null;
+    (async () => {
+      try {
+        const established = await connectAndList(boxId, () => cancelled);
+        if (cancelled) {
+          established.client.close();
+          return;
+        }
+        client = established.client;
+        attachClientRef.current(client);
+        setSessions(established.sessions);
+        setHits(null);
+        setStatus(`E2E-encrypted · ${established.sessions.length} sessions`);
+      } catch (e) {
+        if (!cancelled) setFatal(friendlyError(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      client?.close();
+      clientRef.current = null;
+    };
+  }, [connectAndList]);
+
+  const openSession = useCallback(
+    async (summary: RelaySessionSummary) => {
+      const client = clientRef.current;
+      if (!client) return;
+      try {
+        await loadScenes(client, summary);
+      } catch (e) {
+        handleActionError(e);
+      }
+    },
+    [loadScenes, handleActionError],
+  );
 
   const backToList = useCallback(() => {
     const client = clientRef.current;
@@ -200,8 +379,8 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     setWatching(false);
     setGapNotice(null);
     setView({ name: "list" });
-    if (client) void refreshList(client);
-  }, [refreshList]);
+    if (client) void refreshList(client).catch(handleActionError);
+  }, [refreshList, handleActionError]);
 
   const doSearch = useCallback(async () => {
     const client = clientRef.current;
@@ -209,7 +388,11 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     const q = query.trim();
     if (!q) {
       setHits(null);
-      await refreshList(client);
+      try {
+        await refreshList(client);
+      } catch (e) {
+        handleActionError(e);
+      }
       return;
     }
     setStatus("Searching…");
@@ -218,9 +401,9 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       setHits(results);
       setStatus(`E2E-encrypted · ${results.length} hits`);
     } catch (e) {
-      setFatal(friendlyError(e));
+      handleActionError(e);
     }
-  }, [query, refreshList]);
+  }, [query, refreshList, handleActionError]);
 
   const toggleWatch = useCallback(async () => {
     const client = clientRef.current;
@@ -232,37 +415,12 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       setStatus("E2E-encrypted");
       return;
     }
-    setStatus("Watching live…");
-    // Buffer tail events that arrive while we page the backlog, then replay
-    // them in arrival order so scenes never land out of order.
-    const buffered: TailEvent[] = [];
-    catchupRef.current = buffered;
     try {
-      const { totalScenes } = await client.tail(v.summary.sessionId);
-      // Fixed starting offset: fetch everything added between page load and
-      // subscribe. Page through: one `get` caps at SCENE_PAGE scenes.
-      let cursor = remoteCountRef.current;
-      while (cursor < totalScenes) {
-        const res = await client.get(
-          v.summary.sessionId,
-          cursor,
-          Math.min(SCENE_PAGE, totalScenes - cursor),
-        );
-        if (!res.scenes.length) break; // guard against stalls
-        setScenes((prev) => [...prev, ...res.scenes]);
-        cursor += res.scenes.length;
-      }
-      catchupRef.current = null;
-      if (viewRef.current.name !== "detail") return; // user navigated away
-      remoteCountRef.current = cursor;
-      for (const ev of buffered) applyTailEvent(ev);
-      setWatching(true);
-      setStatus("E2E-encrypted · live — new turns appear below");
+      await startWatching(client, v.summary);
     } catch (e) {
-      catchupRef.current = null;
-      setFatal(friendlyError(e));
+      handleActionError(e);
     }
-  }, [watching, applyTailEvent]);
+  }, [watching, startWatching, handleActionError]);
 
   const openHit = useCallback(
     (hit: RelaySearchHit) => {

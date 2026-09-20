@@ -77,6 +77,12 @@ export interface LiveRelay {
   tail(sessionId: string): Promise<{ totalScenes: number }>;
   untail(sessionId: string): Promise<void>;
   onTail(handler: (ev: TailEvent) => void): () => void;
+  /**
+   * Fired when the socket drops unexpectedly (not via close()). The app uses
+   * it to re-establish the session automatically instead of stranding the
+   * viewer on a terminal error.
+   */
+  onDisconnect(handler: () => void): () => void;
   close(): void;
 }
 
@@ -87,7 +93,10 @@ export class LiveClient implements LiveRelay {
   private seq = 0;
   private pending = new Map<number, Pending>();
   private tailHandlers = new Set<(ev: TailEvent) => void>();
+  private disconnectHandlers = new Set<() => void>();
   private closed = false;
+  /** True once close() was called — suppresses the disconnect handlers. */
+  private intentionalClose = false;
 
   private constructor(ws: WebSocket, key: CryptoKey, boxId: string) {
     this.ws = ws;
@@ -201,6 +210,14 @@ export class LiveClient implements LiveRelay {
     const err = new Error("disconnected");
     for (const [, p] of this.pending) p.reject(err);
     this.pending.clear();
+    if (this.intentionalClose) return;
+    for (const h of this.disconnectHandlers) {
+      try {
+        h();
+      } catch {
+        // a failing handler must not break the others
+      }
+    }
   }
 
   private cmd<T>(obj: Record<string, unknown>): Promise<T> {
@@ -282,7 +299,13 @@ export class LiveClient implements LiveRelay {
     return () => this.tailHandlers.delete(handler);
   }
 
+  onDisconnect(handler: () => void): () => void {
+    this.disconnectHandlers.add(handler);
+    return () => this.disconnectHandlers.delete(handler);
+  }
+
   close(): void {
+    this.intentionalClose = true;
     this.handleClose();
     try {
       this.ws.close();

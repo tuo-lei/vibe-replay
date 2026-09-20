@@ -50,6 +50,7 @@ function makeFake(overrides: Partial<LiveRelay> = {}): LiveRelay {
     tail: async () => ({ totalScenes: scenes.length }),
     untail: async () => {},
     onTail: () => () => {},
+    onDisconnect: () => () => {},
     close: () => {},
     ...overrides,
   };
@@ -171,4 +172,43 @@ describe("LiveApp", () => {
     // Buffered during catch-up, applied once afterwards — not lost, not duplicated.
     expect(screen.getAllByText("live scene")).toHaveLength(1);
   });
+
+  it("retries the initial connect through a transient shipper outage", async () => {
+    const createClient = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connection-error"))
+      .mockRejectedValueOnce(new Error("connection-error"))
+      .mockResolvedValue(makeFake());
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    // Backoff is 1s then 2s before the third attempt succeeds.
+    expect(
+      await screen.findByText("E2E-encrypted · 2 sessions", {}, { timeout: 15000 }),
+    ).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(3);
+  }, 25000);
+
+  it("reconnects and restores the open session after a mid-session drop", async () => {
+    let disconnectHandler: (() => void) | undefined;
+    const fake1 = makeFake({
+      onDisconnect: (h) => {
+        disconnectHandler = h;
+        return () => {};
+      },
+    });
+    const fake2 = makeFake();
+    const createClient = vi.fn().mockResolvedValueOnce(fake1).mockResolvedValue(fake2);
+    render(<LiveApp createClient={createClient} pathname={PATH} />);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("Explain this change");
+
+    // The socket drops unexpectedly; the app re-establishes on its own.
+    disconnectHandler?.();
+    // The open session's scenes are reloaded on the fresh client.
+    expect(await screen.findByText("Explain this change")).toBeTruthy();
+    expect(
+      await screen.findByText("E2E-encrypted · 2 scenes", {}, { timeout: 15000 }),
+    ).toBeTruthy();
+    expect(createClient).toHaveBeenCalledTimes(2);
+  }, 25000);
 });
