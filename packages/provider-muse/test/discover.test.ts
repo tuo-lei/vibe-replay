@@ -115,6 +115,45 @@ describe("discoverMuseSessions", () => {
     expect(session.sourceFingerprint).toBeTruthy();
   });
 
+  it("counts file-editing tool calls as editCountEst", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-test-edits";
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "Fix the bug" }),
+      // Muse built-in names normalize to canonical Edit/Write.
+      itemLine({ type: "function_call", call_id: "c1", name: "edit", arguments: "{}" }),
+      itemLine({ type: "function_call", call_id: "c2", name: "write", arguments: "{}" }),
+      // Non-editing tools do not count.
+      itemLine({ type: "function_call", call_id: "c3", name: "exec", arguments: "{}" }),
+      itemLine({ type: "function_call", call_id: "c4", name: "read", arguments: "{}" }),
+      itemLine({ type: "function_call", call_id: "c5", name: "memory_search", arguments: "{}" }),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].toolCallCount).toBe(5);
+    expect(sessions[0].editCountEst).toBe(2);
+  });
+
+  it("omits editCountEst when there are no edits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-test-no-edits";
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "What is the time?" }),
+      itemLine({ type: "function_call", call_id: "c1", name: "exec", arguments: "{}" }),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].editCountEst).toBeUndefined();
+  });
+
   it("skips injected subagent-context prompts for firstPrompt but still counts them", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
     tempDirs.push(root);

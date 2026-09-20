@@ -3,9 +3,11 @@ import { readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
+import { FILE_EDIT_TOOLS } from "@vibe-replay/provider-core/utils";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { getMuseAgentsDirs, readMuseSessionMeta } from "./config.js";
 import { isRuntimeInjectionSource } from "./parser.js";
+import { mapMuseToolName } from "./tool-mapping.js";
 
 const PROMPT_SCAN_LIMIT = 2;
 const TITLE_MAX_LENGTH = 80;
@@ -15,6 +17,7 @@ const SYSTEM_PROMPT_PREFIX = "[subagent context]";
 interface MuseScanItem {
   type?: string;
   role?: string;
+  name?: string;
   text?: string;
   parts?: Array<{ type?: string; text?: string }>;
 }
@@ -26,6 +29,7 @@ interface MuseScanState {
   prompts: string[];
   promptCount: number;
   toolCallCount: number;
+  editCount: number;
   compactionCount: number;
   lastTimestamp: string;
   lineCount: number;
@@ -39,6 +43,7 @@ function newScanState(): MuseScanState {
     prompts: [],
     promptCount: 0,
     toolCallCount: 0,
+    editCount: 0,
     compactionCount: 0,
     lastTimestamp: "",
     lineCount: 0,
@@ -113,6 +118,11 @@ function scanLine(state: MuseScanState, line: string): void {
   }
   if (item.type === "function_call") {
     state.toolCallCount += 1;
+    // Canonicalize provider tool names before the edit check so Muse
+    // built-ins (`edit`/`write`) count the same way scanner edit analytics do.
+    if (typeof item.name === "string" && FILE_EDIT_TOOLS.has(mapMuseToolName(item.name))) {
+      state.editCount += 1;
+    }
   }
 }
 
@@ -160,6 +170,7 @@ async function extractMuseSessionInfo(
     prompts: state.prompts,
     promptCount: state.promptCount,
     toolCallCount: state.toolCallCount,
+    editCountEst: state.editCount || undefined,
     compactionCount: state.compactionCount,
     model: meta?.model,
     sourceFingerprint: `${mtimeMs}:${fileSize}`,
