@@ -174,7 +174,9 @@ export class LiveRelay {
         const att = ws.deserializeAttachment() as Attachment | null;
         if (att?.role !== "vm") continue;
         const seen = typeof att.lastSeen === "number" ? att.lastSeen : 0;
-        if (seen > bestSeen) {
+        // >= so that on timestamp ties (two hellos in the same ms) the
+        // later socket in iteration order — the replacement — wins.
+        if (seen >= bestSeen) {
           bestSeen = seen;
           best = ws;
         }
