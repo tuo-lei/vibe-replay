@@ -163,15 +163,26 @@ export class LiveRelay {
   }
 
   private vmSocket(): WebSocket | undefined {
+    // Prefer the shipper socket with the freshest lastSeen: after a shipper
+    // restart the old half-open socket can linger in getWebSockets() even
+    // though the hello handler asked it to close. Picking the freshest avoids
+    // black-holing viewer commands to a dead shipper.
+    let best: WebSocket | undefined;
+    let bestSeen = -1;
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
-        if (att?.role === "vm") return ws;
+        if (att?.role !== "vm") continue;
+        const seen = typeof att.lastSeen === "number" ? att.lastSeen : 0;
+        if (seen > bestSeen) {
+          bestSeen = seen;
+          best = ws;
+        }
       } catch {
         // attachment unreadable — treat as unregistered
       }
     }
-    return undefined;
+    return best;
   }
 
   private closeQuietly(ws: WebSocket, code: number, reason: string): void {
