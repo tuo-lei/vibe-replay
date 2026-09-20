@@ -75,6 +75,25 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
    * never rendered, so resume offsets never duplicate or omit ranges.
    */
   const remoteCountRef = useRef(0);
+  /** Bumps on every new load so a superseded session fetch cannot commit. */
+  const loadGenRef = useRef(0);
+  /** Non-null while watch-live catch-up pages the backlog; tail events that
+   * arrive in that window are buffered and replayed in order afterwards. */
+  const catchupRef = useRef<TailEvent[] | null>(null);
+
+  const applyTailEvent = useCallback((ev: TailEvent) => {
+    if (ev.event === "tail-gap") {
+      // Advance the remote cursor past the skipped range even though we never
+      // rendered those scenes.
+      remoteCountRef.current += ev.skipped;
+      setGapNotice(
+        `${ev.skipped} new scenes were too large to relay — reload the session to see them.`,
+      );
+      return;
+    }
+    remoteCountRef.current += ev.newScenes.length;
+    setScenes((prev) => [...prev, ...ev.newScenes]);
+  }, []);
 
   const refreshList = useCallback(async (client: LiveRelay, retried = false) => {
     setStatus("Loading sessions…");
@@ -115,17 +134,13 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         client.onTail((ev: TailEvent) => {
           const v = viewRef.current;
           if (v.name !== "detail" || ev.id !== v.summary.sessionId) return;
-          if (ev.event === "tail-gap") {
-            // Advance the remote cursor past the skipped range even though we
-            // never rendered those scenes.
-            remoteCountRef.current += ev.skipped;
-            setGapNotice(
-              `${ev.skipped} new scenes were too large to relay — reload the session to see them.`,
-            );
+          // During watch-live catch-up, buffer events and replay them in
+          // arrival order after pagination so scenes never land out of order.
+          if (catchupRef.current) {
+            catchupRef.current.push(ev);
             return;
           }
-          remoteCountRef.current += ev.newScenes.length;
-          setScenes((prev) => [...prev, ...ev.newScenes]);
+          applyTailEvent(ev);
         });
         await refreshList(client);
       } catch (e) {
@@ -137,11 +152,12 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       client?.close();
       clientRef.current = null;
     };
-  }, [createClient, pathname, refreshList]);
+  }, [createClient, pathname, refreshList, applyTailEvent]);
 
   const openSession = useCallback(async (summary: RelaySessionSummary) => {
     const client = clientRef.current;
     if (!client) return;
+    const gen = ++loadGenRef.current;
     setView({ name: "detail", summary });
     setScenes([]);
     setGapNotice(null);
@@ -155,6 +171,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       while (offset < total) {
         setStatus(`Loading scenes ${offset}/${total === Infinity ? "…" : total}…`);
         const res = await client.get(summary.sessionId, offset, SCENE_PAGE);
+        if (loadGenRef.current !== gen) return; // superseded by a newer load
         total = res.totalScenes;
         if (!res.scenes.length) {
           total = loaded.length; // guard against stalls
@@ -163,19 +180,22 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         loaded.push(...res.scenes);
         offset = loaded.length;
       }
+      if (loadGenRef.current !== gen) return;
       setScenes(loaded);
       remoteCountRef.current = total;
       setStatus(`E2E-encrypted · ${total} scenes`);
     } catch (e) {
+      if (loadGenRef.current !== gen) return;
       setFatal(friendlyError(e));
     } finally {
-      setLoadingScenes(false);
+      if (loadGenRef.current === gen) setLoadingScenes(false);
     }
   }, []);
 
   const backToList = useCallback(() => {
     const client = clientRef.current;
     const v = viewRef.current;
+    loadGenRef.current++; // invalidate any in-flight session load
     if (client && v.name === "detail") void client.untail(v.summary.sessionId);
     setWatching(false);
     setGapNotice(null);
@@ -213,29 +233,36 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
       return;
     }
     setStatus("Watching live…");
+    // Buffer tail events that arrive while we page the backlog, then replay
+    // them in arrival order so scenes never land out of order.
+    const buffered: TailEvent[] = [];
+    catchupRef.current = buffered;
     try {
       const { totalScenes } = await client.tail(v.summary.sessionId);
-      // Fetch everything added between page load and subscribe so no scenes
-      // fall in the gap, then flip to live. Page through: one `get` caps at
-      // SCENE_PAGE scenes.
-      let offset = remoteCountRef.current;
-      while (offset < totalScenes) {
+      // Fixed starting offset: fetch everything added between page load and
+      // subscribe. Page through: one `get` caps at SCENE_PAGE scenes.
+      let cursor = remoteCountRef.current;
+      while (cursor < totalScenes) {
         const res = await client.get(
           v.summary.sessionId,
-          offset,
-          Math.min(SCENE_PAGE, totalScenes - offset),
+          cursor,
+          Math.min(SCENE_PAGE, totalScenes - cursor),
         );
         if (!res.scenes.length) break; // guard against stalls
         setScenes((prev) => [...prev, ...res.scenes]);
-        offset += res.scenes.length;
+        cursor += res.scenes.length;
       }
-      remoteCountRef.current = offset;
+      catchupRef.current = null;
+      if (viewRef.current.name !== "detail") return; // user navigated away
+      remoteCountRef.current = cursor;
+      for (const ev of buffered) applyTailEvent(ev);
       setWatching(true);
       setStatus("E2E-encrypted · live — new turns appear below");
     } catch (e) {
+      catchupRef.current = null;
       setFatal(friendlyError(e));
     }
-  }, [watching]);
+  }, [watching, applyTailEvent]);
 
   const openHit = useCallback(
     (hit: RelaySearchHit) => {

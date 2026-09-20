@@ -109,16 +109,32 @@ export class LiveClient implements LiveRelay {
     const ws = new WebSocket(`${proto}//${location.host}/live/${boxId}`);
     const client = new LiveClient(ws, key, boxId);
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("connection-timeout")), 15_000);
-      ws.onopen = () => {
+      let settled = false;
+      // A socket that times out or errors must never later trigger onopen and
+      // send hello: clear the setup handlers and close it before rejecting.
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        ws.onopen = null;
+        ws.onerror = null;
+        ws.close();
+        reject(err);
+      };
+      const timer = setTimeout(() => fail(new Error("connection-timeout")), 15_000);
+      ws.onopen = () => {
+        if (settled) {
+          ws.close();
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        ws.onopen = null;
+        ws.onerror = null;
         ws.send(JSON.stringify({ t: "hello", role: "viewer" }));
         resolve();
       };
-      ws.onerror = () => {
-        clearTimeout(timer);
-        reject(new Error("connection-error"));
-      };
+      ws.onerror = () => fail(new Error("connection-error"));
     });
     ws.onmessage = (e) => void client.handleMessage(e);
     ws.onclose = () => client.handleClose();

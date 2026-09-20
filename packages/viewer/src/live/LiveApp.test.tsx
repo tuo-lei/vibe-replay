@@ -140,4 +140,35 @@ describe("LiveApp", () => {
     expect(resume).toHaveLength(1);
     expect(resume[0].limit).toBe(2);
   });
+
+  it("replays tail events buffered during watch-live catch-up exactly once", async () => {
+    let tailHandler: ((ev: TailEvent) => void) | undefined;
+    let emitLive = false;
+    const liveScene: Scene = { type: "text-response", content: "live scene" };
+    const fake = makeFake({
+      onTail: (h) => {
+        tailHandler = h;
+        return () => {};
+      },
+      get: async (_id, offset, limit) => {
+        // A live turn lands while the catch-up page is in flight.
+        if (emitLive) {
+          emitLive = false;
+          tailHandler?.({ event: "tail", id: "sess-1", newScenes: [liveScene] });
+        }
+        return { scenes: [], totalScenes: 0, offset };
+      },
+      tail: async () => ({ totalScenes: 3 }),
+    });
+    renderApp(fake);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("E2E-encrypted · 0 scenes");
+
+    emitLive = true;
+    fireEvent.click(screen.getByText("Watch live"));
+    await screen.findByText(/live — new turns appear below/);
+    // Buffered during catch-up, applied once afterwards — not lost, not duplicated.
+    expect(screen.getAllByText("live scene")).toHaveLength(1);
+  });
 });
