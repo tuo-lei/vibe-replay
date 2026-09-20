@@ -240,9 +240,18 @@ export class LiveRelay {
     }
   }
 
-  /** Push the current viewer roster to every connected viewer. */
-  private broadcastPresence(): void {
-    const viewers = this.viewers();
+  /**
+   * Push the current viewer roster to every connected viewer.
+   *
+   * `except` excludes one socket from both the roster and the recipients.
+   * webSocketClose() passes the closing socket: in production the runtime
+   * still lists it in getWebSockets() when the close event fires (it even
+   * receives the broadcast), and its lastSeen is fresh so the 45 s
+   * presence filter would not drop it — without the exclusion the roster
+   * would never shrink on a clean viewer leave.
+   */
+  private broadcastPresence(except?: unknown): void {
+    const viewers = this.viewers().filter(({ ws }) => ws !== except);
     const msg = JSON.stringify({
       t: "presence",
       viewers: viewers.map(({ vid, name }) => ({ vid, name })),
@@ -518,9 +527,10 @@ export class LiveRelay {
         // storage best-effort (some harnesses lack it)
       }
     }
-    // The closed socket is already removed from getWebSockets(): if it was
-    // a viewer, push the shrunken roster to whoever remains.
-    this.broadcastPresence();
+    // The closed socket is already removed from getWebSockets() — or, in
+    // production, still listed but excluded below: if it was a viewer, push
+    // the shrunken roster to whoever remains.
+    this.broadcastPresence(ws);
     if (this.ctx.getWebSockets().length === 0) {
       // Don't disarm while the end grace is pending — the alarm is what
       // declares the box dead when the shipper never comes back.
