@@ -210,14 +210,21 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   let stopped = false;
   let reconnectDelayMs = 2000;
   /**
-   * When the shipper last had a working relay connection (0 = never).
-   * The relay declares a shipperless box dead after 90 s, so a box id
-   * that stays unreachable far past that can never come back: retrying
-   * it forever is pointless. Past this threshold the shipper exits so
-   * the supervisor/watchdog mints a fresh URL. A shipper that never
-   * connected keeps retrying — the relay may simply not be up yet.
+   * Whether the shipper ever held a working relay connection. The relay
+   * declares a shipperless box dead after 90 s, so an outage far past that
+   * means this box id can never come back: retrying it forever is
+   * pointless. Past the threshold the shipper exits so the
+   * supervisor/watchdog mints a fresh URL. A shipper that never connected
+   * keeps retrying — the relay may simply not be up yet.
+   *
+   * The outage clock starts when a live connection DROPS, not when it was
+   * established: a transient blip (deploy restart, proxy hiccup) on a
+   * long-lived connection must ride the normal reconnect/backoff path,
+   * not exit immediately because the connection was old.
    */
-  let lastConnectedAt = 0;
+  let everConnected = false;
+  /** When the current outage began (0 = connected or never dropped). */
+  let outageBeganAt = 0;
   const DEAD_BOX_RETRY_EXIT_MS = 150_000;
 
   /** Returns false when the socket is down or the frame is oversized — the
@@ -537,7 +544,8 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     ws = socket;
     socket.onopen = () => {
       reconnectDelayMs = 2000;
-      lastConnectedAt = Date.now();
+      everConnected = true;
+      outageBeganAt = 0;
       socket.send(JSON.stringify({ t: "hello", role: "vm" }));
       console.log("  ✓ Connected to relay. Waiting for viewer…\n");
     };
@@ -558,12 +566,17 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       // its 90 s end grace: this box id is dead for good. Exit so the
       // supervisor restarts with a fresh URL instead of pointlessly
       // retrying a box id the relay will only ever reject as a zombie.
-      if (lastConnectedAt > 0 && Date.now() - lastConnectedAt > DEAD_BOX_RETRY_EXIT_MS) {
-        const goneSec = Math.round((Date.now() - lastConnectedAt) / 1000);
-        console.log(`\n  ✕ Relay unreachable for ${goneSec}s — this box id is dead.`);
-        console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
-        stopped = true;
-        process.exit(0);
+      // The outage clock starts when the connection DROPS: a transient blip
+      // on a long-lived connection rides the normal retry path below.
+      if (everConnected) {
+        if (outageBeganAt === 0) outageBeganAt = Date.now();
+        if (Date.now() - outageBeganAt > DEAD_BOX_RETRY_EXIT_MS) {
+          const goneSec = Math.round((Date.now() - outageBeganAt) / 1000);
+          console.log(`\n  ✕ Relay unreachable for ${goneSec}s — this box id is dead.`);
+          console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+          stopped = true;
+          process.exit(0);
+        }
       }
       console.log(`  ↻ Relay connection lost — retrying in ${reconnectDelayMs / 1000}s…`);
       setTimeout(connect, reconnectDelayMs);
