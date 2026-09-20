@@ -69,6 +69,12 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
   const clientRef = useRef<LiveRelay | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
+  /**
+   * Remote scene cursor: how many scenes the shipper has for the open
+   * session. Stays ahead of `scenes.length` when a tail-gap skips scenes we
+   * never rendered, so resume offsets never duplicate or omit ranges.
+   */
+  const remoteCountRef = useRef(0);
 
   const refreshList = useCallback(async (client: LiveRelay, retried = false) => {
     setStatus("Loading sessions…");
@@ -110,11 +116,15 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
           const v = viewRef.current;
           if (v.name !== "detail" || ev.id !== v.summary.sessionId) return;
           if (ev.event === "tail-gap") {
+            // Advance the remote cursor past the skipped range even though we
+            // never rendered those scenes.
+            remoteCountRef.current += ev.skipped;
             setGapNotice(
               `${ev.skipped} new scenes were too large to relay — reload the session to see them.`,
             );
             return;
           }
+          remoteCountRef.current += ev.newScenes.length;
           setScenes((prev) => [...prev, ...ev.newScenes]);
         });
         await refreshList(client);
@@ -137,6 +147,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     setGapNotice(null);
     setWatching(false);
     setLoadingScenes(true);
+    remoteCountRef.current = 0;
     const loaded: Scene[] = [];
     let total = Infinity;
     let offset = 0;
@@ -153,6 +164,7 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
         offset = loaded.length;
       }
       setScenes(loaded);
+      remoteCountRef.current = total;
       setStatus(`E2E-encrypted · ${total} scenes`);
     } catch (e) {
       setFatal(friendlyError(e));
@@ -203,23 +215,27 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     setStatus("Watching live…");
     try {
       const { totalScenes } = await client.tail(v.summary.sessionId);
-      // Fetch anything added between page load and subscribe so no scenes
-      // fall in the gap, then flip to live.
-      const missing = totalScenes - scenes.length;
-      if (missing > 0) {
+      // Fetch everything added between page load and subscribe so no scenes
+      // fall in the gap, then flip to live. Page through: one `get` caps at
+      // SCENE_PAGE scenes.
+      let offset = remoteCountRef.current;
+      while (offset < totalScenes) {
         const res = await client.get(
           v.summary.sessionId,
-          scenes.length,
-          Math.min(SCENE_PAGE, missing),
+          offset,
+          Math.min(SCENE_PAGE, totalScenes - offset),
         );
-        if (res.scenes.length) setScenes((prev) => [...prev, ...res.scenes]);
+        if (!res.scenes.length) break; // guard against stalls
+        setScenes((prev) => [...prev, ...res.scenes]);
+        offset += res.scenes.length;
       }
+      remoteCountRef.current = offset;
       setWatching(true);
       setStatus("E2E-encrypted · live — new turns appear below");
     } catch (e) {
       setFatal(friendlyError(e));
     }
-  }, [watching, scenes.length]);
+  }, [watching]);
 
   const openHit = useCallback(
     (hit: RelaySearchHit) => {

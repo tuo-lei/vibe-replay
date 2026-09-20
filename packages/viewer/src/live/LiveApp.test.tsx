@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LiveApp from "./LiveApp";
 import { stubBrowserAPIs } from "../test-utils/jsdom-stubs";
 import type { Scene } from "../types";
-import type { LiveRelay, RelaySessionSummary } from "./protocol";
+import type { LiveRelay, RelaySessionSummary, TailEvent } from "./protocol";
 
 afterEach(() => {
   cleanup();
@@ -105,5 +105,39 @@ describe("LiveApp", () => {
     render(<LiveApp createClient={(boxId) => LiveClient.connect(boxId)} pathname={PATH} />);
     // jsdom has no #fragment key → invalid-share-url
     expect(await screen.findByText(/missing encryption key/)).toBeTruthy();
+  });
+
+  it("resumes watch-live from the advanced remote cursor after a tail gap", async () => {
+    const getCalls: Array<{ offset: number; limit: number }> = [];
+    let tailHandler: ((ev: TailEvent) => void) | undefined;
+    const fake = makeFake({
+      onTail: (h) => {
+        tailHandler = h;
+        return () => {};
+      },
+      get: async (_id, offset, limit) => {
+        getCalls.push({ offset, limit });
+        return { scenes: [], totalScenes: 0, offset };
+      },
+      tail: async () => ({ totalScenes: 5 }),
+    });
+    renderApp(fake);
+    await screen.findByText("First session");
+    fireEvent.click(screen.getByText("First session"));
+    await screen.findByText("E2E-encrypted · 0 scenes");
+
+    // Shipper skipped 3 scenes that were too large to relay.
+    act(() => {
+      tailHandler?.({ event: "tail-gap", id: "sess-1", skipped: 3 });
+    });
+    expect(screen.getByText(/3 new scenes were too large/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Watch live"));
+    await screen.findByText(/live — new turns appear below/);
+    // The resume fetch must start at the advanced cursor (0 + 3), not at the
+    // rendered array length (0), and page the remaining 2 scenes.
+    const resume = getCalls.filter((c) => c.offset === 3);
+    expect(resume).toHaveLength(1);
+    expect(resume[0].limit).toBe(2);
   });
 });
