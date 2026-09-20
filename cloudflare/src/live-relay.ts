@@ -201,7 +201,10 @@ export class LiveRelay {
    */
   private ensureSweepAlarm(): void {
     try {
-      void this.ctx.storage.setAlarm(Date.now() + SWEEP_ALARM_EVERY_MS);
+      void this.ctx.storage.setAlarm(Date.now() + SWEEP_ALARM_EVERY_MS).catch(() => {
+        // async storage failure (e.g. test harness) — sweep still works when
+        // alarm() is invoked directly
+      });
     } catch {
       // storage unavailable in some test harnesses — sweep still works when
       // alarm() is invoked directly
@@ -226,7 +229,16 @@ export class LiveRelay {
       }
       if (!att || (att.role !== "vm" && att.role !== "viewer")) continue;
       const timeout = att.role === "vm" ? VM_SWEEP_AFTER_MS : PRESENCE_SWEEP_AFTER_MS;
-      if (typeof att.lastSeen === "number" && now - att.lastSeen > timeout) {
+      if (typeof att.lastSeen !== "number") {
+        // Legacy attachment from before the liveness sweep deployed: stamp it
+        // now so it gets one grace period, then normal timeouts apply.
+        // Healthy sockets refresh lastSeen on their next heartbeat/frame;
+        // silent ghosts get swept on a later pass.
+        ws.serializeAttachment({ ...att, lastSeen: now } satisfies Attachment);
+        live++;
+        continue;
+      }
+      if (now - att.lastSeen > timeout) {
         this.closeQuietly(ws, 1001, "idle timeout");
         continue;
       }

@@ -344,6 +344,23 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(h.alarmAt()).toBeGreaterThan(Date.now());
   });
 
+  it("migrates legacy attachments without lastSeen, then sweeps them if they stay silent", async () => {
+    const h = makeAlarmRelay();
+    const a = await helloViewer(h, LEI_CIPHER);
+    // Simulate a socket attached before the liveness sweep deployed.
+    delete (a.ws.attachment as { lastSeen?: number }).lastSeen;
+
+    // First alarm: grace period — stamped with lastSeen, not swept.
+    await h.relay.alarm();
+    expect(a.ws.closed).toEqual([]);
+    expect(typeof (a.ws.attachment as { lastSeen?: number }).lastSeen).toBe("number");
+
+    // Still silent past the 45 s viewer timeout → swept on a later pass.
+    (a.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    await h.relay.alarm();
+    expect(a.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+  });
+
   it("disarms the alarm once the last socket is gone", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);
