@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:live": "vite build --config vite.live.config.ts"
   },
   "dependencies": {
     "@vibe-replay/types": "workspace:*",
