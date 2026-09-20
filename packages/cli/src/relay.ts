@@ -209,6 +209,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   let ws: WebSocket | null = null;
   let stopped = false;
   let reconnectDelayMs = 2000;
+  /**
+   * When the shipper last had a working relay connection (0 = never).
+   * The relay declares a shipperless box dead after 90 s, so a box id
+   * that stays unreachable far past that can never come back: retrying
+   * it forever is pointless. Past this threshold the shipper exits so
+   * the supervisor/watchdog mints a fresh URL. A shipper that never
+   * connected keeps retrying — the relay may simply not be up yet.
+   */
+  let lastConnectedAt = 0;
+  const DEAD_BOX_RETRY_EXIT_MS = 150_000;
 
   /** Returns false when the socket is down or the frame is oversized — the
    *  caller decides whether to retry or send a smaller correlated error.
@@ -527,6 +537,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     ws = socket;
     socket.onopen = () => {
       reconnectDelayMs = 2000;
+      lastConnectedAt = Date.now();
       socket.send(JSON.stringify({ t: "hello", role: "vm" }));
       console.log("  ✓ Connected to relay. Waiting for viewer…\n");
     };
@@ -539,6 +550,17 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       const reason = typeof ev?.reason === "string" ? ev.reason : "";
       if (reason === "session ended" || reason === "box ended") {
         console.log("\n  ✕ The relay ended this session. This URL is dead.");
+        console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+        stopped = true;
+        process.exit(0);
+      }
+      // We once had this box, but the relay has been unreachable far past
+      // its 90 s end grace: this box id is dead for good. Exit so the
+      // supervisor restarts with a fresh URL instead of pointlessly
+      // retrying a box id the relay will only ever reject as a zombie.
+      if (lastConnectedAt > 0 && Date.now() - lastConnectedAt > DEAD_BOX_RETRY_EXIT_MS) {
+        const goneSec = Math.round((Date.now() - lastConnectedAt) / 1000);
+        console.log(`\n  ✕ Relay unreachable for ${goneSec}s — this box id is dead.`);
         console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
         stopped = true;
         process.exit(0);

@@ -193,6 +193,25 @@ export class LiveRelay {
     return out;
   }
 
+  /**
+   * Every attached viewer-role socket, without the presence-liveness
+   * filter. Used when the box dies: a suspended mobile tab that missed
+   * heartbeats still holds a socket and must learn the session ended
+   * when it wakes — not silently rejoin a dead box.
+   */
+  private attachedViewers(): WebSocket[] {
+    const out: WebSocket[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const att = ws.deserializeAttachment() as Attachment | null;
+        if (att?.role === "viewer" && att.vid) out.push(ws);
+      } catch {
+        // attachment unreadable — treat as unregistered
+      }
+    }
+    return out;
+  }
+
   private vmSocket(): WebSocket | undefined {
     for (const ws of this.ctx.getWebSockets()) {
       try {
@@ -403,6 +422,16 @@ export class LiveRelay {
       return;
     }
 
+    // The box is dead but this socket missed endBox (e.g. a suspended tab
+    // whose socket survived). It learns the session ended on its next
+    // message instead of silently rejoining a dead box — and its heartbeat
+    // must not refresh the sweep clock below.
+    if (attachment.role === "viewer" && (await this.boxEnded())) {
+      this.sendQuietly(ws, JSON.stringify({ t: "session-ended" }));
+      this.closeQuietly(ws, 1000, "session ended");
+      return;
+    }
+
     // Plaintext liveness ping from a hello'd socket (viewer heartbeat or
     // anything the shipper sends outside frames). Refreshes the sweep clock.
     if (msg.t === "heartbeat") {
@@ -538,7 +567,10 @@ export class LiveRelay {
       // storage best-effort (some harnesses lack it)
     }
     const msg = JSON.stringify({ t: "session-ended" });
-    for (const { ws } of this.viewers()) {
+    // Every attached viewer socket — not just the presence-filtered roster:
+    // a suspended tab that missed heartbeats still holds a socket and must
+    // learn the session ended when it wakes.
+    for (const ws of this.attachedViewers()) {
       this.sendQuietly(ws, msg);
       this.closeQuietly(ws, 1000, "session ended");
     }

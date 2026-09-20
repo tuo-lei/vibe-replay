@@ -605,3 +605,97 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(res.status).toBe(426);
   });
 });
+
+describe("LiveRelay box lifecycle — stale viewer sockets", () => {
+  // Reuses the storage harness + sessionEndedFrames helper from the
+  // lifecycle describe block above via closure-free duplication: the
+  // helpers are block-scoped, so this block defines its own minimal ones.
+  interface H {
+    relay: LiveRelay;
+    sockets: MockSocket[];
+    store: Map<string, unknown>;
+  }
+  function makeHarness(): H {
+    const sockets: MockSocket[] = [];
+    const store = new Map<string, unknown>();
+    const ctx = {
+      getWebSockets: () => [...sockets],
+      acceptWebSocket: (ws: MockSocket) => {
+        sockets.push(ws);
+      },
+      storage: {
+        get: (k: string) => Promise.resolve(store.get(k)),
+        put: (k: string, v: unknown) => {
+          store.set(k, v);
+          return Promise.resolve();
+        },
+        delete: (k: string) => {
+          store.delete(k);
+          return Promise.resolve();
+        },
+        setAlarm: () => Promise.resolve(),
+        getAlarm: () => Promise.resolve(null),
+        deleteAlarm: () => Promise.resolve(),
+      },
+    } as unknown as DurableObjectState;
+    return { relay: new LiveRelay(ctx), sockets, store };
+  }
+  const endedFrames = (ws: MockSocket) =>
+    ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "session-ended");
+
+  it("endBox reaches even a suspended viewer that missed heartbeats", async () => {
+    const h = makeHarness();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // b is a suspended mobile tab: socket attached, heartbeats stale past
+    // the 45 s presence filter, so the roster no longer lists it.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm" }),
+    );
+
+    // Both learn it — the stale socket is not silently left on a dead box.
+    for (const v of [a, b]) {
+      expect(endedFrames(v.ws)).toHaveLength(1);
+      expect(v.ws.closed).toEqual([{ code: 1000, reason: "session ended" }]);
+    }
+  });
+
+  it("a viewer message on an ended box is answered with session-ended, never a silent rejoin", async () => {
+    const h = makeHarness();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm" }),
+    );
+    expect(h.store.get("ended")).toBe(true);
+
+    // The socket survived endBox half-open (the mock never removes it):
+    // its next heartbeat must not refresh the sweep clock or rejoin the
+    // dead box.
+    a.ws.sent.length = 0;
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    expect(endedFrames(a.ws)).toHaveLength(1);
+    expect(a.ws.closed[a.ws.closed.length - 1]).toEqual({
+      code: 1000,
+      reason: "session ended",
+    });
+
+    // And a viewer command on the dead box is dropped, not routed.
+    a.ws.sent.length = 0;
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "frame", iv: "x", data: "y" }),
+    );
+    expect(endedFrames(a.ws)).toHaveLength(1);
+  });
+});
