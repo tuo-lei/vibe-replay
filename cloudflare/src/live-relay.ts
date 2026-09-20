@@ -27,6 +27,12 @@
  * nobody watching) costs ~zero duration billing: the runtime answers
  * ping/pong without waking the object.
  *
+ * Liveness: viewers send a plaintext `{t:"heartbeat"}` every
+ * HEARTBEAT_INTERVAL_MS; a periodic alarm sweeps sockets silent past the
+ * timeout (viewers 45 s, shipper 150 s). Close frames are not reliably
+ * delivered through proxies and mobile radios, so without the sweep dead
+ * viewers would accumulate as roster ghosts.
+ *
  * Note: this class deliberately does NOT import from "cloudflare:workers".
  * A plain class with the right shape works as a Durable Object, and it keeps
  * the module importable in plain vitest runs (which can't resolve the
@@ -56,7 +62,30 @@ interface Attachment {
    * hello carried no usable ciphertext; viewers render those as "Guest".
    */
   name?: NameCipher | null;
+  /**
+   * Last time (ms epoch) this socket proved liveness: hello, heartbeat, or
+   * any frame. The alarm sweeps sockets silent past the timeout, because
+   * close frames are not reliably delivered (proxies, mobile radios, tab
+   * kills) — without the sweep, dead viewers accumulate as roster ghosts.
+   * Stored in the attachment so it survives hibernation eviction.
+   */
+  lastSeen?: number;
 }
+
+/**
+ * How often a healthy viewer sends `{t:"heartbeat"}` (plaintext liveness,
+ * relay-visible routing metadata like hello — no privacy implication).
+ * The viewer implements this cadence; the relay only enforces the sweep.
+ */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+/** Sweep viewers silent longer than this. Worst-case ghost lifetime is this
+ *  plus one alarm period. */
+const PRESENCE_SWEEP_AFTER_MS = 45_000;
+/** The shipper sends a keepalive every 45 s; sweep a VM socket silent much
+ *  longer than that so a dead shipper stops black-holing viewer commands. */
+const VM_SWEEP_AFTER_MS = 150_000;
+/** How often the sweep alarm re-fires while any socket is attached. */
+const SWEEP_ALARM_EVERY_MS = 20_000;
 
 /** Max relay-visible envelope size. Well under the 32 MiB WS message limit. */
 const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
@@ -165,6 +194,67 @@ export class LiveRelay {
     for (const { ws } of viewers) this.sendQuietly(ws, msg);
   }
 
+  /**
+   * (Re)arm the sweep alarm while any socket is attached. Alarms survive
+   * hibernation eviction, so a box with a live viewer keeps being swept even
+   * when the object sleeps between heartbeats.
+   */
+  private ensureSweepAlarm(): void {
+    try {
+      void this.ctx.storage.setAlarm(Date.now() + SWEEP_ALARM_EVERY_MS).catch(() => {
+        // async storage failure (e.g. test harness) — sweep still works when
+        // alarm() is invoked directly
+      });
+    } catch {
+      // storage unavailable in some test harnesses — sweep still works when
+      // alarm() is invoked directly
+    }
+  }
+
+  /**
+   * Alarm handler: close sockets that stopped proving liveness. Closing
+   * (not just dropping from the roster) lets the runtime deliver
+   * webSocketClose, which broadcasts the shrunken roster and tells the
+   * shipper to drop that viewer's tails.
+   */
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    let live = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      let att: Attachment | null = null;
+      try {
+        att = ws.deserializeAttachment() as Attachment | null;
+      } catch {
+        continue;
+      }
+      if (!att || (att.role !== "vm" && att.role !== "viewer")) continue;
+      const timeout = att.role === "vm" ? VM_SWEEP_AFTER_MS : PRESENCE_SWEEP_AFTER_MS;
+      if (typeof att.lastSeen !== "number") {
+        // Legacy attachment from before the liveness sweep deployed: stamp it
+        // now so it gets one grace period, then normal timeouts apply.
+        // Healthy sockets refresh lastSeen on their next heartbeat/frame;
+        // silent ghosts get swept on a later pass.
+        ws.serializeAttachment({ ...att, lastSeen: now } satisfies Attachment);
+        live++;
+        continue;
+      }
+      if (now - att.lastSeen > timeout) {
+        this.closeQuietly(ws, 1001, "idle timeout");
+        continue;
+      }
+      live++;
+    }
+    if (live > 0) {
+      this.ensureSweepAlarm();
+    } else {
+      try {
+        await this.ctx.storage.deleteAlarm();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
     // Measure text frames in UTF-8 bytes: message.length counts UTF-16 code
     // units, which understates the wire size of non-ASCII payloads.
@@ -205,19 +295,37 @@ export class LiveRelay {
           // One shipper per box: a new shipper takes over from the old one.
           const existing = this.vmSocket();
           if (existing && existing !== ws) this.closeQuietly(existing, 1000, "replaced");
-          ws.serializeAttachment({ role: "vm" } satisfies Attachment);
+          ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
+          this.ensureSweepAlarm();
           return;
         }
         // Viewers are never displaced: any number of viewers may watch the
         // same box at once, Excalidraw-style.
         const vid = newVid();
         const name = sanitizeNameCipher(msg.name);
-        ws.serializeAttachment({ role: "viewer", vid, name } satisfies Attachment);
+        ws.serializeAttachment({
+          role: "viewer",
+          vid,
+          name,
+          lastSeen: Date.now(),
+        } satisfies Attachment);
         this.sendQuietly(ws, JSON.stringify({ t: "welcome", vid }));
+        this.ensureSweepAlarm();
         this.broadcastPresence();
         return;
       }
       this.closeQuietly(ws, 1003, "hello first");
+      return;
+    }
+
+    // Plaintext liveness ping from a hello'd socket (viewer heartbeat or
+    // anything the shipper sends outside frames). Refreshes the sweep clock.
+    if (msg.t === "heartbeat") {
+      try {
+        ws.serializeAttachment({ ...attachment, lastSeen: Date.now() } satisfies Attachment);
+      } catch {
+        // attachment unwritable — the sweep will eventually reap this socket
+      }
       return;
     }
 
@@ -227,6 +335,14 @@ export class LiveRelay {
     }
 
     if (attachment.role === "vm") {
+      // Any VM frame — including the shipper's keepalive no-ops — proves the
+      // shipper is alive. A dead shipper's ghost socket must not black-hole
+      // viewer commands forever; the sweep reaps it past VM_SWEEP_AFTER_MS.
+      try {
+        ws.serializeAttachment({ ...attachment, lastSeen: Date.now() } satisfies Attachment);
+      } catch {
+        // attachment unwritable — the sweep will eventually reap this socket
+      }
       // VM → viewers: route by the plaintext `via` tag the shipper echoed
       // back, or broadcast when absent (keepalive no-ops). Strip the routing
       // tag before delivery — viewers only ever see {t, iv, data}.
@@ -267,6 +383,13 @@ export class LiveRelay {
     // The closed socket is already removed from getWebSockets(): if it was
     // a viewer, push the shrunken roster to whoever remains.
     this.broadcastPresence();
+    if (this.ctx.getWebSockets().length === 0) {
+      try {
+        await this.ctx.storage.deleteAlarm();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BOX_ID_RE, KEY_RE, b64urlDecode, b64urlEncode, boxIdFromPath } from "./protocol";
 
 describe("b64url helpers", () => {
@@ -300,5 +300,49 @@ describe("LiveClient presence generation guard", () => {
 
     const roster = seen[seen.length - 1]!;
     expect(roster).toEqual([{ vid: "v2", name: "new" }]);
+  });
+});
+
+describe("LiveClient heartbeat", () => {
+  it("sends {t:'heartbeat'} on start and every HEARTBEAT_INTERVAL_MS, stopping on close", async () => {
+    vi.useFakeTimers();
+    try {
+      const { LiveClient, HEARTBEAT_INTERVAL_MS } = await import("./protocol");
+      const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+        "encrypt",
+        "decrypt",
+      ]);
+      const sent: string[] = [];
+      const fakeWs = {
+        send: (d: string) => {
+          sent.push(d);
+        },
+        close: () => {},
+        readyState: 1,
+      };
+      // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+      const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+      client.startHeartbeat();
+      // Immediate beat, then one per interval.
+      expect(sent).toEqual([JSON.stringify({ t: "heartbeat" })]);
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+      expect(sent).toEqual([
+        JSON.stringify({ t: "heartbeat" }),
+        JSON.stringify({ t: "heartbeat" }),
+      ]);
+      // close() stops the timer: no more beats.
+      client.close();
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS * 3);
+      expect(sent).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays under the relay's sweep timeout with wide margin", async () => {
+    const { HEARTBEAT_INTERVAL_MS } = await import("./protocol");
+    // Relay sweeps viewers silent past 45 s; two missed beats must still
+    // not look dead.
+    expect(HEARTBEAT_INTERVAL_MS * 2).toBeLessThan(45_000);
   });
 });

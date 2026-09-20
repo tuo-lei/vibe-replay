@@ -439,6 +439,22 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
     };
   }, [connectAndList, myName]);
 
+  // Best-effort prompt leave: tell the relay the viewer is going away when
+  // the page hides (tab close, navigation). Close frames don't reliably
+  // survive proxies, so the relay also sweeps silent viewers — this just
+  // makes the common case instant.
+  useEffect(() => {
+    const onHide = () => {
+      try {
+        clientRef.current?.close();
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, []);
+
   const openSession = useCallback(
     async (summary: RelaySessionSummary) => {
       const client = clientRef.current;

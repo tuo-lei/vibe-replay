@@ -75,6 +75,12 @@ export function normalizeName(raw: string): string {
 export const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
 export const BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const COMMAND_TIMEOUT_MS = 30_000;
+/**
+ * Viewer heartbeat cadence. Must stay well under the relay's
+ * PRESENCE_SWEEP_AFTER_MS (45 s) — keep in sync with
+ * cloudflare/src/live-relay.ts HEARTBEAT_INTERVAL_MS.
+ */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
 /** Chunked command responses: hard cap on chunks per command (mirrors the shipper). */
 const MAX_CHUNKS = 64;
 
@@ -157,6 +163,9 @@ export class LiveClient implements LiveRelay {
   private closed = false;
   /** True once close() was called — suppresses the disconnect handlers. */
   private intentionalClose = false;
+  /** Liveness pings to the relay (`{t:"heartbeat"}`), so the relay's sweep
+   *  never mistakes a healthy viewer for a ghost. Started after hello. */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private constructor(ws: WebSocket, key: CryptoKey, boxId: string) {
     this.ws = ws;
@@ -205,6 +214,7 @@ export class LiveClient implements LiveRelay {
         ws.onopen = null;
         ws.onerror = null;
         ws.send(JSON.stringify({ t: "hello", role: "viewer", name: nameCipher }));
+        client.startHeartbeat();
         resolve();
       };
       ws.onerror = () => fail(new Error("connection-error"));
@@ -392,6 +402,7 @@ export class LiveClient implements LiveRelay {
   private handleClose(info: DisconnectInfo): void {
     if (this.closed) return;
     this.closed = true;
+    this.stopHeartbeat();
     for (const [, p] of this.pending) p.reject(new Error("disconnected"));
     this.pending.clear();
     this.chunkBufs.clear();
@@ -402,6 +413,33 @@ export class LiveClient implements LiveRelay {
       } catch {
         // a failing handler must not break the others
       }
+    }
+  }
+
+  /**
+   * Prove liveness to the relay so its sweep never reaps a healthy viewer.
+   * Plaintext `{t:"heartbeat"}` — relay-visible routing metadata like hello,
+   * carrying nothing private. The relay sweeps viewers silent past 45 s, so
+   * this fires every HEARTBEAT_INTERVAL_MS (15 s) with wide margin.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const beat = () => {
+      if (this.closed || this.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        this.ws.send(JSON.stringify({ t: "heartbeat" }));
+      } catch {
+        // send failed — the close handler will clean up
+      }
+    };
+    beat();
+    this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 
