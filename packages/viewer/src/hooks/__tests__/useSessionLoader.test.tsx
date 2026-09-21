@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySession } from "../../types";
 import { useSessionLoader } from "../useSessionLoader";
 
+const relayState = vi.hoisted(() => ({ connect: vi.fn() }));
+
+vi.mock("../../live/protocol", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../live/protocol")>();
+  return {
+    ...actual,
+    LiveClient: { connect: relayState.connect },
+  };
+});
+
 const win = window as unknown as {
   __VIBE_REPLAY_DATA__?: ReplaySession;
   __VIBE_REPLAY_EDITOR__?: boolean;
@@ -30,6 +40,7 @@ function setSearch(search: string) {
 
 afterEach(() => {
   cleanup();
+  relayState.connect.mockReset();
   win.__VIBE_REPLAY_DATA__ = undefined;
   win.__VIBE_REPLAY_EDITOR__ = undefined;
   setSearch("/");
@@ -84,6 +95,33 @@ describe("useSessionLoader", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
     if (result.current.status !== "ready") throw new Error("unreachable");
     expect(result.current.mode).toBe("embedded");
+  });
+
+  it("loads an E2E Quick Share replay through the relay client", async () => {
+    const getReplay = vi.fn().mockResolvedValue(fakeSession);
+    const close = vi.fn();
+    relayState.connect.mockResolvedValue({ getReplay, close });
+    setSearch("?relay=abcdefghijklmnopqrstuv");
+
+    const { result } = renderHook(() => useSessionLoader());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    if (result.current.status !== "ready") throw new Error("unreachable");
+
+    expect(result.current.mode).toBe("readonly");
+    expect(result.current.session).toEqual(fakeSession);
+    expect(relayState.connect).toHaveBeenCalledWith("abcdefghijklmnopqrstuv", "Replay viewer");
+    expect(getReplay).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a malformed Quick Share box id before connecting", async () => {
+    setSearch("?relay=not-valid!");
+    const { result } = renderHook(() => useSessionLoader());
+
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    if (result.current.status !== "error") throw new Error("unreachable");
+    expect(result.current.message).toMatch(/invalid replay share link/i);
+    expect(relayState.connect).not.toHaveBeenCalled();
   });
 
   it("errors on invalid SSH targetId in editor mode", async () => {

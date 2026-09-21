@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BOX_ID_RE, LiveClient } from "../live/protocol";
 import type { ReplaySession } from "../types";
 import { parseReplaySession } from "../utils/replaySchema";
 
@@ -78,10 +79,11 @@ interface LoadResult {
 /**
  * Load session data from one of:
  * 1. window.__VIBE_REPLAY_DATA__ (embedded by CLI)
- * 2. Editor mode — with ?view=dashboard shows dashboard, with ?session=slug loads another session,
+ * 2. ?relay=<box-id> — E2E-encrypted ephemeral replay from a local host
+ * 3. Editor mode — with ?view=dashboard shows dashboard, with ?session=slug loads another session,
  *    or ?live=1&provider=<>&sessionId=<> streams a running session via SSE
- * 3. ?url=<jsonl-or-json-url> (fetch from URL, e.g., raw gist)
- * 4. ?file=<local-path> (dev mode, fetch from Vite public/)
+ * 4. ?url=<jsonl-or-json-url> (fetch from URL, e.g., raw gist)
+ * 5. ?file=<local-path> (dev mode, fetch from Vite public/)
  */
 export function useSessionLoader(): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -288,7 +290,26 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
 
   const params = new URLSearchParams(window.location.search);
 
-  // 2. Cloud replay parameter — always check first (works in any mode)
+  // 2. Ephemeral E2E replay share. The URL fragment contains the content
+  // key and is never sent to the relay; Cloudflare only forwards ciphertext.
+  const relayBoxId = params.get("relay");
+  if (relayBoxId) {
+    if (!BOX_ID_RE.test(relayBoxId)) throw new Error("Invalid replay share link");
+    const client = await LiveClient.connect(relayBoxId, "Replay viewer");
+    try {
+      const replay = await client.getReplay();
+      return { session: parseReplaySession(replay), mode: "readonly" };
+    } catch (error) {
+      if (error instanceof Error && error.message === "session-ended") {
+        throw new Error("This Quick Share has ended", { cause: error });
+      }
+      throw error;
+    } finally {
+      client.close();
+    }
+  }
+
+  // 3. Cloud replay parameter — always check first (works in any mode)
   const cloudId = params.get("cloud");
   if (cloudId) {
     if (!/^[a-zA-Z0-9_-]{10,16}$/.test(cloudId)) {
@@ -312,7 +333,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     return { session: parseReplaySession(data), mode: "readonly" };
   }
 
-  // 3. Gist parameter — always check (works in any mode)
+  // 4. Gist parameter — always check (works in any mode)
   const gistId = params.get("gist");
   if (gistId) {
     if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
@@ -326,7 +347,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     return { session, mode: "readonly", gistOwner: owner };
   }
 
-  // 4. Editor mode (served by CLI local server)
+  // 5. Editor mode (served by CLI local server)
   if (isEditorMode()) {
     // Dashboard view within editor
     if (params.get("view") === "dashboard") {
@@ -351,7 +372,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     return "dashboard";
   }
 
-  // 5. URL parameter — fetch JSON from a remote URL (read-only)
+  // 6. URL parameter — fetch JSON from a remote URL (read-only)
   const url = params.get("url");
   if (url) {
     return { session: await fetchJson(url), mode: "readonly" };

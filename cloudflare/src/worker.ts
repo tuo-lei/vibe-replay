@@ -2421,6 +2421,21 @@ app.get("/live/:boxId/status", async (c) => {
   return stub.fetch(c.req.raw);
 });
 
+/**
+ * Human-friendly ephemeral replay URL. The fragment contains the E2E key and
+ * is not visible to the Worker, so transfer it client-side to the normal
+ * replay viewer's `?relay=` loader.
+ */
+app.get("/share/:boxId", (c) => {
+  const boxId = c.req.param("boxId");
+  if (!LIVE_BOX_ID_RE.test(boxId)) return c.text("Not Found", 404);
+  const destination = `/view/?relay=${boxId}`;
+  c.header("Cache-Control", "no-store");
+  return c.html(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Opening replay…</title></head><body><script>location.replace(${jsonForInlineScript(destination)}+location.hash)</script></body></html>`,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Fallback — serve static assets (Astro website)
 // ---------------------------------------------------------------------------
