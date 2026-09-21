@@ -32,6 +32,7 @@ interface SessionOutputRouteDeps {
 export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteDeps): void {
   const { baseDir, loadSession } = deps;
   const quickShares = new Map<string, QuickReplayShare>();
+  const quickShareCreates = new Map<string, Promise<QuickReplayShare>>();
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
 
   const loadShareableSession = async (slug: string, targetId?: string) => {
@@ -85,17 +86,30 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     }
 
     try {
-      const targetSession = await loadShareableSession(result.slug, targetId);
-      const activeShare = { boxId: undefined as string | undefined };
-      const created = await createQuickReplayShare(targetSession, {
-        onEnded: () => {
-          if (activeShare.boxId && quickShares.get(key)?.boxId === activeShare.boxId) {
-            quickShares.delete(key);
-          }
-        },
-      });
-      activeShare.boxId = created.boxId;
-      quickShares.set(key, created);
+      let pending = quickShareCreates.get(key);
+      if (!pending) {
+        pending = (async () => {
+          const targetSession = await loadShareableSession(result.slug, targetId);
+          const activeShare = { boxId: undefined as string | undefined };
+          const created = await createQuickReplayShare(targetSession, {
+            onEnded: () => {
+              if (activeShare.boxId && quickShares.get(key)?.boxId === activeShare.boxId) {
+                quickShares.delete(key);
+              }
+            },
+          });
+          activeShare.boxId = created.boxId;
+          quickShares.set(key, created);
+          return created;
+        })();
+        quickShareCreates.set(key, pending);
+        void pending
+          .finally(() => {
+            if (quickShareCreates.get(key) === pending) quickShareCreates.delete(key);
+          })
+          .catch(() => {});
+      }
+      const created = await pending;
       return c.json({
         active: true,
         url: created.url,

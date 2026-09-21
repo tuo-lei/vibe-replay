@@ -52,7 +52,12 @@ export async function createQuickReplayShare(
       return { seq, ok: false, error: `unknown command: ${String(cmd)}` };
     },
   });
-  await host.ready;
+  try {
+    await host.ready;
+  } catch (error) {
+    await host.stop();
+    throw error;
+  }
 
   return {
     url: host.shareUrl,

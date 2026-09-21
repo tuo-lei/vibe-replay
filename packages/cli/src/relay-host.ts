@@ -15,6 +15,7 @@ export const RELAY_MAX_RESPONSE_BYTES = RELAY_CHUNK_PLAINTEXT_BYTES * RELAY_MAX_
 
 const KEEPALIVE_MS = 45_000;
 const DEAD_BOX_RETRY_EXIT_MS = 150_000;
+export const RELAY_STARTUP_TIMEOUT_MS = 30_000;
 
 export interface RelayHostOptions {
   relayOrigin?: string;
@@ -93,9 +94,29 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
   let outageBeganAt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveReady!: () => void;
-  const ready = new Promise<void>((resolve) => {
+  let rejectReady!: (error: Error) => void;
+  let readySettled = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  const ready = new Promise<void>((resolve, reject) => {
     resolveReady = resolve;
+    rejectReady = reject;
   });
+
+  const settleReady = (): void => {
+    if (readySettled) return;
+    readySettled = true;
+    if (startupTimer) clearTimeout(startupTimer);
+    startupTimer = null;
+    resolveReady();
+  };
+
+  const failReady = (message: string): void => {
+    if (readySettled) return;
+    readySettled = true;
+    if (startupTimer) clearTimeout(startupTimer);
+    startupTimer = null;
+    rejectReady(new Error(message));
+  };
 
   const sendFrame = async (payload: unknown, via?: string): Promise<boolean> => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -139,12 +160,13 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
 
   let commandChain: Promise<void> = Promise.resolve();
 
-  const endPermanently = (): void => {
+  const endPermanently = (reason = "relay ended before it became ready"): void => {
     if (stopped) return;
     stopped = true;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     clearInterval(keepaliveTimer);
-    options.onConnectionChange?.("ended");
+    failReady(reason);
+    options.onConnectionChange?.("ended", reason);
     options.onPermanentEnd?.();
     try {
       ws?.close(1000, "box ended");
@@ -161,7 +183,7 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
       return;
     }
     if (outer.t === "hello-ok") {
-      resolveReady();
+      settleReady();
       return;
     }
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
@@ -169,7 +191,7 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
       return;
     }
     if (outer.t === "session-ended") {
-      endPermanently();
+      endPermanently("relay session ended before it became ready");
       return;
     }
     if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string") {
@@ -206,7 +228,7 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
       if (stopped) return;
       const reason = typeof event?.reason === "string" ? event.reason : "";
       if (reason === "session ended" || reason === "box ended") {
-        endPermanently();
+        endPermanently(`relay ${reason}`);
         return;
       }
       if (everConnected) {
@@ -235,6 +257,7 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
     stopped = true;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     clearInterval(keepaliveTimer);
+    failReady("relay host stopped before it became ready");
     try {
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ t: "goodbye", role: "vm" }));
@@ -251,6 +274,11 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
     }
   };
 
+  startupTimer = setTimeout(
+    () => endPermanently(`relay did not become ready within ${RELAY_STARTUP_TIMEOUT_MS}ms`),
+    RELAY_STARTUP_TIMEOUT_MS,
+  );
+  startupTimer.unref?.();
   connect();
   return { boxId, shareUrl, ready, stop };
 }

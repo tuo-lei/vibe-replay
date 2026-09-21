@@ -10,6 +10,7 @@ const relayState = vi.hoisted(() => ({
   },
   create: vi.fn(),
   stop: vi.fn(async () => {}),
+  ready: Promise.resolve() as Promise<void>,
 }));
 
 vi.mock("../src/relay-host.js", () => ({
@@ -20,7 +21,7 @@ vi.mock("../src/relay-host.js", () => ({
       boxId: "abcdefghijklmnopqrstuv",
       shareUrl:
         "https://vibe-replay.com/share/abcdefghijklmnopqrstuv#abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
-      ready: Promise.resolve(),
+      ready: relayState.ready,
       stop: relayState.stop,
     };
   }),
@@ -48,6 +49,7 @@ beforeEach(() => {
   relayState.options = null;
   relayState.create.mockClear();
   relayState.stop.mockClear();
+  relayState.ready = Promise.resolve();
 });
 
 describe("Quick Replay Share", () => {
@@ -80,5 +82,11 @@ describe("Quick Replay Share", () => {
     const session = replay("x".repeat(QUICK_SHARE_MAX_BYTES + 1));
     await expect(createQuickReplayShare(session)).rejects.toBeInstanceOf(QuickShareTooLargeError);
     expect(relayState.create).not.toHaveBeenCalled();
+  });
+
+  it("stops the relay host when startup readiness fails", async () => {
+    relayState.ready = Promise.reject(new Error("relay startup failed"));
+    await expect(createQuickReplayShare(replay())).rejects.toThrow("relay startup failed");
+    expect(relayState.stop).toHaveBeenCalledTimes(1);
   });
 });
