@@ -24,8 +24,11 @@
  *   key.
  * - viewer-joined / viewer-left: plaintext control notices the relay sends
  *   to the shipper socket when a viewer hello lands / a viewer socket
- *   closes, plus a `viewers` count on the shipper's `hello-ok` ack so a
- *   reconnecting shipper can resync its watcher display. Routing metadata
+ *   closes. Each notice carries an absolute `viewers` count (remaining
+ *   viewers after the transition), as does the shipper's `hello-ok` ack —
+ *   the CLI displays the absolute count instead of doing its own
+ *   base+delta arithmetic, so a stale viewer reaped after a shipper
+ *   reconnect can never make the displayed count drift. Routing metadata
  *   only — the shipper shows counts, never names (names are ciphertext it
  *   cannot read).
  *
@@ -557,10 +560,15 @@ export class LiveRelay {
         this.broadcastPresence();
         // Tell the shipper a viewer joined so the CLI operator can see who
         // is watching — symmetric with the viewer-left notice on close.
-        // If the shipper is away it learns the count from its next hello-ok
-        // instead; no notice is ever queued.
+        // The absolute count is authoritative: the joining viewer is already
+        // in viewers() (fresh lastSeen). If the shipper is away it learns
+        // the count from its next hello-ok instead; no notice is ever queued.
         const vm = this.vmSocket();
-        if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-joined", via: vid }));
+        if (vm)
+          this.sendQuietly(
+            vm,
+            JSON.stringify({ t: "viewer-joined", via: vid, viewers: this.viewers().length }),
+          );
         return;
       }
       this.closeQuietly(ws, 1003, "hello first");
@@ -646,7 +654,17 @@ export class LiveRelay {
     }
     if (att?.role === "viewer") {
       const vm = this.vmSocket();
-      if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-left", via: att.vid }));
+      if (vm) {
+        // Absolute remaining-viewer count, excluding the closing socket
+        // explicitly: the runtime may still list it in getWebSockets() when
+        // this fires (healthy close), while a swept stale socket is already
+        // filtered out of viewers(). Either way the count is exact.
+        const remaining = this.viewers().filter((v) => v.ws !== ws).length;
+        this.sendQuietly(
+          vm,
+          JSON.stringify({ t: "viewer-left", via: att.vid, viewers: remaining }),
+        );
+      }
     }
     if (att?.role === "vm") {
       // The shipper is gone. Its retry loop reconnects with the same box id

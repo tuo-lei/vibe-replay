@@ -225,16 +225,16 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
 
   const tails = new Map<string, TailState>();
   /**
-   * Viewer presence as the relay reports it. `viewerVias` holds the ids of
-   * viewers that joined since the last hello-ok; `viewerBaseCount` is the
-   * relay's snapshot count at that ack (viewers already attached then never
-   * sent a join notice). Together they drive the watcher count the CLI
-   * prints. Viewer display names travel as AES-GCM ciphertext the shipper
-   * cannot decrypt — counts only, never names.
+   * Viewer presence as the relay reports it. The relay sends an absolute
+   * `viewers` count on every hello-ok / viewer-joined / viewer-left, and
+   * the CLI displays that authoritative count directly — it never does its
+   * own base+delta arithmetic, so a stale viewer reaped after a shipper
+   * reconnect can never make the displayed count drift. `viewerVias` only
+   * dedupes join prints. Viewer display names travel as AES-GCM ciphertext
+   * the shipper cannot decrypt — counts only, never names.
    */
   const viewerVias = new Set<string>();
-  let viewerBaseCount = 0;
-  const viewerCount = (): number => viewerBaseCount + viewerVias.size;
+  let viewerCount = 0;
   const pluralViewers = (n: number): string => `${n} viewer${n === 1 ? "" : "s"}`;
   let ws: WebSocket | null = null;
   let stopped = false;
@@ -546,14 +546,14 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     // "session ended". (Acks on reconnects are harmless no-ops.)
     if (outer.t === "hello-ok") {
       resolveHelloOk();
-      // The relay reports how many viewers are attached right now, so a
-      // reconnecting shipper resyncs instead of showing a stale count.
-      // Older relays omit it — then transition tracking alone applies.
+      // The relay reports the absolute viewer count, so a reconnecting
+      // shipper resyncs instead of showing a stale count. Older relays
+      // omit it — then transition tracking alone applies.
       if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
         viewerVias.clear();
-        viewerBaseCount = Math.max(0, Math.floor(outer.viewers));
-        if (viewerBaseCount > 0) {
-          console.log(`  → ${pluralViewers(viewerBaseCount)} already watching`);
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        if (viewerCount > 0) {
+          console.log(`  → ${pluralViewers(viewerCount)} already watching`);
         }
       }
       return;
@@ -565,7 +565,13 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     if (outer.t === "viewer-joined" && typeof outer.via === "string") {
       if (!viewerVias.has(outer.via)) {
         viewerVias.add(outer.via);
-        console.log(`  → viewer connected (${viewerCount()} watching)`);
+        // Prefer the relay's absolute count; fall back to +1 for relays
+        // that predate the count field.
+        viewerCount =
+          typeof outer.viewers === "number" && Number.isFinite(outer.viewers)
+            ? Math.max(0, Math.floor(outer.viewers))
+            : viewerCount + 1;
+        console.log(`  → viewer connected (${viewerCount} watching)`);
       }
       return;
     }
@@ -574,12 +580,17 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     // update the watcher count display.
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
       for (const id of tails.keys()) stopTail(id, outer.via);
-      if (!viewerVias.delete(outer.via)) {
-        // No tracked join for this id: it was already attached at the last
-        // hello-ok snapshot (or a notice was lost) — decrement the base.
-        viewerBaseCount = Math.max(0, viewerBaseCount - 1);
+      const tracked = viewerVias.delete(outer.via);
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        // Absolute count from the relay is authoritative — never decrement
+        // a snapshot that may not have included this viewer (e.g. a stale
+        // viewer reaped after a shipper reconnect).
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+      } else if (tracked) {
+        // Old relay without counts: only decrement for a join we tracked.
+        viewerCount = Math.max(0, viewerCount - 1);
       }
-      console.log(`  → viewer left (${viewerCount()} watching)`);
+      console.log(`  → viewer left (${viewerCount} watching)`);
       return;
     }
     // The relay declared this box dead (we were swept as a ghost, or a

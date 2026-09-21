@@ -210,7 +210,8 @@ describe("LiveRelay multi-viewer", () => {
     await h.relay.webSocketClose(a.ws as unknown as WebSocket);
 
     const notices = vm.sent.map((s) => JSON.parse(s));
-    expect(notices).toContainEqual({ t: "viewer-left", via: a.vid });
+    // a is gone; b remains — the absolute count excludes the closing socket.
+    expect(notices).toContainEqual({ t: "viewer-left", via: a.vid, viewers: 1 });
   });
 
   it("forwards encrypted display names verbatim and never sees plaintext", async () => {
@@ -306,8 +307,8 @@ describe("LiveRelay shipper presence notices", () => {
     const b = await helloViewer(h, WENDY_CIPHER);
 
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid },
-      { t: "viewer-joined", via: b.vid },
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: b.vid, viewers: 2 },
     ]);
   });
 
@@ -330,9 +331,7 @@ describe("LiveRelay shipper presence notices", () => {
     const h = makeRelay();
     const first = helloVm(h);
     await first.p;
-    const firstAcks = first.ws.sent
-      .map((s) => JSON.parse(s))
-      .filter((m) => m.t === "hello-ok");
+    const firstAcks = first.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
     expect(firstAcks).toEqual([{ t: "hello-ok", viewers: 0 }]);
 
     await helloViewer(h, LEI_CIPHER);
@@ -343,9 +342,7 @@ describe("LiveRelay shipper presence notices", () => {
     const second = helloVm(h);
     await second.p;
     expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
-    const secondAcks = second.ws.sent
-      .map((s) => JSON.parse(s))
-      .filter((m) => m.t === "hello-ok");
+    const secondAcks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
     expect(secondAcks).toEqual([{ t: "hello-ok", viewers: 2 }]);
   });
 
@@ -359,8 +356,33 @@ describe("LiveRelay shipper presence notices", () => {
     await h.relay.webSocketClose(a.ws as unknown as WebSocket);
 
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid },
-      { t: "viewer-left", via: a.vid },
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-left", via: a.vid, viewers: 0 },
+    ]);
+  });
+
+  it("reports the absolute remaining count when a stale viewer is swept", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b goes stale (> 45 s without a heartbeat): it drops out of the
+    // presence-filtered roster while its socket is still attached.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // The sweep closes the stale socket; the runtime delivers the close.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+
+    // The leave notice carries the absolute remaining count (just a) — a
+    // shipper that resynced from a hello-ok snapshot excluding stale b
+    // must not decrement anything on this notice.
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: b.vid, viewers: 2 },
+      { t: "viewer-left", via: b.vid, viewers: 1 },
     ]);
   });
 
@@ -450,7 +472,9 @@ describe("LiveRelay presence liveness sweep", () => {
     const roster = lastPresence(a.ws)?.viewers;
     expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
     const notices = vm.sent.map((s) => JSON.parse(s));
-    expect(notices).toContainEqual({ t: "viewer-left", via: b.vid });
+    // The swept viewer was already stale-excluded from the roster, so the
+    // absolute remaining count is just the survivor — never negative drift.
+    expect(notices).toContainEqual({ t: "viewer-left", via: b.vid, viewers: 1 });
 
     // A viewer remains, so the alarm stays armed.
     expect(h.alarmAt()).toBeGreaterThan(Date.now());

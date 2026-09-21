@@ -279,7 +279,7 @@ describe("LiveSessionCard adapter", () => {
     const { container } = render(
       <LiveSessionCard session={{ ...summary, slug: longSlug }} onOpen={() => {}} />,
     );
-    const meta = container.querySelector(`span[title="${longSlug}"]`);
+    const meta = container.querySelector('span[title="' + longSlug + '"]');
     expect(meta).toBeTruthy();
     expect(meta!.className).toContain("overflow-hidden");
     expect(meta!.className).toContain("text-ellipsis");

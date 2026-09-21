@@ -634,7 +634,7 @@ describe("shipper viewer presence", () => {
     }
   });
 
-  it("resyncs the count from hello-ok and tracks unknown vias against the base", async () => {
+  it("uses the relay's absolute count on leave and never decrements untracked vias", async () => {
     const { logs, restore } = captureLogs();
     try {
       // Two viewers were already attached when the shipper (re)connected:
@@ -642,13 +642,21 @@ describe("shipper viewer presence", () => {
       const sock = await connectedShipper(2);
       expect(logs.some((l) => l.includes("2 viewers already watching"))).toBe(true);
 
-      // A leave for an unattributed via decrements the snapshot base.
-      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-old" }) });
-      // A fresh join is tracked by via on top of the base.
-      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-new" }) });
+      // The relay's absolute count on leave is authoritative: a leave for
+      // an unattributed via sets the count instead of decrementing a
+      // snapshot the departing viewer may not have been part of (e.g. a
+      // stale viewer reaped after a shipper reconnect).
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-old", viewers: 1 }) });
+      // Without an absolute count, a leave for an unknown via leaves the
+      // count alone — it must never drive the display negative or steal a
+      // healthy viewer's slot.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-ghost" }) });
+      // A fresh join takes the relay's absolute count.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-new", viewers: 2 }) });
       await new Promise((r) => setTimeout(r, 20));
 
       expect(presenceLines(logs)).toEqual([
+        "  → viewer left (1 watching)",
         "  → viewer left (1 watching)",
         "  → viewer connected (2 watching)",
       ]);
