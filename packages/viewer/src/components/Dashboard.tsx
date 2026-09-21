@@ -95,7 +95,8 @@ import {
   sessionDataState,
 } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
-import { ActiveFilterChip, SessionStatusRow } from "./SessionCard";
+import { ActiveFilterChip, SessionCard } from "./SessionCard";
+import { ActiveFilterChipRow, SearchFilterInput } from "./SessionFilters";
 
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights" | "settings";
 
@@ -3396,7 +3397,7 @@ function SessionsPanel() {
             </div>
 
             {hasActiveFilters && (
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <ActiveFilterChipRow onClearAll={handleClearAllFilters} className="mt-3">
                 {filter && (
                   <ActiveFilterChip
                     label="Search"
@@ -3473,38 +3474,18 @@ function SessionsPanel() {
                     onRemove={() => handleProjectChange(ALL_PROJECTS)}
                   />
                 )}
-                <button
-                  onClick={handleClearAllFilters}
-                  className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
-                >
-                  Clear all
-                </button>
-              </div>
+              </ActiveFilterChipRow>
             )}
           </div>
 
           {/* Search + archive toggle */}
           <div className="flex gap-2 items-center">
-            <div className="relative flex-1">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="7" cy="7" r="5" />
-                <path d="M11 11l3.5 3.5" />
-              </svg>
-              <input
-                value={filter}
-                onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Search sessions, tools, MCP, skills..."
-                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
-              />
-            </div>
+            <SearchFilterInput
+              value={filter}
+              onChange={handleFilterChange}
+              placeholder="Search sessions, tools, MCP, skills..."
+              ariaLabel="Search sessions"
+            />
             {archivedCount > 0 && (
               <button
                 onClick={handleToggleArchived}
@@ -3521,89 +3502,85 @@ function SessionsPanel() {
           </div>
 
           {hasActiveFilters && (
-            <div className="md:hidden flex items-center gap-2 flex-wrap">
-              {filter && (
-                <ActiveFilterChip
-                  label="Search"
-                  value={filter}
-                  onRemove={() => handleFilterChange("")}
-                />
-              )}
-              {insightsRange !== "all" && (
-                <ActiveFilterChip
-                  label="Range"
-                  value={insightsRange}
-                  onRemove={handleClearInsightsRange}
-                />
-              )}
-              {selectedProviders.map((provider) => (
-                <ActiveFilterChip
-                  key={provider}
-                  label="Provider"
-                  value={providerDisplayName(provider)}
-                  onRemove={() => handleProviderToggle(provider)}
-                />
-              ))}
-              {selectedRepos.map((repo) => (
-                <ActiveFilterChip
-                  key={repo}
-                  label="Repo"
-                  value={repoFilterLabel(repo)}
-                  onRemove={() => handleRepoToggle(repo)}
-                />
-              ))}
-              {compactionsOnly && (
-                <ActiveFilterChip
-                  label="Signal"
-                  value="Compacted"
-                  onRemove={handleToggleCompactionsOnly}
-                />
-              )}
-              {selectedTools.map((tool) => (
-                <ActiveFilterChip
-                  key={tool}
-                  label="Tool"
-                  value={tool}
-                  onRemove={() => handleToolToggle(tool)}
-                />
-              ))}
-              {selectedMcpServers.map((server) => (
-                <ActiveFilterChip
-                  key={server}
-                  label="MCP"
-                  value={server}
-                  onRemove={() => handleMcpServerToggle(server)}
-                />
-              ))}
-              {selectedMcpTools.map((tool) => (
-                <ActiveFilterChip
-                  key={tool}
-                  label="MCP tool"
-                  value={tool}
-                  onRemove={() => handleMcpToolToggle(tool)}
-                />
-              ))}
-              {selectedSkills.map((skill) => (
-                <ActiveFilterChip
-                  key={skill}
-                  label="Skill"
-                  value={skill}
-                  onRemove={() => handleSkillToggle(skill)}
-                />
-              ))}
-              {selectedProjectKey !== ALL_PROJECTS && (
-                <ActiveFilterChip
-                  label="Project"
-                  value={projectFilterLabel(selectedProjectKey, projectLabels)}
-                  onRemove={() => handleProjectChange(ALL_PROJECTS)}
-                />
-              )}
-              <button
-                onClick={handleClearAllFilters}
-                className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
-              >
-                Clear all
-              </button>
+            <div className="md:hidden">
+              <ActiveFilterChipRow onClearAll={handleClearAllFilters}>
+                {filter && (
+                  <ActiveFilterChip
+                    label="Search"
+                    value={filter}
+                    onRemove={() => handleFilterChange("")}
+                  />
+                )}
+                {insightsRange !== "all" && (
+                  <ActiveFilterChip
+                    label="Range"
+                    value={insightsRange}
+                    onRemove={handleClearInsightsRange}
+                  />
+                )}
+                {selectedProviders.map((provider) => (
+                  <ActiveFilterChip
+                    key={provider}
+                    label="Provider"
+                    value={providerDisplayName(provider)}
+                    onRemove={() => handleProviderToggle(provider)}
+                  />
+                ))}
+                {selectedRepos.map((repo) => (
+                  <ActiveFilterChip
+                    key={repo}
+                    label="Repo"
+                    value={repoFilterLabel(repo)}
+                    onRemove={() => handleRepoToggle(repo)}
+                  />
+                ))}
+                {compactionsOnly && (
+                  <ActiveFilterChip
+                    label="Signal"
+                    value="Compacted"
+                    onRemove={handleToggleCompactionsOnly}
+                  />
+                )}
+                {selectedTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="Tool"
+                    value={tool}
+                    onRemove={() => handleToolToggle(tool)}
+                  />
+                ))}
+                {selectedMcpServers.map((server) => (
+                  <ActiveFilterChip
+                    key={server}
+                    label="MCP"
+                    value={server}
+                    onRemove={() => handleMcpServerToggle(server)}
+                  />
+                ))}
+                {selectedMcpTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="MCP tool"
+                    value={tool}
+                    onRemove={() => handleMcpToolToggle(tool)}
+                  />
+                ))}
+                {selectedSkills.map((skill) => (
+                  <ActiveFilterChip
+                    key={skill}
+                    label="Skill"
+                    value={skill}
+                    onRemove={() => handleSkillToggle(skill)}
+                  />
+                ))}
+                {selectedProjectKey !== ALL_PROJECTS && (
+                  <ActiveFilterChip
+                    label="Project"
+                    value={projectFilterLabel(selectedProjectKey, projectLabels)}
+                    onRemove={() => handleProjectChange(ALL_PROJECTS)}
+                  />
+                )}
+              </ActiveFilterChipRow>
             </div>
           )}
         </div>
@@ -3803,9 +3780,9 @@ function SessionsPanel() {
                     })()
                   : "Estimated cost";
                 return (
-                  <div
+                  <SessionCard
                     key={sessionIdentityKey(s)}
-                    onClick={() => {
+                    onOpen={() => {
                       if (replaySlug) {
                         navigateTo({
                           view: null,
@@ -3814,31 +3791,13 @@ function SessionsPanel() {
                         });
                       } else selectSession(s);
                     }}
-                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- card contains nested controls; cannot use a real <button>
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        if (replaySlug) {
-                          navigateTo({
-                            view: null,
-                            session: replaySlug,
-                            targetId: s.location?.kind === "ssh" ? s.location.id : null,
-                          });
-                        } else selectSession(s);
-                      }
-                    }}
-                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${
-                      isPriorityEnriching ? "ring-1 ring-terminal-blue/20" : ""
-                    } ${isArchived ? "opacity-50" : ""}`}
-                  >
-                    {/* Row 1: provider icon + title | slug·time + menu */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <span className="mt-0.5">
-                          <ProviderBadge provider={s.provider} title={providerTooltip} />
-                        </span>
+                    archived={isArchived}
+                    enriching={isPriorityEnriching}
+                    provider={s.provider}
+                    providerTitle={providerTooltip}
+                    title={sessionTitle}
+                    titleLeading={
+                      <>
                         <SessionLocationBadge location={s.location} />
                         {transcriptStatusText && (
                           <span
@@ -3852,200 +3811,107 @@ function SessionsPanel() {
                             {transcriptStatusText}
                           </span>
                         )}
-                        <span className="text-sm font-sans font-semibold text-terminal-text leading-snug line-clamp-2">
-                          {sessionTitle}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap hidden sm:inline">
-                          {s.slug} · {timeAgo(s.timestamp)}
-                        </span>
-                        <SessionMoreMenu
-                          onArchive={() => toggleArchive(s.slug, s.location)}
-                          onDelete={
-                            replaySlug
-                              ? () => handleDeleteReplay(replaySlug, s.location)
-                              : undefined
-                          }
-                          onRawData={() => openRawSourceJson(s, scanData || null)}
-                          isArchived={isArchived}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Row 2: user prompts (deduped against the title, which may be a
-                        normalized/truncated form of the first prompt) */}
-                    {prompts
-                      .filter((p) => normalizeTitleText(p) !== sessionTitle)
-                      .map((p, i) => (
-                        <div key={i} className="flex gap-2 items-start">
-                          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">
-                            &gt;
-                          </span>
-                          <p className="text-sm text-terminal-dim line-clamp-2 leading-relaxed">
-                            {p}
-                          </p>
-                        </div>
-                      ))}
-
-                    {/* Row 3: place — project · branch · repo (clickable) */}
-                    <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap text-xs font-mono text-terminal-dim">
-                      <span
-                        className="inline-flex items-center gap-1 max-w-[240px] truncate"
-                        title={s.project}
-                      >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                          className="text-terminal-dimmer shrink-0"
-                        >
-                          <path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z" />
-                        </svg>
-                        {projectLabel}
+                      </>
+                    }
+                    timeMeta={
+                      <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap hidden sm:inline">
+                        {s.slug} · {timeAgo(s.timestamp)}
                       </span>
-                      {branch &&
-                        (branchUrl ? (
-                          <a
-                            href={branchUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
-                            title={`Open branch ${branch} on GitHub`}
-                          >
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
+                    }
+                    headerActions={
+                      <SessionMoreMenu
+                        onArchive={() => toggleArchive(s.slug, s.location)}
+                        onDelete={
+                          replaySlug ? () => handleDeleteReplay(replaySlug, s.location) : undefined
+                        }
+                        onRawData={() => openRawSourceJson(s, scanData || null)}
+                        isArchived={isArchived}
+                      />
+                    }
+                    prompts={prompts.filter((p) => normalizeTitleText(p) !== sessionTitle)}
+                    place={{
+                      project: s.project,
+                      projectLabel,
+                      branch,
+                      branchUrl,
+                      repo: s.gitRepo,
+                      repoUrl,
+                      badges: (
+                        <>
+                          {isWorktree && (
+                            <span
+                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
+                              title={`Agent worktree: ${s.project}`}
                             >
-                              <circle cx="5" cy="4" r="2" />
-                              <circle cx="11" cy="12" r="2" />
-                              <path d="M5 6v4c0 1.1.9 2 2 2h2" />
-                            </svg>
-                            {branch}
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 shrink-0">
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
+                              worktree
+                            </span>
+                          )}
+                          {s.spaceId && (
+                            <span
+                              className="text-terminal-dimmer shrink-0"
+                              title={
+                                s.spaceIdSetBy
+                                  ? `Cowork space ${s.spaceId} (${s.spaceIdSetBy})`
+                                  : `Cowork space ${s.spaceId}`
+                              }
                             >
-                              <circle cx="5" cy="4" r="2" />
-                              <circle cx="11" cy="12" r="2" />
-                              <path d="M5 6v4c0 1.1.9 2 2 2h2" />
-                            </svg>
-                            {branch}
-                          </span>
-                        ))}
-                      {s.gitRepo && repoUrl && (
-                        <a
-                          href={repoUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
-                          title="Open repo on GitHub"
-                        >
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            className="text-terminal-dimmer"
-                          >
-                            <path d="M8 1a7 7 0 0 0-2.2 13.6c.35.06.48-.15.48-.34v-1.2c-1.95.42-2.36-.94-2.36-.94-.32-.8-.78-1.02-.78-1.02-.64-.44.05-.43.05-.43.7.05 1.07.72 1.07.72.63 1.08 1.65.77 2.05.59.06-.46.25-.77.45-.95-1.56-.18-3.2-.78-3.2-3.47 0-.77.27-1.4.72-1.89-.07-.18-.31-.9.07-1.87 0 0 .59-.19 1.93.72a6.7 6.7 0 0 1 3.5 0c1.34-.91 1.93-.72 1.93-.72.38.97.14 1.69.07 1.87.45.49.72 1.12.72 1.89 0 2.7-1.64 3.29-3.2 3.46.25.22.48.65.48 1.31v1.95c0 .19.13.4.49.33A7 7 0 0 0 8 1z" />
-                          </svg>
-                          {s.gitRepo}
-                        </a>
-                      )}
-                      {isWorktree && (
-                        <span
-                          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
-                          title={`Agent worktree: ${s.project}`}
-                        >
-                          worktree
-                        </span>
-                      )}
-                      {s.spaceId && (
-                        <span
-                          className="text-terminal-dimmer shrink-0"
-                          title={
-                            s.spaceIdSetBy
-                              ? `Cowork space ${s.spaceId} (${s.spaceIdSetBy})`
-                              : `Cowork space ${s.spaceId}`
-                          }
-                        >
-                          space-{shortCoworkSpaceId(s.spaceId)}
-                        </span>
-                      )}
-                      {s.pluginsEnabled && (
-                        <span
-                          className="text-terminal-dimmer shrink-0"
-                          title="Claude Cowork plugins enabled"
-                        >
-                          plugins
-                        </span>
-                      )}
-                      {s.skillsEnabled && (
-                        <span
-                          className="text-terminal-dimmer shrink-0"
-                          title="Claude Cowork skills enabled"
-                        >
-                          skills
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Row 4: activity — exact values, hairline-framed. Leads with the
-                        data-level icon (replaces the old "Scanned" chip next to the CTAs).
-                        Shared with the live viewer via SessionStatusRow. */}
-                    <SessionStatusRow
-                      leading={
-                        <DataLevelIcon
-                          state={dataState}
-                          active={isPriorityEnriching}
-                          scannedAtLabel={scannedAtLabel}
-                        />
-                      }
-                      durationMs={displayDurationMs}
-                      durationEstimated={scanData?.durationMs == null}
-                      promptCount={displayPromptCount}
-                      toolCallCount={displayToolCount}
-                      editCount={displayEditCount}
-                      editEstimated={scanData?.editCount == null}
-                      costEstimate={displayCost}
-                      costTitle={costTitle}
-                      compactionCount={compactionCount}
-                      errorCount={errorCount}
-                      cleanRun={cleanRun}
-                    />
-
-                    <SessionUsageDetails
-                      summary={scanData?.usageSummary}
-                      usageIndexed={scanData?.usageIndexed}
-                      expectedCalls={displayToolCount}
-                      selectedTools={selectedTools}
-                      selectedMcpTools={selectedMcpTools}
-                      selectedSkills={selectedSkills}
-                      onToolToggle={handleToolToggle}
-                      onMcpToolToggle={handleMcpToolToggle}
-                      onSkillToggle={handleSkillToggle}
-                    />
-
-                    {/* Row 5: outcome facts (left) | state + CTAs (right) */}
-                    <div className="flex items-end justify-between gap-3">
-                      <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs font-mono min-w-0">
+                              space-{shortCoworkSpaceId(s.spaceId)}
+                            </span>
+                          )}
+                          {s.pluginsEnabled && (
+                            <span
+                              className="text-terminal-dimmer shrink-0"
+                              title="Claude Cowork plugins enabled"
+                            >
+                              plugins
+                            </span>
+                          )}
+                          {s.skillsEnabled && (
+                            <span
+                              className="text-terminal-dimmer shrink-0"
+                              title="Claude Cowork skills enabled"
+                            >
+                              skills
+                            </span>
+                          )}
+                        </>
+                      ),
+                    }}
+                    statusLeading={
+                      <DataLevelIcon
+                        state={dataState}
+                        active={isPriorityEnriching}
+                        scannedAtLabel={scannedAtLabel}
+                      />
+                    }
+                    status={{
+                      durationMs: displayDurationMs,
+                      durationEstimated: scanData?.durationMs == null,
+                      promptCount: displayPromptCount,
+                      toolCallCount: displayToolCount,
+                      editCount: displayEditCount,
+                      editEstimated: scanData?.editCount == null,
+                      costEstimate: displayCost,
+                      costTitle,
+                      compactionCount,
+                      errorCount,
+                      cleanRun,
+                    }}
+                    middle={
+                      <SessionUsageDetails
+                        summary={scanData?.usageSummary}
+                        usageIndexed={scanData?.usageIndexed}
+                        expectedCalls={displayToolCount}
+                        selectedTools={selectedTools}
+                        selectedMcpTools={selectedMcpTools}
+                        selectedSkills={selectedSkills}
+                        onToolToggle={handleToolToggle}
+                        onMcpToolToggle={handleMcpToolToggle}
+                        onSkillToggle={handleSkillToggle}
+                      />
+                    }
+                    facts={
+                      <>
                         {prLink ? (
                           <a
                             href={prLink.prUrl}
@@ -4123,8 +3989,10 @@ function SessionsPanel() {
                               : `expires in ${s.expiresInDays}d`}
                           </span>
                         )}
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      </>
+                    }
+                    actions={
+                      <>
                         {s.sessionId && s.location?.kind !== "ssh" && isRecentSession && (
                           <button
                             onClick={(e) => {
@@ -4235,9 +4103,9 @@ function SessionsPanel() {
                             )}
                           </button>
                         )}
-                      </div>
-                    </div>
-                  </div>
+                      </>
+                    }
+                  />
                 );
               })}
               {remainingRenderCount > 0 && (
@@ -5165,7 +5033,7 @@ function ReplaysPanel() {
             </div>
 
             {hasActiveFilters && (
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <ActiveFilterChipRow onClearAll={handleClearAllFilters} className="mt-3">
                 {filter && (
                   <ActiveFilterChip
                     label="Search"
@@ -5235,38 +5103,18 @@ function ReplaysPanel() {
                     onRemove={() => handleProjectChange(ALL_PROJECTS)}
                   />
                 )}
-                <button
-                  onClick={handleClearAllFilters}
-                  className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
-                >
-                  Clear all
-                </button>
-              </div>
+              </ActiveFilterChipRow>
             )}
           </div>
 
           {/* Search + actions (desktop) */}
           <div className="hidden md:flex items-center gap-2">
-            <div className="relative flex-1">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="7" cy="7" r="5" />
-                <path d="M11 11l3.5 3.5" />
-              </svg>
-              <input
-                value={filter}
-                onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Search title, prompt, slug, provider, repo, project..."
-                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
-              />
-            </div>
+            <SearchFilterInput
+              value={filter}
+              onChange={handleFilterChange}
+              placeholder="Search title, prompt, slug, provider, repo, project..."
+              ariaLabel="Search replays"
+            />
             {archivedCount > 0 && (
               <button
                 onClick={handleToggleArchived}
@@ -5285,26 +5133,12 @@ function ReplaysPanel() {
 
           {/* Mobile search + archive toggle (kept stacked) */}
           <div className="md:hidden flex gap-2 items-center">
-            <div className="relative flex-1">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="7" cy="7" r="5" />
-                <path d="M11 11l3.5 3.5" />
-              </svg>
-              <input
-                value={filter}
-                onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Search replays..."
-                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
-              />
-            </div>
+            <SearchFilterInput
+              value={filter}
+              onChange={handleFilterChange}
+              placeholder="Search replays..."
+              ariaLabel="Search replays"
+            />
             {archivedCount > 0 && (
               <button
                 onClick={handleToggleArchived}
@@ -5320,82 +5154,78 @@ function ReplaysPanel() {
             )}
           </div>
           {hasActiveFilters && (
-            <div className="md:hidden flex items-center gap-2 flex-wrap">
-              {filter && (
-                <ActiveFilterChip
-                  label="Search"
-                  value={filter}
-                  onRemove={() => handleFilterChange("")}
-                />
-              )}
-              {selectedProviders.map((provider) => (
-                <ActiveFilterChip
-                  key={provider}
-                  label="Provider"
-                  value={providerDisplayName(provider)}
-                  onRemove={() => handleProviderToggle(provider)}
-                />
-              ))}
-              {selectedRepos.map((repo) => (
-                <ActiveFilterChip
-                  key={repo}
-                  label="Repo"
-                  value={repoFilterLabel(repo)}
-                  onRemove={() => handleRepoToggle(repo)}
-                />
-              ))}
-              {compactionsOnly && (
-                <ActiveFilterChip
-                  label="Signal"
-                  value="Compacted"
-                  onRemove={handleToggleCompactionsOnly}
-                />
-              )}
-              {selectedTools.map((tool) => (
-                <ActiveFilterChip
-                  key={tool}
-                  label="Tool"
-                  value={tool}
-                  onRemove={() => handleToolToggle(tool)}
-                />
-              ))}
-              {selectedMcpServers.map((server) => (
-                <ActiveFilterChip
-                  key={server}
-                  label="MCP"
-                  value={server}
-                  onRemove={() => handleMcpServerToggle(server)}
-                />
-              ))}
-              {selectedMcpTools.map((tool) => (
-                <ActiveFilterChip
-                  key={tool}
-                  label="MCP tool"
-                  value={tool}
-                  onRemove={() => handleMcpToolToggle(tool)}
-                />
-              ))}
-              {selectedSkills.map((skill) => (
-                <ActiveFilterChip
-                  key={skill}
-                  label="Skill"
-                  value={skill}
-                  onRemove={() => handleSkillToggle(skill)}
-                />
-              ))}
-              {selectedProjectKey !== ALL_PROJECTS && (
-                <ActiveFilterChip
-                  label="Project"
-                  value={projectFilterLabel(selectedProjectKey, projectLabels)}
-                  onRemove={() => handleProjectChange(ALL_PROJECTS)}
-                />
-              )}
-              <button
-                onClick={handleClearAllFilters}
-                className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
-              >
-                Clear all
-              </button>
+            <div className="md:hidden">
+              <ActiveFilterChipRow onClearAll={handleClearAllFilters}>
+                {filter && (
+                  <ActiveFilterChip
+                    label="Search"
+                    value={filter}
+                    onRemove={() => handleFilterChange("")}
+                  />
+                )}
+                {selectedProviders.map((provider) => (
+                  <ActiveFilterChip
+                    key={provider}
+                    label="Provider"
+                    value={providerDisplayName(provider)}
+                    onRemove={() => handleProviderToggle(provider)}
+                  />
+                ))}
+                {selectedRepos.map((repo) => (
+                  <ActiveFilterChip
+                    key={repo}
+                    label="Repo"
+                    value={repoFilterLabel(repo)}
+                    onRemove={() => handleRepoToggle(repo)}
+                  />
+                ))}
+                {compactionsOnly && (
+                  <ActiveFilterChip
+                    label="Signal"
+                    value="Compacted"
+                    onRemove={handleToggleCompactionsOnly}
+                  />
+                )}
+                {selectedTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="Tool"
+                    value={tool}
+                    onRemove={() => handleToolToggle(tool)}
+                  />
+                ))}
+                {selectedMcpServers.map((server) => (
+                  <ActiveFilterChip
+                    key={server}
+                    label="MCP"
+                    value={server}
+                    onRemove={() => handleMcpServerToggle(server)}
+                  />
+                ))}
+                {selectedMcpTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="MCP tool"
+                    value={tool}
+                    onRemove={() => handleMcpToolToggle(tool)}
+                  />
+                ))}
+                {selectedSkills.map((skill) => (
+                  <ActiveFilterChip
+                    key={skill}
+                    label="Skill"
+                    value={skill}
+                    onRemove={() => handleSkillToggle(skill)}
+                  />
+                ))}
+                {selectedProjectKey !== ALL_PROJECTS && (
+                  <ActiveFilterChip
+                    label="Project"
+                    value={projectFilterLabel(selectedProjectKey, projectLabels)}
+                    onRemove={() => handleProjectChange(ALL_PROJECTS)}
+                  />
+                )}
+              </ActiveFilterChipRow>
             </div>
           )}
         </div>

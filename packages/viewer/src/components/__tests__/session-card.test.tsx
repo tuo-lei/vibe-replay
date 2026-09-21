@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ActiveFilterChip, SessionStatusRow } from "../SessionCard";
+import { ActiveFilterChip, SessionCard, SessionStatusRow } from "../SessionCard";
+import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 
 afterEach(cleanup);
 
@@ -68,5 +69,85 @@ describe("ActiveFilterChip", () => {
     render(<ActiveFilterChip label="Provider" value="muse" onRemove={onRemove} />);
     fireEvent.click(screen.getByTitle("Remove Provider: muse"));
     expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The local dashboard and the live viewer render the same `SessionCard`
+ * component. These tests pin that contract: given dashboard-shaped props and
+ * live-shaped props, the outer shell and row structure must be identical, so
+ * the two surfaces cannot visually drift apart again.
+ */
+describe("SessionCard shared shell", () => {
+  const dashboardProps = {
+    onOpen: () => {},
+    provider: "muse",
+    providerTitle: "Muse · claude-sonnet",
+    title: "Fix the flaky test",
+    timeMeta: "abc123 · 5m ago",
+    prompts: ["make the test deterministic"],
+    place: {
+      project: "/home/lei/vibe-replay",
+      projectLabel: "vibe-replay",
+      branch: "feat/x",
+      branchUrl: "https://github.com/tuo-lei/vibe-replay/tree/feat/x",
+      repo: "tuo-lei/vibe-replay",
+      repoUrl: "https://github.com/tuo-lei/vibe-replay",
+    },
+    status: { promptCount: 3, toolCallCount: 12, editCount: 4 },
+  };
+
+  // What the live viewer passes: relay summary fields, no scan-data rows.
+  const liveProps = {
+    onOpen: () => {},
+    provider: "muse",
+    providerTitle: "Muse · claude-sonnet",
+    title: "Fix the flaky test",
+    timeMeta: "5m ago",
+    place: {
+      project: "/home/lei/vibe-replay",
+      projectLabel: "vibe-replay",
+      branch: "feat/x",
+      repo: "tuo-lei/vibe-replay",
+    },
+    status: {
+      durationMs: 2700000,
+      durationEstimated: true,
+      promptCount: 3,
+      toolCallCount: 12,
+      editCount: 4,
+      editEstimated: true,
+    },
+  };
+
+  it("renders an identical outer shell for dashboard and live props", () => {
+    stubBrowserAPIs();
+    const { container: dashboardContainer, unmount } = render(<SessionCard {...dashboardProps} />);
+    const dashboardShell = dashboardContainer.firstElementChild!;
+    const dashboardClasses = [...dashboardShell.classList].sort().join(" ");
+    const dashboardRows = dashboardShell.children.length;
+    unmount();
+
+    const { container: liveContainer } = render(<SessionCard {...liveProps} />);
+    const liveShell = liveContainer.firstElementChild!;
+    const liveClasses = [...liveShell.classList].sort().join(" ");
+
+    // Same card element, same shell classes: one visual card, two data sources.
+    expect(dashboardShell.tagName).toBe("DIV");
+    expect(dashboardShell.getAttribute("role")).toBe("button");
+    expect(liveClasses).toBe(dashboardClasses);
+    // Header + place + status rows exist in both; dashboard additionally has
+    // prompt previews (row 2).
+    expect(dashboardRows).toBe(4);
+    expect(liveShell.children.length).toBe(3);
+  });
+
+  it("renders the branch/repo as links only when URLs are provided", () => {
+    stubBrowserAPIs();
+    const { container } = render(<SessionCard {...liveProps} />);
+    // Live passes no URLs: plain text, no anchors.
+    expect(container.querySelectorAll("a").length).toBe(0);
+    expect(container.textContent).toContain("feat/x");
+    expect(container.textContent).toContain("tuo-lei/vibe-replay");
   });
 });
