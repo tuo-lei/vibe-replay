@@ -39,6 +39,14 @@ A local audit usually reveals a layered system:
 
 If you're building tooling on top of Cursor session data, this matters. If you're just curious where your chats went, it matters even more.
 
+vibe-replay turns Cursor `state.vscdb` and `agent-transcripts` into a shareable HTML replay — one command, no account.
+
+```bash
+npx vibe-replay
+```
+
+Skip the CLI and [Watch Eng+GTM collaborate](/explore/).
+
 ---
 
 ## Where are Cursor sessions actually stored?
@@ -135,6 +143,8 @@ The `store.db` session IDs and the `composerData` session IDs are not guaranteed
 Some transcript IDs match `store.db` sessions, some match `composerData` sessions, and some may not match either source cleanly.
 
 The practical mental model is that Cursor has at least **two replay stacks**, and transcript JSONL can attach to either one.
+
+Skip reconstructing those stacks by hand: `npx vibe-replay` already merges `store.db`, `agent-transcripts`, and `state.vscdb` locally. Prefer a live example first? [Watch Eng+GTM collaborate](/explore/).
 
 ---
 
@@ -524,6 +534,8 @@ If you want the interactive version instead of grepping databases:
 ```bash
 npx vibe-replay
 ```
+
+Or [Watch Eng+GTM collaborate](/explore/) without installing.
 
 Cursor's local stores can contain prompts, file contents, command arguments, workspace paths, and recovery data. Read them locally, avoid uploading raw databases, and review any replay before sharing it.
 
