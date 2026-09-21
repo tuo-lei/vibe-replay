@@ -741,6 +741,12 @@ export interface RelaySessionSummary {
   hasSqlite?: boolean;
   /** True when a provider SDK agent store exists (drives the storage badge label). */
   hasSdk?: boolean;
+  /**
+   * Storage data source for the badge label (same vocabulary as the dashboard
+   * scan's `dataSource`: "jsonl" | "sqlite" | "global-state" | "jsonl+tools").
+   * Inferred from discovery facts; the scan itself never crosses the relay.
+   */
+  dataSource?: string;
   /** Context compactions counted during lightweight discovery. */
   compactionCount?: number;
   /** Sum of turn_duration durationMs values (estimate). */

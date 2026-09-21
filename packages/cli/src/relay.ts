@@ -67,6 +67,21 @@ function summarize(info: SessionInfo): RelaySessionSummary {
     gitBranch: info.gitBranch,
     hasSqlite: info.hasSqlite,
     hasSdk: info.hasSdk,
+    // Storage data source for the badge label. The scan's dataSource never
+    // crosses the relay, so infer it from the same discovery facts the
+    // dashboard scanner uses (see scanner.ts): SDK sessions pair with JSONL
+    // transcripts, Cursor global-state markers are "global-state",
+    // SQLite-backed sessions are "sqlite", Cursor agent-tools sidecars are
+    // "jsonl+tools", everything else is JSONL.
+    dataSource: info.hasSdk
+      ? "jsonl"
+      : (info.filePath ?? "").includes("#composerData:")
+        ? "global-state"
+        : info.hasSqlite
+          ? "sqlite"
+          : (info.toolPaths?.length ?? 0) > 0
+            ? "jsonl+tools"
+            : "jsonl",
     compactionCount: info.compactionCount,
     durationMsEst: info.durationMsEst,
     editCountEst: info.editCountEst,

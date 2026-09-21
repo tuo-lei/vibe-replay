@@ -62,9 +62,14 @@ export function LiveSessionCard({
     } satisfies SourceSession,
     null,
   );
-  // Same label/class logic as the dashboard card; the scan's `dataSource`
-  // never crosses the relay, so discovery's hasSqlite/hasSdk decide alone.
-  const dataSourceLabel = formatDataSourceLabel(session.hasSqlite, undefined, session.hasSdk);
+  // Same label/class logic as the dashboard card. The scan's `dataSource`
+  // never crosses the relay, so the relay infers it from discovery facts
+  // (see relay.ts summarize()) — same function, same text, same classes.
+  const dataSourceLabel = formatDataSourceLabel(
+    session.hasSqlite,
+    session.dataSource,
+    session.hasSdk,
+  );
   return (
     <SessionCard
       onOpen={() => onOpen(session)}
@@ -72,7 +77,10 @@ export function LiveSessionCard({
       providerTitle={providerTitle}
       title={title}
       timeMeta={
-        <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap">
+        <span
+          className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap overflow-hidden text-ellipsis max-w-[140px]"
+          title={session.slug}
+        >
           {[session.slug, timeAgo(session.timestamp)].filter(Boolean).join(" · ")}
         </span>
       }
@@ -98,18 +106,16 @@ export function LiveSessionCard({
           <span className="text-terminal-dimmer tabular-nums" title="Transcript size">
             {formatSize(session.fileSize)}
           </span>
-          {(session.hasSqlite || session.hasSdk) && (
-            <span
-              className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(
-                undefined,
-                session.hasSqlite,
-                session.hasSdk,
-              )}`}
-              title={dataSourceLabel}
-            >
-              {dataSourceLabel}
-            </span>
-          )}
+          <span
+            className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(
+              session.dataSource,
+              session.hasSqlite,
+              session.hasSdk,
+            )}`}
+            title={dataSourceLabel}
+          >
+            {dataSourceLabel}
+          </span>
         </>
       }
       actions={
