@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActiveFilterChip, SessionCard, SessionStatusRow } from "../SessionCard";
+import { LiveSessionCard } from "../../live/LiveSessionCard";
 import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 
 afterEach(cleanup);
@@ -98,14 +99,15 @@ describe("SessionCard shared shell", () => {
   };
 
   // What the live viewer passes: relay summary fields plus the rows the relay
-  // now ships (prompt previews, size, View CTA). Still no scan-data rows:
-  // no usage details, no outcome facts, no Share/Redo.
+  // now ships (prompt previews, slug, size + storage badge, data-level icon,
+  // View CTA). Still no scan-data rows: no usage details, no error state,
+  // no Share/Redo — those slots stay honestly empty.
   const liveProps = {
     onOpen: () => {},
     provider: "muse",
     providerTitle: "Muse · claude-sonnet",
     title: "Fix the flaky test",
-    timeMeta: "5m ago",
+    timeMeta: "a9080f00 · 5m ago",
     prompts: ["make the test deterministic", "also cover the retry path"],
     place: {
       project: "/home/lei/vibe-replay",
@@ -113,6 +115,7 @@ describe("SessionCard shared shell", () => {
       branch: "feat/x",
       repo: "tuo-lei/vibe-replay",
     },
+    statusLeading: <span data-testid="data-level-icon" />,
     status: {
       durationMs: 2700000,
       durationEstimated: true,
@@ -121,7 +124,12 @@ describe("SessionCard shared shell", () => {
       editCount: 4,
       editEstimated: true,
     },
-    middle: <span data-testid="live-size">22.8MB</span>,
+    facts: (
+      <>
+        <span data-testid="live-size">22.8MB</span>
+        <span data-testid="live-storage-badge">SQLite + JSONL</span>
+      </>
+    ),
     actions: (
       <button data-testid="live-view" type="button">
         View
@@ -146,24 +154,101 @@ describe("SessionCard shared shell", () => {
     expect(dashboardShell.getAttribute("role")).toBe("button");
     expect(liveClasses).toBe(dashboardClasses);
     // Dashboard fixture: header + 1 prompt preview + place + status.
-    // Live fixture: header + 2 prompt previews + place + status + middle + footer.
+    // Live fixture: header + 2 prompt previews + place + status + footer
+    // (facts + View action).
     expect(dashboardRows).toBe(4);
-    expect(liveShell.children.length).toBe(7);
+    expect(liveShell.children.length).toBe(6);
   });
 
-  it("renders prompt previews, the size middle-node and the View action for the live shape", () => {
+  it("renders prompt previews, slug·time, the data-level icon, facts and the View action for the live shape", () => {
     stubBrowserAPIs();
     const { container } = render(<SessionCard {...liveProps} />);
     expect(container.textContent).toContain("make the test deterministic");
     expect(container.textContent).toContain("also cover the retry path");
+    expect(container.textContent).toContain("a9080f00 · 5m ago");
+    expect(screen.getByTestId("data-level-icon")).toBeTruthy();
     expect(screen.getByTestId("live-size")).toBeTruthy();
+    expect(screen.getByTestId("live-storage-badge").textContent).toBe("SQLite + JSONL");
     const viewButton = screen.getByTestId("live-view");
     expect(viewButton.textContent).toBe("View");
   });
+});
 
-  it("renders the branch/repo as links only when URLs are provided", () => {
+/**
+ * The live viewer's `LiveSessionCard` adapter: pins that a relay summary
+ * produces the same shared `SessionCard` with the dashboard's rows wired up —
+ * slug·time header, prompt previews, the data-level status icon, the size +
+ * storage-badge facts, and the View CTA.
+ */
+describe("LiveSessionCard adapter", () => {
+  const summary = {
+    provider: "muse",
+    sessionId: "a9080f00-4a4e-4f1e-9c2b-1234567890ab",
+    title: "Fix the flaky test",
+    project: "/home/lei/vibe-replay",
+    timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    slug: "a9080f00",
+    lineCount: 120,
+    fileSize: 23986176,
+    promptCount: 3,
+    toolCallCount: 12,
+    model: "claude-sonnet-4-20250514",
+    gitRepo: "tuo-lei/vibe-replay",
+    gitBranch: "feat/x",
+    hasSqlite: true,
+    compactionCount: 1,
+    durationMsEst: 2700000,
+    editCountEst: 4,
+    firstPrompts: ["make the test deterministic", "also cover the retry path"],
+  };
+
+  it("renders the shared card shell with slug·time, prompts, icon, facts and View", () => {
     stubBrowserAPIs();
-    const { container } = render(<SessionCard {...liveProps} />);
+    const { container } = render(<LiveSessionCard session={summary} onOpen={() => {}} />);
+    const shell = container.firstElementChild!;
+    // The exact shared shell: same component the dashboard renders.
+    expect(shell.getAttribute("role")).toBe("button");
+    expect(shell.className).toContain("bg-terminal-surface");
+    expect(shell.className).toContain("rounded-xl");
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("a9080f00 · ");
+    expect(text).toContain("make the test deterministic");
+    expect(text).toContain("also cover the retry path");
+    expect(text).toContain("22.9MB");
+    // Storage badge uses the dashboard's exact label…
+    expect(screen.getByText("SQLite + JSONL")).toBeTruthy();
+    // …and the dashboard's exact badge class for the sqlite case.
+    const badge = screen.getByText("SQLite + JSONL");
+    expect(badge.className).toContain("bg-terminal-green-subtle");
+    expect(badge.className).toContain("text-terminal-green");
+    // Same data-level icon component the dashboard passes as statusLeading.
+    expect(screen.getByLabelText("Data level: Counted")).toBeTruthy();
+    // View CTA opens the detail.
+    const viewButton = screen.getByRole("button", { name: "Open Fix the flaky test" });
+    expect(viewButton.textContent).toContain("View");
+  });
+
+  it("hides the storage badge when there is no sqlite/sdk source", () => {
+    stubBrowserAPIs();
+    const { container } = render(
+      <LiveSessionCard session={{ ...summary, hasSqlite: false }} onOpen={() => {}} />,
+    );
+    expect(screen.queryByText("SQLite + JSONL")).toBeNull();
+    expect(container.textContent).toContain("22.9MB");
+  });
+
+  it("falls back to time-only when the slug is missing", () => {
+    stubBrowserAPIs();
+    const { container } = render(
+      <LiveSessionCard session={{ ...summary, slug: undefined }} onOpen={() => {}} />,
+    );
+    expect(container.textContent).not.toContain(" · ");
+  });
+
+  it("renders the branch/repo as plain text since no URLs exist remotely", () => {
+    stubBrowserAPIs();
+    const { container } = render(<LiveSessionCard session={summary} onOpen={() => {}} />);
     // Live passes no URLs: plain text, no anchors.
     expect(container.querySelectorAll("a").length).toBe(0);
     expect(container.textContent).toContain("feat/x");
