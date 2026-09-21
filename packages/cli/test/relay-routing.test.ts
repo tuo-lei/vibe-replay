@@ -566,3 +566,200 @@ describe("shipper list summaries", () => {
     expect(firstPrompts[1]!.endsWith("…")).toBe(true);
   });
 });
+
+describe("shipper viewer presence", () => {
+  function captureLogs() {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    return { logs, restore: () => void (console.log = origLog) };
+  }
+
+  async function connectedShipper(viewers?: number): Promise<FakeSocket> {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+    sock.onopen!();
+    // Ack the hello the way a current relay does (older relays omit
+    // `viewers`).
+    sock.onmessage!(
+      typeof viewers === "number"
+        ? { data: JSON.stringify({ t: "hello-ok", viewers }) }
+        : { data: JSON.stringify({ t: "hello-ok" }) },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    return sock;
+  }
+
+  const presenceLines = (logs: string[]) => logs.filter((l) => l.includes("→ viewer"));
+
+  it("prints join/leave lines with the watcher count", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v2" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (2 watching)",
+        "  → viewer left (1 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("applies the absolute count from a rejoin notice for an already-tracked viewer", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      // A joins, then goes stale; B joins while A is stale-excluded, so the
+      // relay reports viewers: 1 even though two sockets are attached.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-a", viewers: 1 }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-b", viewers: 1 }) });
+      // A revives before the sweep: the relay sends a rejoin notice with the
+      // true absolute count. A is already tracked, so there is no new
+      // "connected" line — but the count must repair to 2, not freeze at 1.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-a", viewers: 2 }) });
+      // A legacy join without a count falls back to +1 on the repaired
+      // count, proving the rejoin was applied, not discarded.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-c" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (3 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores a duplicate join notice without double-counting", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer left (0 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("uses the relay's absolute count on leave and never decrements untracked vias", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      // Two viewers were already attached when the shipper (re)connected:
+      // their vias were never announced, so hello-ok carries the count.
+      const sock = await connectedShipper(2);
+      expect(logs.some((l) => l.includes("2 viewers already watching"))).toBe(true);
+
+      // The relay's absolute count on leave is authoritative: a leave for
+      // an unattributed via sets the count instead of decrementing a
+      // snapshot the departing viewer may not have been part of (e.g. a
+      // stale viewer reaped after a shipper reconnect).
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-old", viewers: 1 }) });
+      // Without an absolute count, a leave for an unknown via leaves the
+      // count alone — it must never drive the display negative or steal a
+      // healthy viewer's slot.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-ghost" }) });
+      // A fresh join takes the relay's absolute count.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-new", viewers: 2 }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer left (1 watching)",
+        "  → viewer left (1 watching)",
+        "  → viewer connected (2 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("clears count authority when a reconnect ack omits the snapshot", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      // The shipper first talked to a current relay (authoritative count),
+      // then reconnected after a relay rollback: the new hello-ok carries
+      // no viewers, so the old count must not survive the epoch change.
+      const sock = await connectedShipper(2);
+      expect(logs.some((l) => l.includes("2 viewers already watching"))).toBe(true);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "hello-ok" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // A legacy leave after the rollback reports the disconnect without
+      // resurrecting the stale "2 watching" count.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual(["  → viewer left"]);
+      expect(logs.some((l) => l.includes("2 watching"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("never fabricates a count for a legacy relay that omits it", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      // A legacy relay omits `viewers` on hello-ok and only ever sends
+      // viewer-left (never viewer-joined). With no authoritative count
+      // and no tracked join, the leave is reported without inventing
+      // "0 watching" — other viewers may still be attached.
+      const sock = await connectedShipper();
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(logs.some((l) => l.includes("already watching"))).toBe(false);
+      expect(logs.some((l) => l.includes("watching"))).toBe(false);
+      expect(presenceLines(logs)).toEqual(["  → viewer left"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores malformed/unknown control frames without dropping the connection", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      // No `via`: must not print, must not throw, must not close.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "some-future-control", x: 1 }) });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(presenceLines(logs)).toEqual([]);
+
+      // The connection still works: a ping gets a routed response.
+      sock.onmessage!({
+        data: JSON.stringify({
+          t: "frame",
+          iv: "mock-iv",
+          data: JSON.stringify({ seq: 42, cmd: "ping" }),
+        }),
+      });
+      await waitFor(() => sock.sent.length > 1, "ping answered after unknown frames");
+      expect(JSON.parse(lastOuter(sock).data as string)).toMatchObject({ seq: 42, ok: true });
+    } finally {
+      restore();
+    }
+  });
+});

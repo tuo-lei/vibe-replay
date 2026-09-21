@@ -210,7 +210,8 @@ describe("LiveRelay multi-viewer", () => {
     await h.relay.webSocketClose(a.ws as unknown as WebSocket);
 
     const notices = vm.sent.map((s) => JSON.parse(s));
-    expect(notices).toContainEqual({ t: "viewer-left", via: a.vid });
+    // a is gone; b remains — the absolute count excludes the closing socket.
+    expect(notices).toContainEqual({ t: "viewer-left", via: a.vid, viewers: 1 });
   });
 
   it("forwards encrypted display names verbatim and never sees plaintext", async () => {
@@ -283,6 +284,227 @@ describe("LiveRelay multi-viewer", () => {
     );
     // No VM: nothing to forward to, viewer stays connected for a later retry.
     expect(a.ws.closed).toEqual([]);
+  });
+});
+
+/**
+ * Shipper presence notices: the relay tells the shipper socket when viewers
+ * join/leave (and how many are attached at hello-ok) so the CLI operator
+ * can see who is watching. Routing metadata only — the shipper never sees
+ * names.
+ */
+describe("LiveRelay shipper presence notices", () => {
+  const controlNotices = (ws: MockSocket) =>
+    ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-joined" || m.t === "viewer-left");
+
+  it("notifies the shipper when a viewer joins", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: b.vid, viewers: 2 },
+    ]);
+  });
+
+  it("sends no join notice when no shipper is attached (and does not crash)", async () => {
+    const h = makeRelay();
+    // No shipper hello: the viewer still gets a welcome; the shipper will
+    // learn the count from its hello-ok when it (re)connects.
+    const a = await helloViewer(h, LEI_CIPHER);
+    expect(a.ws.closed).toEqual([]);
+
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    // No retroactive join notices — but the ack carries the live count.
+    expect(controlNotices(vm)).toEqual([]);
+    const acks = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(acks).toEqual([{ t: "hello-ok", viewers: 1 }]);
+  });
+
+  it("includes the live viewer count in the shipper's hello-ok", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const firstAcks = first.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(firstAcks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+
+    await helloViewer(h, LEI_CIPHER);
+    await helloViewer(h, WENDY_CIPHER);
+
+    // Shipper reconnects and displaces the first: the ack carries the live
+    // roster count so the CLI can resync its watcher display.
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    const secondAcks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(secondAcks).toEqual([{ t: "hello-ok", viewers: 2 }]);
+  });
+
+  it("routes join notices to the new shipper during takeover, not the closing socket", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    // A replacement shipper takes over: the old socket is closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    // ...but the runtime may still list it (the mock never removes
+    // sockets, mirroring production's close-completion window).
+    expect(h.sockets).toContain(first.ws);
+
+    // A viewer joining in that window must notify the NEW shipper — the
+    // dying socket must not swallow the join and leave the replacement
+    // with a stale count from its earlier hello-ok snapshot.
+    const v = await helloViewer(h, LEI_CIPHER);
+    expect(controlNotices(first.ws)).toEqual([]);
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+  });
+
+  it("ignores a delayed goodbye from a displaced shipper after takeover", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    // A replacement shipper takes over: the old socket is marked displaced
+    // and closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+
+    // ...but the runtime may still dispatch a message the old shipper
+    // queued before the close completed. A delayed `goodbye` from it must
+    // not endBox() a box the replacement shipper now owns.
+    await h.relay.webSocketMessage(
+      first.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye" }),
+    );
+
+    // The box is still alive: a viewer can hello and the new shipper gets
+    // the join notice; the displaced socket gets nothing further.
+    const v = await helloViewer(h, LEI_CIPHER);
+    expect(controlNotices(first.ws)).toEqual([]);
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+  });
+
+  it("does not route frames from a displaced shipper to viewers", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const second = helloVm(h);
+    await second.p;
+
+    // A frame the old shipper queued before the close completed must not
+    // reach the viewer — it belongs to the pre-takeover epoch.
+    const before = a.ws.sent.length;
+    await h.relay.webSocketMessage(
+      first.ws as unknown as WebSocket,
+      JSON.stringify({ t: "frame", iv: "i9", data: "d9", via: a.vid }),
+    );
+    expect(a.ws.sent.length).toBe(before);
+  });
+
+  it("sends viewer-left on close so join/leave notices stay symmetric", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    h.sockets.splice(h.sockets.indexOf(a.ws), 1);
+    await h.relay.webSocketClose(a.ws as unknown as WebSocket);
+
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-left", via: a.vid, viewers: 0 },
+    ]);
+  });
+
+  it("reports the absolute remaining count when a stale viewer is swept", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b goes stale (> 45 s without a heartbeat): it drops out of the
+    // presence-filtered roster while its socket is still attached.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // The sweep closes the stale socket; the runtime delivers the close.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+
+    // The leave notice carries the absolute remaining count (just a) — a
+    // shipper that resynced from a hello-ok snapshot excluding stale b
+    // must not decrement anything on this notice.
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: b.vid, viewers: 2 },
+      { t: "viewer-left", via: b.vid, viewers: 1 },
+    ]);
+  });
+
+  it("treats a heartbeat after staleness as a rejoin so a resynced shipper stops undercounting", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    // a goes stale (> 45 s without a heartbeat) while its socket stays open.
+    (a.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // Shipper reconnects mid-staleness: the hello-ok snapshot excludes a.
+    const second = helloVm(h);
+    await second.p;
+    const acks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(acks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+
+    // a resumes heartbeating before the sweep reaps it: the relay notifies
+    // the new shipper — a rejoin carrying the absolute count — so the CLI
+    // repairs its undercount instead of showing 0 until the next unrelated
+    // viewer transition.
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: a.vid, viewers: 1 }]);
+  });
+
+  it("a revived viewer re-notifies a continuously connected shipper without double counting", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    (a.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+
+    // The relay still emits the rejoin notice — it cannot tell a resynced
+    // shipper from a continuously connected one — but the absolute count
+    // stays 1 and the CLI dedupes by vid, so no duplicate print or drift.
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+    ]);
+  });
+
+  it("never leaks plaintext names into shipper notices", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    await helloViewer(h, LEI_CIPHER);
+    await helloViewer(h, WENDY_CIPHER);
+
+    expect(vm.sent.join("\n")).not.toContain("Lei");
+    expect(vm.sent.join("\n")).not.toContain("Wendy");
   });
 });
 
@@ -360,10 +582,205 @@ describe("LiveRelay presence liveness sweep", () => {
     const roster = lastPresence(a.ws)?.viewers;
     expect(roster).toEqual([{ vid: a.vid, name: LEI_CIPHER }]);
     const notices = vm.sent.map((s) => JSON.parse(s));
-    expect(notices).toContainEqual({ t: "viewer-left", via: b.vid });
+    // The swept viewer was already stale-excluded from the roster, so the
+    // absolute remaining count is just the survivor — never negative drift.
+    expect(notices).toContainEqual({ t: "viewer-left", via: b.vid, viewers: 1 });
 
     // A viewer remains, so the alarm stays armed.
     expect(h.alarmAt()).toBeGreaterThan(Date.now());
+  });
+
+  it("notifies the shipper during the sweep and does not double-notify on close", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // b goes stale (> 45 s without a heartbeat) on a half-open socket.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    const leaves = (ws: MockSocket) =>
+      ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+
+    // The sweep reaps the stale socket: the shipper learns the leave
+    // immediately with the absolute remaining count, even though the
+    // runtime hasn't delivered webSocketClose yet.
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(leaves(vm)).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+
+    // When the runtime eventually delivers the close, no duplicate notice.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    expect(leaves(vm)).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
+  it("does not re-notify the shipper on later sweeps while the half-open socket lingers", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    const leaves = (ws: MockSocket) =>
+      ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+
+    await h.relay.alarm();
+    expect(leaves(vm)).toHaveLength(1);
+
+    // The half-open socket is still listed across later alarms (the exact
+    // delayed-close case): no repeated viewer-left, no rerun tail cleanup.
+    await h.relay.alarm();
+    await h.relay.alarm();
+    expect(leaves(vm)).toHaveLength(1);
+  });
+
+  it("retries the sweep leave notice when no shipper was attached", async () => {
+    const h = makeAlarmRelay();
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // No shipper attached: the sweep reaps the socket but cannot notify —
+    // and must not mark it notified, or the notice would be lost forever.
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // A shipper attaches before the delayed close: the close callback still
+    // delivers the leave, so the CLI drops the dead viewer's tails.
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
+  it("keeps the sweep leave notice retryable when the shipper's send fails", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // The shipper's socket dies mid-send: the notice is lost, and the flag
+    // must stay clear so a replacement shipper can still learn the leave.
+    const origSend = vm.send;
+    vm.send = () => {
+      throw new Error("boom");
+    };
+    await h.relay.alarm();
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+    vm.send = origSend;
+
+    // A replacement shipper connects; the delayed close retries the notice.
+    const second = helloVm(h);
+    await second.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
+  it("does not entrust a viewer leave to a shipper reaped earlier in the same sweep", async () => {
+    const h = makeAlarmRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // Network outage: both the shipper and viewer b go stale. The shipper
+    // is first in getWebSockets(), so the sweep reaps it before b.
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    // b's leave was not entrusted to the closing shipper: no notice went
+    // out and the viewer stays retryable.
+    const firstLeaves = first.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-left");
+    expect(firstLeaves).toEqual([]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // The CLI reconnects; the delayed viewer close retries the notice to
+    // the replacement shipper, which then drops the dead viewer's tails.
+    const second = helloVm(h);
+    await second.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
+  it("does not entrust a viewer leave to a stale shipper that has not been reaped yet", async () => {
+    const h = makeAlarmRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // Shipper takeover: the replacement VM is newer than the viewers.
+    const second = helloVm(h);
+    await second.p;
+    // Outage: the replacement shipper and viewer b both go stale. The
+    // viewer is older, so the sweep visits it before the shipper.
+    (second.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.alarm();
+    expect(second.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    // The stale (not yet reaped) shipper was not entrusted: no notice went
+    // out and the viewer stays retryable.
+    const secondLeaves = second.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-left");
+    expect(secondLeaves).toEqual([]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // A third shipper connects; the delayed viewer close retries the notice
+    // to the replacement, which then drops the dead viewer's tails.
+    const third = helloVm(h);
+    await third.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = third.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
+  it("clears the leave marker when a swept viewer revives via heartbeat", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b goes stale; the sweep sends viewer-left and marks it.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    await h.relay.alarm();
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBe(true);
+    const vmNotices = () => vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t !== "roster");
+    expect(vmNotices()).toContainEqual({ t: "viewer-left", via: b.vid, viewers: 1 });
+
+    // A heartbeat dispatched after the sweep revives b before its socket
+    // closes: the marker must not survive the revival.
+    await h.relay.webSocketMessage(
+      b.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBe(false);
+
+    // b's eventual close notifies the shipper again instead of being
+    // swallowed by the stale marker.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = vmNotices().filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([
+      { t: "viewer-left", via: b.vid, viewers: 1 },
+      { t: "viewer-left", via: b.vid, viewers: 1 },
+    ]);
   });
 
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
@@ -586,6 +1003,24 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await h.relay.alarm();
     expect(h.store.get("ended")).toBeUndefined();
     expect(a.ws.closed).toEqual([]);
+  });
+
+  it("a displaced shipper's close does not start the box-end grace", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    // Takeover: the old socket is marked displaced and closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(second.ws.closed).toEqual([]);
+
+    // ...but the runtime may still list it when its close event fires.
+    // That close must not start the end grace — the replacement is
+    // already connected.
+    await h.relay.webSocketClose(first.ws as unknown as WebSocket);
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.store.get("ended")).toBeUndefined();
   });
 
   it("the box ends when the grace expires with no reconnect", async () => {

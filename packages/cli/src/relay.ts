@@ -224,6 +224,30 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   const shareUrl = `${origin}/live/${boxId}#${keyString}`;
 
   const tails = new Map<string, TailState>();
+  /**
+   * Viewer presence as the relay reports it. A current relay sends an
+   * absolute `viewers` count on every hello-ok / viewer-joined /
+   * viewer-left, and the CLI displays that authoritative count directly —
+   * it never does its own base+delta arithmetic, so a stale viewer reaped
+   * after a shipper reconnect can never make the displayed count drift.
+   * Older relays omit the count and only ever send viewer-left: such a
+   * leave is still reported (and still clears tail state), but without a
+   * count, so the console never presents a fabricated "0 watching".
+   * `viewerVias` only dedupes join prints. Viewer display names travel as
+   * AES-GCM ciphertext the shipper cannot decrypt — counts only, never
+   * names.
+   */
+  const viewerVias = new Set<string>();
+  let viewerCount = 0;
+  /**
+   * Whether the relay has ever sent an authoritative absolute count (on
+   * hello-ok or any presence notice). A legacy relay omits `viewers` and
+   * only ever sends viewer-left — in that case we have no honest count to
+   * display, so the leave notice is printed without one rather than
+   * presenting a fabricated "0 watching".
+   */
+  let hasAuthoritativeCount = false;
+  const pluralViewers = (n: number): string => `${n} viewer${n === 1 ? "" : "s"}`;
   let ws: WebSocket | null = null;
   let stopped = false;
   /**
@@ -534,12 +558,80 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     // "session ended". (Acks on reconnects are harmless no-ops.)
     if (outer.t === "hello-ok") {
       resolveHelloOk();
+      // The relay reports the absolute viewer count, so a reconnecting
+      // shipper resyncs instead of showing a stale count.
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        viewerVias.clear();
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        hasAuthoritativeCount = true;
+        if (viewerCount > 0) {
+          console.log(`  → ${pluralViewers(viewerCount)} already watching`);
+        }
+      } else {
+        // Legacy relay (or a rollback / mixed-version deployment): the ack
+        // carries no snapshot, so any count authority from a previous
+        // connection is stale — start a fresh unknown-count epoch instead
+        // of printing an old count for an audience that may have changed
+        // during the outage.
+        viewerVias.clear();
+        viewerCount = 0;
+        hasAuthoritativeCount = false;
+      }
+      return;
+    }
+    // Plaintext relay control: a viewer joined. Track the watcher count so
+    // the operator can see someone is watching. Older relays never send
+    // this; older shippers ignore the unknown `t` without dropping the
+    // connection — backward compatible both ways.
+    if (outer.t === "viewer-joined" && typeof outer.via === "string") {
+      // The relay's absolute count is authoritative — apply it even for a
+      // vid we already track. A viewer that went stale and revived rejoins
+      // with the true count (e.g. another viewer joined while it was
+      // stale); discarding the notice as a "duplicate" would freeze the
+      // console on the undercount indefinitely. Only the connected log
+      // line is deduplicated, never the count.
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        hasAuthoritativeCount = true;
+      } else if (!viewerVias.has(outer.via)) {
+        // Relays that predate the count field: +1 per untracked join.
+        viewerCount += 1;
+      }
+      if (!viewerVias.has(outer.via)) {
+        viewerVias.add(outer.via);
+        console.log(`  → viewer connected (${viewerCount} watching)`);
+      }
       return;
     }
     // Plaintext relay control: a viewer left. Drop its id from every tail
-    // fan-out; tails with no subscribers left stop their poll loop.
+    // fan-out; tails with no subscribers left stop their poll loop. Also
+    // update the watcher count display.
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
       for (const id of tails.keys()) stopTail(id, outer.via);
+      const tracked = viewerVias.delete(outer.via);
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        // Absolute count from the relay is authoritative — never decrement
+        // a snapshot that may not have included this viewer (e.g. a stale
+        // viewer reaped after a shipper reconnect).
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        hasAuthoritativeCount = true;
+        console.log(`  → viewer left (${viewerCount} watching)`);
+      } else if (tracked) {
+        // Only decrement for a join we actually tracked; the leave then
+        // carries a real transition, not a fabricated zero.
+        viewerCount = Math.max(0, viewerCount - 1);
+        console.log(`  → viewer left (${viewerCount} watching)`);
+      } else if (hasAuthoritativeCount) {
+        // The relay gave us an absolute count before but omitted it on
+        // this notice — keep the last known count, never drift it down
+        // for an unattributed leave.
+        console.log(`  → viewer left (${viewerCount} watching)`);
+      } else {
+        // Legacy relay: hello-ok carried no count and such a relay only
+        // ever sends viewer-left, so there is no honest count to show —
+        // report the disconnect without inventing "0 watching".
+        console.log("  → viewer left");
+      }
       return;
     }
     // The relay declared this box dead (we were swept as a ghost, or a

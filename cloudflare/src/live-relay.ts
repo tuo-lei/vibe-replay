@@ -22,6 +22,15 @@
  *   hello; the relay stores and broadcasts the ciphertext verbatim and can
  *   never see the plaintext. Viewers decrypt names locally with the fragment
  *   key.
+ * - viewer-joined / viewer-left: plaintext control notices the relay sends
+ *   to the shipper socket when a viewer hello lands / a viewer socket
+ *   closes. Each notice carries an absolute `viewers` count (remaining
+ *   viewers after the transition), as does the shipper's `hello-ok` ack —
+ *   the CLI displays the absolute count instead of doing its own
+ *   base+delta arithmetic, so a stale viewer reaped after a shipper
+ *   reconnect can never make the displayed count drift. Routing metadata
+ *   only — the shipper shows counts, never names (names are ciphertext it
+ *   cannot read).
  *
  * Uses the Hibernation API, so an idle box (VM holding its socket open with
  * nobody watching) costs ~zero duration billing: the runtime answers
@@ -70,6 +79,23 @@ interface Attachment {
    * Stored in the attachment so it survives hibernation eviction.
    */
   lastSeen?: number;
+  /**
+   * Shipper only: set when a newer shipper displaced this socket. The
+   * runtime may still list the closing socket in getWebSockets() while
+   * the close completes, so vmSocket() skips displaced sockets —
+   * presence notices and viewer frames go to the replacement, and its
+   * close must not start the box-end grace.
+   */
+  displaced?: boolean;
+  /**
+   * Viewer only: set when the sweep alarm actually delivered this viewer's
+   * leave notice to an attached shipper while reaping the socket.
+   * webSocketClose — and later alarms, while the half-open socket lingers —
+   * must not double-notify. The flag is set only when a shipper was there
+   * to hear the notice; otherwise a later alarm or the close callback
+   * retries.
+   */
+  leaveNotified?: boolean;
 }
 
 /**
@@ -289,7 +315,35 @@ export class LiveRelay {
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
-        if (att?.role === "vm") return ws;
+        // A displaced shipper is already closing: presence notices and
+        // viewer frames must reach the replacement, never the dying
+        // socket (the runtime may still list it while the close
+        // completes).
+        if (att?.role === "vm" && !att.displaced) return ws;
+      } catch {
+        // attachment unreadable — treat as unregistered
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The shipper socket eligible for a sweep-time viewer-leave notice.
+   * Unlike vmSocket(), this also excludes a shipper that is itself past
+   * the sweep timeout, regardless of visit order: after a takeover the
+   * replacement VM is newer than existing viewers, so a stale viewer can
+   * be visited first while the stale shipper hasn't been reaped yet. A
+   * send() to such a shipper may be accepted without delivery, and the
+   * leaveNotified mark would then suppress the retry a reconnecting
+   * shipper needs. A stale shipper is reaped in this same pass anyway.
+   */
+  private notifyingVmSocket(now: number): WebSocket | undefined {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const att = ws.deserializeAttachment() as Attachment | null;
+        if (att?.role !== "vm" || att.displaced) continue;
+        if (typeof att.lastSeen === "number" && now - att.lastSeen > VM_SWEEP_AFTER_MS) continue;
+        return ws;
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -378,6 +432,40 @@ export class LiveRelay {
         continue;
       }
       if (now - att.lastSeen > timeout) {
+        if (att.role === "viewer" && typeof att.vid === "string" && !att.leaveNotified) {
+          // A half-open socket's close may never deliver webSocketClose
+          // promptly, and the leave notice lives only in that callback —
+          // notify the shipper now so its watcher count and the dead
+          // viewer's tail subscriptions don't linger. The reaped viewer is
+          // already stale-excluded from viewers(), so the absolute count is
+          // exact. Mark the socket only after the send observably succeeds:
+          // an attached shipper socket can still die mid-send, and the mark
+          // must not suppress the retry a replacement shipper needs.
+          // When no shipper is attached — or the send fails — the flag stays
+          // clear so a later alarm or the delayed close callback retries.
+          // Never entrust the notice to a shipper that is itself stale:
+          // notifyingVmSocket() excludes it regardless of sweep visit
+          // order.
+          const vm = this.notifyingVmSocket(now);
+          if (vm) {
+            let sent = false;
+            try {
+              vm.send(
+                JSON.stringify({ t: "viewer-left", via: att.vid, viewers: this.viewers().length }),
+              );
+              sent = true;
+            } catch {
+              // peer died mid-send — leave the flag clear to retry
+            }
+            if (sent) {
+              try {
+                ws.serializeAttachment({ ...att, leaveNotified: true } satisfies Attachment);
+              } catch {
+                // best effort — the mark may not stick on a dead socket
+              }
+            }
+          }
+        }
         this.closeQuietly(ws, 1001, "idle timeout");
         reaped++;
         continue;
@@ -449,6 +537,16 @@ export class LiveRelay {
       attachment = null;
     }
 
+    // A displaced shipper lost a takeover race: its socket is already being
+    // closed, but the runtime may still dispatch messages it queued before
+    // the close completes (a delayed `goodbye`, heartbeat, or frame).
+    // Ignore everything from it — a stale `goodbye` must not endBox() a box
+    // the replacement shipper now owns, and its heartbeats/frames belong to
+    // the old epoch.
+    if (attachment?.role === "vm" && attachment.displaced) {
+      return;
+    }
+
     // First message on a fresh socket must be the plaintext hello.
     // (Plaintext role is routing metadata only; the display name travels
     // as ciphertext and the encrypted payloads that follow stay opaque.)
@@ -469,7 +567,25 @@ export class LiveRelay {
             }
             // One shipper per box: a new shipper takes over from the old one.
             const existing = this.vmSocket();
-            if (existing && existing !== ws) this.closeQuietly(existing, 1000, "replaced");
+            if (existing && existing !== ws) {
+              // Mark the old socket displaced *before* closing it: the
+              // runtime may still list it in getWebSockets() while the
+              // close completes, and vmSocket() must already resolve to
+              // the new claim in that window — otherwise a viewer joining
+              // right now would send its join notice to the dying socket
+              // while the new shipper's hello-ok snapshot (taken before
+              // the join) leaves its watcher count stale.
+              try {
+                existing.serializeAttachment({
+                  role: "vm",
+                  lastSeen: 0,
+                  displaced: true,
+                } satisfies Attachment);
+              } catch {
+                // already gone
+              }
+              this.closeQuietly(existing, 1000, "replaced");
+            }
             ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
             // The shipper reconnected inside the end grace — cancel it.
             try {
@@ -488,7 +604,10 @@ export class LiveRelay {
           // share URL. Viewers can therefore never open the URL before the
           // relay knows the shipper. (A zombie hello returned early above
           // and gets no ack; its CLI exits on the session-ended instead.)
-          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok" }));
+          // `viewers` lets a (re)connecting shipper resync its watcher
+          // count: viewers that joined while it was away never sent it a
+          // join notice. Viewers get `welcome`, never `hello-ok`.
+          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok", viewers: this.viewers().length }));
           return;
         }
         // A viewer joining a dead box learns it immediately instead of
@@ -546,6 +665,17 @@ export class LiveRelay {
         this.sendQuietly(ws, JSON.stringify({ t: "welcome", vid }));
         this.ensureSweepAlarm();
         this.broadcastPresence();
+        // Tell the shipper a viewer joined so the CLI operator can see who
+        // is watching — symmetric with the viewer-left notice on close.
+        // The absolute count is authoritative: the joining viewer is already
+        // in viewers() (fresh lastSeen). If the shipper is away it learns
+        // the count from its next hello-ok instead; no notice is ever queued.
+        const vm = this.vmSocket();
+        if (vm)
+          this.sendQuietly(
+            vm,
+            JSON.stringify({ t: "viewer-joined", via: vid, viewers: this.viewers().length }),
+          );
         return;
       }
       this.closeQuietly(ws, 1003, "hello first");
@@ -565,10 +695,45 @@ export class LiveRelay {
     // Plaintext liveness ping from a hello'd socket (viewer heartbeat or
     // anything the shipper sends outside frames). Refreshes the sweep clock.
     if (msg.t === "heartbeat") {
+      const now = Date.now();
+      // A viewer that missed heartbeats for over 45 s dropped out of the
+      // stale-filtered roster — and out of any hello-ok snapshot taken while
+      // it was stale. If it resumes heartbeating before the sweep reaps its
+      // still-open socket, the shipper would undercount it indefinitely: no
+      // join notice and no fresh snapshot would ever repair the count. Treat
+      // the revival as a rejoin and notify with the absolute count. A shipper
+      // that stayed connected throughout already tracks this vid, so its CLI
+      // dedupes the notice; a shipper that resynced mid-staleness gets its
+      // count fixed.
+      const revivedViewer =
+        attachment.role === "viewer" &&
+        typeof attachment.vid === "string" &&
+        typeof attachment.lastSeen === "number" &&
+        now - attachment.lastSeen > PRESENCE_SWEEP_AFTER_MS;
       try {
-        ws.serializeAttachment({ ...attachment, lastSeen: Date.now() } satisfies Attachment);
+        ws.serializeAttachment({
+          ...attachment,
+          lastSeen: now,
+          // A revived viewer starts a fresh presence epoch: if the sweep
+          // already sent viewer-left for the stale interval, clear the mark —
+          // otherwise the viewer's eventual departure would never notify the
+          // shipper again.
+          ...(revivedViewer ? { leaveNotified: false } : undefined),
+        } satisfies Attachment);
       } catch {
         // attachment unwritable — the sweep will eventually reap this socket
+      }
+      if (revivedViewer && attachment.role === "viewer" && typeof attachment.vid === "string") {
+        const vm = this.vmSocket();
+        if (vm)
+          this.sendQuietly(
+            vm,
+            JSON.stringify({
+              t: "viewer-joined",
+              via: attachment.vid,
+              viewers: this.viewers().length,
+            }),
+          );
       }
       return;
     }
@@ -629,15 +794,26 @@ export class LiveRelay {
     } catch {
       att = null;
     }
-    if (att?.role === "viewer") {
+    if (att?.role === "viewer" && !att.leaveNotified) {
       const vm = this.vmSocket();
-      if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-left", via: att.vid }));
+      if (vm) {
+        // Absolute remaining-viewer count, excluding the closing socket
+        // explicitly: the runtime may still list it in getWebSockets() when
+        // this fires (healthy close), while a swept stale socket is already
+        // filtered out of viewers(). Either way the count is exact.
+        const remaining = this.viewers().filter((v) => v.ws !== ws).length;
+        this.sendQuietly(
+          vm,
+          JSON.stringify({ t: "viewer-left", via: att.vid, viewers: remaining }),
+        );
+      }
     }
-    if (att?.role === "vm") {
+    if (att?.role === "vm" && !att.displaced) {
       // The shipper is gone. Its retry loop reconnects with the same box id
       // (backoff caps at 30 s) — start the end grace; the sweep declares the
       // box dead only if no shipper reattaches in time. Skip when the box
-      // already ended (the goodbye path handled it).
+      // already ended (the goodbye path handled it). A displaced socket's
+      // close never starts the grace: its replacement is already connected.
       try {
         const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
         if (ended !== true) {
