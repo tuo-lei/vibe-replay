@@ -366,6 +366,49 @@ describe("LiveRelay shipper presence notices", () => {
     expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
   });
 
+  it("ignores a delayed goodbye from a displaced shipper after takeover", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    // A replacement shipper takes over: the old socket is marked displaced
+    // and closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+
+    // ...but the runtime may still dispatch a message the old shipper
+    // queued before the close completed. A delayed `goodbye` from it must
+    // not endBox() a box the replacement shipper now owns.
+    await h.relay.webSocketMessage(
+      first.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye" }),
+    );
+
+    // The box is still alive: a viewer can hello and the new shipper gets
+    // the join notice; the displaced socket gets nothing further.
+    const v = await helloViewer(h, LEI_CIPHER);
+    expect(controlNotices(first.ws)).toEqual([]);
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+  });
+
+  it("does not route frames from a displaced shipper to viewers", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const second = helloVm(h);
+    await second.p;
+
+    // A frame the old shipper queued before the close completed must not
+    // reach the viewer — it belongs to the pre-takeover epoch.
+    const before = a.ws.sent.length;
+    await h.relay.webSocketMessage(
+      first.ws as unknown as WebSocket,
+      JSON.stringify({ t: "frame", iv: "i9", data: "d9", via: a.vid }),
+    );
+    expect(a.ws.sent.length).toBe(before);
+  });
+
   it("sends viewer-left on close so join/leave notices stay symmetric", async () => {
     const h = makeRelay();
     const { ws: vm, p } = helloVm(h);

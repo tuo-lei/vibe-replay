@@ -537,6 +537,16 @@ export class LiveRelay {
       attachment = null;
     }
 
+    // A displaced shipper lost a takeover race: its socket is already being
+    // closed, but the runtime may still dispatch messages it queued before
+    // the close completes (a delayed `goodbye`, heartbeat, or frame).
+    // Ignore everything from it — a stale `goodbye` must not endBox() a box
+    // the replacement shipper now owns, and its heartbeats/frames belong to
+    // the old epoch.
+    if (attachment?.role === "vm" && attachment.displaced) {
+      return;
+    }
+
     // First message on a fresh socket must be the plaintext hello.
     // (Plaintext role is routing metadata only; the display name travels
     // as ciphertext and the encrypted payloads that follow stay opaque.)
