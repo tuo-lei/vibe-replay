@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import type { RelaySessionSummary } from "./protocol";
-import { ActiveFilterChip } from "../components/SessionCard";
+import {
+  ActiveFilterChip,
+  ActiveFilterChipRow,
+  SearchFilterInput,
+} from "../components/SessionFilters";
 import { providerDisplayName } from "../components/dashboard-utils";
 import { shortName } from "../utils/format";
 
@@ -113,12 +117,11 @@ export function SessionFilterBar({
             </option>
           ))}
         </select>
-        <input
+        <SearchFilterInput
           value={filters.text}
-          onChange={(e) => onChange({ ...filters, text: e.target.value })}
+          onChange={(text) => onChange({ ...filters, text })}
           placeholder="Filter list…"
-          aria-label="Filter sessions by text"
-          className="min-w-24 flex-1 rounded-lg bg-terminal-surface px-2.5 py-1.5 text-xs text-terminal-text ring-1 ring-terminal-border-subtle placeholder:text-terminal-dimmer focus:outline-none focus:ring-terminal-green/40 sm:max-w-[180px] sm:flex-none"
+          ariaLabel="Filter sessions by text"
         />
         <button
           type="button"
@@ -132,7 +135,7 @@ export function SessionFilterBar({
 
       {/* Active filter pills */}
       {active && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <ActiveFilterChipRow onClearAll={clearAll}>
           {filters.text.trim() !== "" && (
             <ActiveFilterChip
               label="Filter"
@@ -155,14 +158,7 @@ export function SessionFilterBar({
               onRemove={() => onChange({ ...filters, project: ALL_PROJECTS })}
             />
           )}
-          <button
-            type="button"
-            onClick={clearAll}
-            className="text-xs text-terminal-dimmer underline-offset-2 hover:text-terminal-text hover:underline"
-          >
-            Clear all
-          </button>
-        </div>
+        </ActiveFilterChipRow>
       )}
     </div>
   );

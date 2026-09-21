@@ -940,7 +940,7 @@ function SessionList({
     if (!hits.length)
       return <div className="py-10 text-center text-sm text-terminal-dimmer">No matches.</div>;
     return (
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {hits.map((h) => (
           <button
             key={h.sessionId}
@@ -968,7 +968,7 @@ function SessionList({
       </div>
     );
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {sessions.map((s) => (
         <LiveSessionCard key={s.sessionId} session={s} onOpen={onOpen} />
       ))}

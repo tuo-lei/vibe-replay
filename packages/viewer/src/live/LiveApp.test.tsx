@@ -96,9 +96,24 @@ describe("LiveApp", () => {
     // Provider facet chip (shared filter UI with the dashboard).
     expect(screen.getByRole("button", { name: "muse1" })).toBeTruthy();
     // The card's shared activity status row renders exact values.
-    const statusRow = screen.getByText("First session").closest("button")!;
+    const statusRow = screen.getByText("First session").closest('[role="button"]')!;
     expect(statusRow.textContent).toContain("3 prompts");
     expect(statusRow.textContent).toContain("12 tools");
+    // The live card IS the dashboard card: same shared shell, not a forked
+    // <button> with its own classes. If the shell diverges, this fails.
+    for (const cls of [
+      "bg-terminal-surface",
+      "rounded-xl",
+      "px-5",
+      "py-4",
+      "space-y-3",
+      "shadow-layer-sm",
+      "hover-lift",
+    ]) {
+      expect(statusRow.classList.contains(cls)).toBe(true);
+    }
+    // Header row: provider badge + semibold title, place row below.
+    expect(statusRow.querySelector(".font-semibold")?.textContent).toContain("First session");
   });
 
   it("filters the list by provider facet", async () => {
@@ -157,7 +172,7 @@ describe("LiveApp", () => {
   it("shows discovery estimates with a tilde on the shared status row", async () => {
     renderApp(makeFake());
     await screen.findByText("First session");
-    const statusRow = screen.getByText("First session").closest("button")!;
+    const statusRow = screen.getByText("First session").closest('[role="button"]')!;
     // durationMsEst / editCountEst are estimates → "~" prefix, like the dashboard.
     expect(statusRow.textContent).toContain("~45m");
     expect(statusRow.textContent).toContain("~4 edits");
