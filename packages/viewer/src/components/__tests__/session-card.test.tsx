@@ -196,6 +196,7 @@ describe("LiveSessionCard adapter", () => {
     gitRepo: "tuo-lei/vibe-replay",
     gitBranch: "feat/x",
     hasSqlite: true,
+    dataSource: "sqlite",
     compactionCount: 1,
     durationMsEst: 2700000,
     editCountEst: 4,
@@ -217,9 +218,9 @@ describe("LiveSessionCard adapter", () => {
     expect(text).toContain("also cover the retry path");
     expect(text).toContain("22.9MB");
     // Storage badge uses the dashboard's exact label…
-    expect(screen.getByText("SQLite + JSONL")).toBeTruthy();
+    expect(screen.getByText("SQLite + JSONL supplement")).toBeTruthy();
     // …and the dashboard's exact badge class for the sqlite case.
-    const badge = screen.getByText("SQLite + JSONL");
+    const badge = screen.getByText("SQLite + JSONL supplement");
     expect(badge.className).toContain("bg-terminal-green-subtle");
     expect(badge.className).toContain("text-terminal-green");
     // Same data-level icon component the dashboard passes as statusLeading.
@@ -229,12 +230,16 @@ describe("LiveSessionCard adapter", () => {
     expect(viewButton.textContent).toContain("View");
   });
 
-  it("hides the storage badge when there is no sqlite/sdk source", () => {
+  it("shows the JSONL transcript badge for plain JSONL sessions", () => {
     stubBrowserAPIs();
     const { container } = render(
-      <LiveSessionCard session={{ ...summary, hasSqlite: false }} onOpen={() => {}} />,
+      <LiveSessionCard
+        session={{ ...summary, hasSqlite: false, dataSource: "jsonl" }}
+        onOpen={() => {}}
+      />,
     );
-    expect(screen.queryByText("SQLite + JSONL")).toBeNull();
+    // Same label the dashboard shows for a jsonl scan without sqlite.
+    expect(screen.getByText("JSONL transcript")).toBeTruthy();
     expect(container.textContent).toContain("22.9MB");
   });
 
@@ -244,6 +249,19 @@ describe("LiveSessionCard adapter", () => {
       <LiveSessionCard session={{ ...summary, slug: undefined }} onOpen={() => {}} />,
     );
     expect(container.textContent).not.toContain(" · ");
+  });
+
+  it("truncates an overlong slug so narrow cards cannot overflow", () => {
+    stubBrowserAPIs();
+    const longSlug = "a".repeat(120);
+    const { container } = render(
+      <LiveSessionCard session={{ ...summary, slug: longSlug }} onOpen={() => {}} />,
+    );
+    const meta = container.querySelector('span[title="' + longSlug + '"]');
+    expect(meta).toBeTruthy();
+    expect(meta!.className).toContain("overflow-hidden");
+    expect(meta!.className).toContain("text-ellipsis");
+    expect(meta!.className).toContain("max-w-[140px]");
   });
 
   it("renders the branch/repo as plain text since no URLs exist remotely", () => {
