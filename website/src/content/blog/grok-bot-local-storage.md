@@ -1,13 +1,13 @@
 ---
 title: "What Does Grok Bot Store Locally? agent-transcripts JSONL Explained"
-excerpt: "Grok Bot keeps each agent session as cloud-box JSONL under agent-transcripts — with send_message as the visible reply, hidden prompts filtered, and group rooms merged into a multi-speaker timeline."
+excerpt: "Grok Bot’s sidebar lists every agent, but each durable JSONL lives on the computer that agent is bound to — cloud-box agent-transcripts, not Mac Application Support — with send_message replies and merged group rooms."
 cover: "/blog/grok-bot-storage/storage-map.png"
 date: 2026-09-04
-updated: 2026-09-10
-readTime: "7 min read"
+updated: 2026-09-21
+readTime: "8 min read"
 ---
 
-Claude Code keeps sessions under `~/.claude/`. Cursor spreads them across SQLite and JSONL. Grok Bot is different: the durable chat history lives on the **cloud box**, not your Mac — one JSONL per agent, with a twist that user-visible replies are a tool call.
+Claude Code keeps sessions under `~/.claude/`. Cursor spreads them across SQLite and JSONL. Grok Bot is different: the durable chat history is still **cloud-box JSONL**, not Mac Application Support — one file per agent, with a twist that user-visible replies are a tool call. The Grok Bot sidebar is account-level; that file lives on the **computer the agent is bound to**.
 
 **Try it:** `npx vibe-replay@latest -p grok-bot`. **Watch demo:** [Eng+GTM English group-chat replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92) (834 scenes, GCP/GA4 identifiers redacted). Public Grok Bot sessions also land on [Explore](/explore/).
 
@@ -22,13 +22,13 @@ The practical mental model is:
         └── sibling agents/<id>/profile.json  → titles
 ```
 
-![Diagram of Grok Bot agent-transcripts layout](/blog/grok-bot-storage/storage-map.png)
+![Diagram of Grok Bot agent-transcripts layout on the bound computer](/blog/grok-bot-storage/storage-map.png)
 
 vibe-replay discovers those JSONL files, rewrites hidden wakes and `send_message` replies, and renders the result as the same replay format used for other providers.
 
 ## Where the files live
 
-On the box, transcripts default to:
+On the computer the agent is bound to, transcripts default to:
 
 ```text
 /home/box/agent-data/agent-transcripts/<agentId>/<agentId>.jsonl
@@ -59,6 +59,17 @@ VIBE_REPLAY_GROK_BOT_DIR=/path/to/agent-transcripts npx vibe-replay@latest -p gr
 ```
 
 SSH remote indexing of Grok Bot transcripts is not included yet.
+
+## One sidebar, many disks
+
+Grok Bot’s sidebar is account-level: you see every agent. Each agent’s durable JSONL lives on the **computer that agent is bound to** — the user’s local machine, or a specific cloud computer. Different sidebar bots can therefore live on different disks. The on-disk layout is still the cloud-box tree above; vibe-replay does not assemble a cross-machine catalog from the sidebar.
+
+That split is why a vibe-replay session list can look smaller than the Grok Bot sidebar:
+
+- `npx vibe-replay -p grok-bot` / discovery only sees transcripts under **this machine’s** `agent-transcripts` roots (`/home/box/agent-data/...` or `sand-data`, or a `~/.grok-bot/...` export sitting here). An env override replaces those defaults on the current machine; it does not pull other computers.
+- `vibe-replay relay` (live E2E share) likewise only lists sessions on the machine running `relay` — not every bot in the sidebar. To share another bot, run `relay` on the computer that holds that bot’s transcript. The command is on current `main`; it is **not** in the published npm package as of `vibe-replay@0.2.11`. Build the CLI from `main`, or wait for a release that includes `relay`.
+- Subagents (`sand-subagent-*`) stay hidden from top-level discovery (picker, dashboard, live list). A parent `task` call can still attach a child-run card when the result names that sibling id.
+- Empty or first-run transcripts with no real user prompt are skipped, so a brand-new bot may exist in the sidebar and still not appear.
 
 ## The JSONL shape
 
@@ -93,9 +104,9 @@ User turns often arrive with delivery tags such as `[t0u]` / `[t3u]`. Those pref
 
 On disk, builtins show up as lowercase implementation names: `read`, `shell`, `web_fetch`, `todo`. The replay viewer expects canonical names (`Read`, `Bash`, `WebFetch`, `TodoWrite`) to build diffs and shell scenes. Unrecognized names (future builtins, MCP) pass through unchanged.
 
-## Subagents are separate sessions (for now)
+## Subagents stay off the top-level list
 
-Folders named `sand-subagent-<uuid>/` are discovered as **their own sessions**. v1 does not stitch them under a parent agent.
+Folders named `sand-subagent-<uuid>/` stay hidden from picker, dashboard, and live/relay lists so they do not flood discovery. A parent `task` call attaches a child-run card when the result names that sibling id. Direct `--session` parse still works when the parent path is on disk.
 
 ## Group chats: split speakers, then merge the room
 
@@ -126,7 +137,7 @@ npx vibe-replay@latest -d
 
 **Watch demo** — [Eng+GTM English multi-speaker replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92). Public Grok Bot sessions also appear on [Explore](/explore/).
 
-Grok Bot is a good reminder that JSONL does not automatically mean “linear Claude-style chat.” The durable truth is still one cloud-box file per agent, whose visible replies are a tool call. Hidden wakes are filtered out, group rooms are split by speaker, and sibling JSONLs that share a room merge into one multi-speaker timeline. Once you model those rewrites, the replay matches the product instead of the raw log.
+Grok Bot is a good reminder that JSONL does not automatically mean “linear Claude-style chat.” The durable truth is still one cloud-box file per agent — on the disk of the computer that agent is bound to — whose visible replies are a tool call. Hidden wakes are filtered out, group rooms are split by speaker, and sibling JSONLs that share a room merge into one multi-speaker timeline. Once you model those rewrites, the replay matches the product instead of the raw log.
 
 For comparison, see the JSONL tree used by [Pi coding agent](/blog/pi-local-storage/) and [Hermes’s profile-aware `state.db`](/blog/hermes-local-storage/).
 
