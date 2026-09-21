@@ -547,6 +547,30 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(h.alarmAt()).toBeGreaterThan(Date.now());
   });
 
+  it("notifies the shipper during the sweep and does not double-notify on close", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // b goes stale (> 45 s without a heartbeat) on a half-open socket.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    const leaves = (ws: MockSocket) =>
+      ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+
+    // The sweep reaps the stale socket: the shipper learns the leave
+    // immediately with the absolute remaining count, even though the
+    // runtime hasn't delivered webSocketClose yet.
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(leaves(vm)).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+
+    // When the runtime eventually delivers the close, no duplicate notice.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    expect(leaves(vm)).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);

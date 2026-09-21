@@ -615,6 +615,34 @@ describe("shipper viewer presence", () => {
     }
   });
 
+  it("applies the absolute count from a rejoin notice for an already-tracked viewer", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      // A joins, then goes stale; B joins while A is stale-excluded, so the
+      // relay reports viewers: 1 even though two sockets are attached.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-a", viewers: 1 }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-b", viewers: 1 }) });
+      // A revives before the sweep: the relay sends a rejoin notice with the
+      // true absolute count. A is already tracked, so there is no new
+      // "connected" line — but the count must repair to 2, not freeze at 1.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-a", viewers: 2 }) });
+      // A legacy join without a count falls back to +1 on the repaired
+      // count, proving the rejoin was applied, not discarded.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-c" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (3 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
   it("ignores a duplicate join notice without double-counting", async () => {
     const { logs, restore } = captureLogs();
     try {

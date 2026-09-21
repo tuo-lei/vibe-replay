@@ -87,6 +87,13 @@ interface Attachment {
    * close must not start the box-end grace.
    */
   displaced?: boolean;
+  /**
+   * Viewer only: set when the sweep alarm already sent the shipper this
+   * viewer's leave notice while reaping the socket. webSocketClose may
+   * arrive late (or never, for a half-open socket) — it must not
+   * double-notify.
+   */
+  leaveNotified?: boolean;
 }
 
 /**
@@ -399,6 +406,26 @@ export class LiveRelay {
         continue;
       }
       if (now - att.lastSeen > timeout) {
+        if (att.role === "viewer" && typeof att.vid === "string") {
+          // A half-open socket's close may never deliver webSocketClose
+          // promptly, and the leave notice lives only in that callback —
+          // notify the shipper now so its watcher count and the dead
+          // viewer's tail subscriptions don't linger. The reaped viewer is
+          // already stale-excluded from viewers(), so the absolute count is
+          // exact. Mark the socket so the eventual close callback doesn't
+          // double-notify.
+          try {
+            ws.serializeAttachment({ ...att, leaveNotified: true } satisfies Attachment);
+          } catch {
+            // best effort — the mark may not stick on a dead socket
+          }
+          const vm = this.vmSocket();
+          if (vm)
+            this.sendQuietly(
+              vm,
+              JSON.stringify({ t: "viewer-left", via: att.vid, viewers: this.viewers().length }),
+            );
+        }
         this.closeQuietly(ws, 1001, "idle timeout");
         reaped++;
         continue;
@@ -709,7 +736,7 @@ export class LiveRelay {
     } catch {
       att = null;
     }
-    if (att?.role === "viewer") {
+    if (att?.role === "viewer" && !att.leaveNotified) {
       const vm = this.vmSocket();
       if (vm) {
         // Absolute remaining-viewer count, excluding the closing socket

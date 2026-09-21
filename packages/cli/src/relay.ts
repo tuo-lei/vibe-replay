@@ -584,16 +584,21 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     // this; older shippers ignore the unknown `t` without dropping the
     // connection — backward compatible both ways.
     if (outer.t === "viewer-joined" && typeof outer.via === "string") {
+      // The relay's absolute count is authoritative — apply it even for a
+      // vid we already track. A viewer that went stale and revived rejoins
+      // with the true count (e.g. another viewer joined while it was
+      // stale); discarding the notice as a "duplicate" would freeze the
+      // console on the undercount indefinitely. Only the connected log
+      // line is deduplicated, never the count.
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        hasAuthoritativeCount = true;
+      } else if (!viewerVias.has(outer.via)) {
+        // Relays that predate the count field: +1 per untracked join.
+        viewerCount += 1;
+      }
       if (!viewerVias.has(outer.via)) {
         viewerVias.add(outer.via);
-        // Prefer the relay's absolute count; fall back to +1 for relays
-        // that predate the count field.
-        if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
-          viewerCount = Math.max(0, Math.floor(outer.viewers));
-          hasAuthoritativeCount = true;
-        } else {
-          viewerCount += 1;
-        }
         console.log(`  → viewer connected (${viewerCount} watching)`);
       }
       return;
