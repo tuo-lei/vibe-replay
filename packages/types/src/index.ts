@@ -726,6 +726,8 @@ export interface RelaySessionSummary {
   project: string;
   /** ISO string of last activity (most recent record / file mtime). */
   timestamp: string;
+  /** Provider-native slug (e.g. "a9080f00"), shown as `slug · time ago` in the card header. */
+  slug?: string;
   lineCount: number;
   fileSize: number;
   promptCount?: number;
@@ -735,6 +737,10 @@ export interface RelaySessionSummary {
   /** Normalized git remote origin (e.g. "tuo-lei/vibe-replay"). */
   gitRepo?: string;
   gitBranch?: string;
+  /** True when any provider SQLite source exists (drives the storage badge label). */
+  hasSqlite?: boolean;
+  /** True when a provider SDK agent store exists (drives the storage badge label). */
+  hasSdk?: boolean;
   /** Context compactions counted during lightweight discovery. */
   compactionCount?: number;
   /** Sum of turn_duration durationMs values (estimate). */
