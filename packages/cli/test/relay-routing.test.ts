@@ -665,16 +665,21 @@ describe("shipper viewer presence", () => {
     }
   });
 
-  it("works with an older relay that omits the viewer count", async () => {
+  it("never fabricates a count for a legacy relay that omits it", async () => {
     const { logs, restore } = captureLogs();
     try {
+      // A legacy relay omits `viewers` on hello-ok and only ever sends
+      // viewer-left (never viewer-joined). With no authoritative count
+      // and no tracked join, the leave is reported without inventing
+      // "0 watching" — other viewers may still be attached.
       const sock = await connectedShipper();
 
-      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
       await new Promise((r) => setTimeout(r, 20));
 
       expect(logs.some((l) => l.includes("already watching"))).toBe(false);
-      expect(presenceLines(logs)).toEqual(["  → viewer connected (1 watching)"]);
+      expect(logs.some((l) => l.includes("watching"))).toBe(false);
+      expect(presenceLines(logs)).toEqual(["  → viewer left"]);
     } finally {
       restore();
     }
