@@ -97,13 +97,16 @@ describe("SessionCard shared shell", () => {
     status: { promptCount: 3, toolCallCount: 12, editCount: 4 },
   };
 
-  // What the live viewer passes: relay summary fields, no scan-data rows.
+  // What the live viewer passes: relay summary fields plus the rows the relay
+  // now ships (prompt previews, size, View CTA). Still no scan-data rows:
+  // no usage details, no outcome facts, no Share/Redo.
   const liveProps = {
     onOpen: () => {},
     provider: "muse",
     providerTitle: "Muse · claude-sonnet",
     title: "Fix the flaky test",
     timeMeta: "5m ago",
+    prompts: ["make the test deterministic", "also cover the retry path"],
     place: {
       project: "/home/lei/vibe-replay",
       projectLabel: "vibe-replay",
@@ -118,6 +121,12 @@ describe("SessionCard shared shell", () => {
       editCount: 4,
       editEstimated: true,
     },
+    middle: <span data-testid="live-size">22.8MB</span>,
+    actions: (
+      <button data-testid="live-view" type="button">
+        View
+      </button>
+    ),
   };
 
   it("renders an identical outer shell for dashboard and live props", () => {
@@ -136,10 +145,20 @@ describe("SessionCard shared shell", () => {
     expect(dashboardShell.tagName).toBe("DIV");
     expect(dashboardShell.getAttribute("role")).toBe("button");
     expect(liveClasses).toBe(dashboardClasses);
-    // Header + place + status rows exist in both; dashboard additionally has
-    // prompt previews (row 2).
+    // Dashboard fixture: header + 1 prompt preview + place + status.
+    // Live fixture: header + 2 prompt previews + place + status + middle + footer.
     expect(dashboardRows).toBe(4);
-    expect(liveShell.children.length).toBe(3);
+    expect(liveShell.children.length).toBe(7);
+  });
+
+  it("renders prompt previews, the size middle-node and the View action for the live shape", () => {
+    stubBrowserAPIs();
+    const { container } = render(<SessionCard {...liveProps} />);
+    expect(container.textContent).toContain("make the test deterministic");
+    expect(container.textContent).toContain("also cover the retry path");
+    expect(screen.getByTestId("live-size")).toBeTruthy();
+    const viewButton = screen.getByTestId("live-view");
+    expect(viewButton.textContent).toBe("View");
   });
 
   it("renders the branch/repo as links only when URLs are provided", () => {

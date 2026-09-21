@@ -31,6 +31,7 @@ interface MuseScanState {
   toolCallCount: number;
   editCount: number;
   compactionCount: number;
+  firstTimestamp: string;
   lastTimestamp: string;
   lineCount: number;
 }
@@ -45,6 +46,7 @@ function newScanState(): MuseScanState {
     toolCallCount: 0,
     editCount: 0,
     compactionCount: 0,
+    firstTimestamp: "",
     lastTimestamp: "",
     lineCount: 0,
   };
@@ -94,6 +96,7 @@ function scanLine(state: MuseScanState, line: string): void {
     return; // Malformed lines become parser warnings, not discovery failures.
   }
   if (typeof record.created_at === "string") {
+    if (!state.firstTimestamp) state.firstTimestamp = record.created_at;
     state.lastTimestamp = record.created_at;
   }
   if (record.type === "session_header") {
@@ -126,6 +129,21 @@ function scanLine(state: MuseScanState, line: string): void {
   }
 }
 
+/**
+ * Wall-clock duration estimate from the first/last record timestamps.
+ * Muse transcripts have no turn_duration events, so the sum-of-turns approach
+ * other providers use does not apply here. Returns undefined when the span is
+ * not positive (single-timestamp or clock-skewed sessions).
+ */
+function estimateMuseDurationMs(first: string, last: string): number | undefined {
+  if (!first || !last) return undefined;
+  const start = Date.parse(first);
+  const end = Date.parse(last);
+  if (Number.isNaN(start) || Number.isNaN(end)) return undefined;
+  const span = end - start;
+  return span > 0 ? span : undefined;
+}
+
 async function extractMuseSessionInfo(
   filePath: string,
   sessionsDir: string,
@@ -152,6 +170,9 @@ async function extractMuseSessionInfo(
   const sessionId = state.sessionId || filePath;
   const meta = await readMuseSessionMeta(sessionsDir, sessionId);
   const timestamp = meta?.updatedAt || state.lastTimestamp || new Date(mtimeMs).toISOString();
+  // Muse sessions carry no turn_duration events; estimate wall-clock duration
+  // from the first/last record timestamps instead (marked "~" at render).
+  const durationMsEst = estimateMuseDurationMs(state.firstTimestamp, state.lastTimestamp);
 
   return {
     provider: "muse",
@@ -172,6 +193,7 @@ async function extractMuseSessionInfo(
     toolCallCount: state.toolCallCount,
     editCountEst: state.editCount || undefined,
     compactionCount: state.compactionCount,
+    durationMsEst,
     model: meta?.model,
     sourceFingerprint: `${mtimeMs}:${fileSize}`,
   };

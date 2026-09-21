@@ -154,6 +154,38 @@ describe("discoverMuseSessions", () => {
     expect(sessions[0].editCountEst).toBeUndefined();
   });
 
+  it("estimates wall-clock duration from the first/last record timestamps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-test-duration";
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "Hi" }, "2026-09-18T10:00:00Z"),
+      itemLine({ type: "message", role: "assistant", text: "Hello" }, "2026-09-18T10:04:30Z"),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+
+    expect(sessions).toHaveLength(1);
+    // headerLine stamps 10:00:00Z, last item 10:04:30Z → 270_000 ms.
+    expect(sessions[0].durationMsEst).toBe(270_000);
+  });
+
+  it("omits durationMsEst when the transcript has a single timestamp", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-test-duration-single";
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "Hi" }, "2026-09-18T10:00:00Z"),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].durationMsEst).toBeUndefined();
+  });
+
   it("skips injected subagent-context prompts for firstPrompt but still counts them", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
     tempDirs.push(root);

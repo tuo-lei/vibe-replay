@@ -42,6 +42,7 @@ const sessions: RelaySessionSummary[] = [
     model: "claude-sonnet-4-20250514",
     lineCount: 100,
     fileSize: 4096,
+    firstPrompts: ["Why is the cache slow?", "Add retry with backoff"],
   },
   {
     provider: "codex",
@@ -179,6 +180,21 @@ describe("LiveApp", () => {
     expect(statusRow.textContent).toContain("2 compacts");
     expect(statusRow.textContent).toContain("feat/live-filters");
     expect(statusRow.textContent).toContain("tuo-lei/vibe-replay");
+  });
+
+  it("renders prompt previews, size and a View action on the live card", async () => {
+    renderApp(makeFake());
+    await screen.findByText("First session");
+    const card = screen.getByText("First session").closest('[role="button"]')!;
+    // Prompt previews come from the relay summary's firstPrompts.
+    expect(card.textContent).toContain("Why is the cache slow?");
+    expect(card.textContent).toContain("Add retry with backoff");
+    // Size middle-node (4096 bytes → 4KB) and the dashboard-styled View CTA.
+    expect(card.textContent).toContain("4KB");
+    const viewButton = screen.getByRole("button", { name: "Open First session" });
+    expect(viewButton.textContent).toContain("View");
+    // No cost: discovery has no token data, so nothing is fabricated.
+    expect(card.textContent).not.toContain("$");
   });
 
   it("opens a session and renders the transcript via ConversationView", async () => {
