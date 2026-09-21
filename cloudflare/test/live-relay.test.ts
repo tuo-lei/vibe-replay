@@ -672,6 +672,41 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
   });
 
+  it("does not entrust a viewer leave to a stale shipper that has not been reaped yet", async () => {
+    const h = makeAlarmRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // Shipper takeover: the replacement VM is newer than the viewers.
+    const second = helloVm(h);
+    await second.p;
+    // Outage: the replacement shipper and viewer b both go stale. The
+    // viewer is older, so the sweep visits it before the shipper.
+    (second.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.alarm();
+    expect(second.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    // The stale (not yet reaped) shipper was not entrusted: no notice went
+    // out and the viewer stays retryable.
+    const secondLeaves = second.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-left");
+    expect(secondLeaves).toEqual([]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // A third shipper connects; the delayed viewer close retries the notice
+    // to the replacement, which then drops the dead viewer's tails.
+    const third = helloVm(h);
+    await third.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = third.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);

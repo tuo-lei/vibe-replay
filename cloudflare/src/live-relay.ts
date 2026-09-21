@@ -311,12 +311,8 @@ export class LiveRelay {
     return out;
   }
 
-  private vmSocket(exclude?: ReadonlySet<WebSocket>): WebSocket | undefined {
+  private vmSocket(): WebSocket | undefined {
     for (const ws of this.ctx.getWebSockets()) {
-      // A socket reaped earlier in the current sweep is already closing:
-      // handing it a notice risks a send() that is accepted without
-      // delivery.
-      if (exclude?.has(ws)) continue;
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
         // A displaced shipper is already closing: presence notices and
@@ -324,6 +320,30 @@ export class LiveRelay {
         // socket (the runtime may still list it while the close
         // completes).
         if (att?.role === "vm" && !att.displaced) return ws;
+      } catch {
+        // attachment unreadable — treat as unregistered
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The shipper socket eligible for a sweep-time viewer-leave notice.
+   * Unlike vmSocket(), this also excludes a shipper that is itself past
+   * the sweep timeout, regardless of visit order: after a takeover the
+   * replacement VM is newer than existing viewers, so a stale viewer can
+   * be visited first while the stale shipper hasn't been reaped yet. A
+   * send() to such a shipper may be accepted without delivery, and the
+   * leaveNotified mark would then suppress the retry a reconnecting
+   * shipper needs. A stale shipper is reaped in this same pass anyway.
+   */
+  private notifyingVmSocket(now: number): WebSocket | undefined {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const att = ws.deserializeAttachment() as Attachment | null;
+        if (att?.role !== "vm" || att.displaced) continue;
+        if (typeof att.lastSeen === "number" && now - att.lastSeen > VM_SWEEP_AFTER_MS) continue;
+        return ws;
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -393,12 +413,6 @@ export class LiveRelay {
     const now = Date.now();
     let live = 0;
     let reaped = 0;
-    // Sockets reaped by this pass are already closing: later iterations
-    // must not entrust them with a viewer-leave notice (a send() to a
-    // closing socket may be accepted without delivery, and the
-    // leaveNotified mark would then suppress the retry a reconnecting
-    // shipper needs).
-    const reapedThisPass = new Set<WebSocket>();
     for (const ws of this.ctx.getWebSockets()) {
       let att: Attachment | null = null;
       try {
@@ -429,9 +443,10 @@ export class LiveRelay {
           // must not suppress the retry a replacement shipper needs.
           // When no shipper is attached — or the send fails — the flag stays
           // clear so a later alarm or the delayed close callback retries.
-          // Never entrust the notice to a shipper reaped earlier in this
-          // same sweep: it is already closing.
-          const vm = this.vmSocket(reapedThisPass);
+          // Never entrust the notice to a shipper that is itself stale:
+          // notifyingVmSocket() excludes it regardless of sweep visit
+          // order.
+          const vm = this.notifyingVmSocket(now);
           if (vm) {
             let sent = false;
             try {
@@ -452,7 +467,6 @@ export class LiveRelay {
           }
         }
         this.closeQuietly(ws, 1001, "idle timeout");
-        reapedThisPass.add(ws);
         reaped++;
         continue;
       }
