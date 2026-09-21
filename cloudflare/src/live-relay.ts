@@ -79,6 +79,14 @@ interface Attachment {
    * Stored in the attachment so it survives hibernation eviction.
    */
   lastSeen?: number;
+  /**
+   * Shipper only: set when a newer shipper displaced this socket. The
+   * runtime may still list the closing socket in getWebSockets() while
+   * the close completes, so vmSocket() skips displaced sockets —
+   * presence notices and viewer frames go to the replacement, and its
+   * close must not start the box-end grace.
+   */
+  displaced?: boolean;
 }
 
 /**
@@ -298,7 +306,11 @@ export class LiveRelay {
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
-        if (att?.role === "vm") return ws;
+        // A displaced shipper is already closing: presence notices and
+        // viewer frames must reach the replacement, never the dying
+        // socket (the runtime may still list it while the close
+        // completes).
+        if (att?.role === "vm" && !att.displaced) return ws;
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -478,7 +490,25 @@ export class LiveRelay {
             }
             // One shipper per box: a new shipper takes over from the old one.
             const existing = this.vmSocket();
-            if (existing && existing !== ws) this.closeQuietly(existing, 1000, "replaced");
+            if (existing && existing !== ws) {
+              // Mark the old socket displaced *before* closing it: the
+              // runtime may still list it in getWebSockets() while the
+              // close completes, and vmSocket() must already resolve to
+              // the new claim in that window — otherwise a viewer joining
+              // right now would send its join notice to the dying socket
+              // while the new shipper's hello-ok snapshot (taken before
+              // the join) leaves its watcher count stale.
+              try {
+                existing.serializeAttachment({
+                  role: "vm",
+                  lastSeen: 0,
+                  displaced: true,
+                } satisfies Attachment);
+              } catch {
+                // already gone
+              }
+              this.closeQuietly(existing, 1000, "replaced");
+            }
             ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
             // The shipper reconnected inside the end grace — cancel it.
             try {
@@ -666,11 +696,12 @@ export class LiveRelay {
         );
       }
     }
-    if (att?.role === "vm") {
+    if (att?.role === "vm" && !att.displaced) {
       // The shipper is gone. Its retry loop reconnects with the same box id
       // (backoff caps at 30 s) — start the end grace; the sweep declares the
       // box dead only if no shipper reattaches in time. Skip when the box
-      // already ended (the goodbye path handled it).
+      // already ended (the goodbye path handled it). A displaced socket's
+      // close never starts the grace: its replacement is already connected.
       try {
         const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
         if (ended !== true) {

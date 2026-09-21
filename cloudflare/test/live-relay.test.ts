@@ -346,6 +346,26 @@ describe("LiveRelay shipper presence notices", () => {
     expect(secondAcks).toEqual([{ t: "hello-ok", viewers: 2 }]);
   });
 
+  it("routes join notices to the new shipper during takeover, not the closing socket", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    // A replacement shipper takes over: the old socket is closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    // ...but the runtime may still list it (the mock never removes
+    // sockets, mirroring production's close-completion window).
+    expect(h.sockets).toContain(first.ws);
+
+    // A viewer joining in that window must notify the NEW shipper — the
+    // dying socket must not swallow the join and leave the replacement
+    // with a stale count from its earlier hello-ok snapshot.
+    const v = await helloViewer(h, LEI_CIPHER);
+    expect(controlNotices(first.ws)).toEqual([]);
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+  });
+
   it("sends viewer-left on close so join/leave notices stay symmetric", async () => {
     const h = makeRelay();
     const { ws: vm, p } = helloVm(h);
@@ -700,6 +720,24 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await h.relay.alarm();
     expect(h.store.get("ended")).toBeUndefined();
     expect(a.ws.closed).toEqual([]);
+  });
+
+  it("a displaced shipper's close does not start the box-end grace", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    // Takeover: the old socket is marked displaced and closed...
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(second.ws.closed).toEqual([]);
+
+    // ...but the runtime may still list it when its close event fires.
+    // That close must not start the end grace — the replacement is
+    // already connected.
+    await h.relay.webSocketClose(first.ws as unknown as WebSocket);
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.store.get("ended")).toBeUndefined();
   });
 
   it("the box ends when the grace expires with no reconnect", async () => {
