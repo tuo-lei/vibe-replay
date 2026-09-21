@@ -613,6 +613,33 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
   });
 
+  it("keeps the sweep leave notice retryable when the shipper's send fails", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // The shipper's socket dies mid-send: the notice is lost, and the flag
+    // must stay clear so a replacement shipper can still learn the leave.
+    const origSend = vm.send;
+    vm.send = () => {
+      throw new Error("boom");
+    };
+    await h.relay.alarm();
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+    vm.send = origSend;
+
+    // A replacement shipper connects; the delayed close retries the notice.
+    const second = helloVm(h);
+    await second.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);

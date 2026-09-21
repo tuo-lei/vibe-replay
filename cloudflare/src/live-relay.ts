@@ -414,22 +414,29 @@ export class LiveRelay {
           // notify the shipper now so its watcher count and the dead
           // viewer's tail subscriptions don't linger. The reaped viewer is
           // already stale-excluded from viewers(), so the absolute count is
-          // exact. Mark the socket only once a notice was actually sent: the
-          // eventual close callback (and later alarms, while the half-open
-          // socket lingers) must not double-notify — but when no shipper is
-          // attached to hear it, leave the flag clear so a later alarm or
-          // the close callback retries.
+          // exact. Mark the socket only after the send observably succeeds:
+          // an attached shipper socket can still die mid-send, and the mark
+          // must not suppress the retry a replacement shipper needs.
+          // When no shipper is attached — or the send fails — the flag stays
+          // clear so a later alarm or the delayed close callback retries.
           const vm = this.vmSocket();
           if (vm) {
+            let sent = false;
             try {
-              ws.serializeAttachment({ ...att, leaveNotified: true } satisfies Attachment);
+              vm.send(
+                JSON.stringify({ t: "viewer-left", via: att.vid, viewers: this.viewers().length }),
+              );
+              sent = true;
             } catch {
-              // best effort — the mark may not stick on a dead socket
+              // peer died mid-send — leave the flag clear to retry
             }
-            this.sendQuietly(
-              vm,
-              JSON.stringify({ t: "viewer-left", via: att.vid, viewers: this.viewers().length }),
-            );
+            if (sent) {
+              try {
+                ws.serializeAttachment({ ...att, leaveNotified: true } satisfies Attachment);
+              } catch {
+                // best effort — the mark may not stick on a dead socket
+              }
+            }
           }
         }
         this.closeQuietly(ws, 1001, "idle timeout");
