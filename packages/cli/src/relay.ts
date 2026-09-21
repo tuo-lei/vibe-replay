@@ -86,7 +86,11 @@ function summarize(info: SessionInfo): RelaySessionSummary {
     durationMsEst: info.durationMsEst,
     editCountEst: info.editCountEst,
     // Prompt previews for the live card; the relay never ships full transcripts.
-    firstPrompts: info.prompts?.slice(0, 2),
+    // Each preview is truncated: one huge pasted prompt must not push the
+    // `list` response near the relay's 32 MiB frame ceiling.
+    firstPrompts: info.prompts
+      ?.slice(0, 2)
+      .map((p) => (p.length > 300 ? `${p.slice(0, 300)}…` : p)),
   };
 }
 

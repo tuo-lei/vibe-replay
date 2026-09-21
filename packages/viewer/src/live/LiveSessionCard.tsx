@@ -103,9 +103,14 @@ export function LiveSessionCard({
       }}
       facts={
         <>
-          <span className="text-terminal-dimmer tabular-nums" title="Transcript size">
-            {formatSize(session.fileSize)}
-          </span>
+          {/* OpenCode/Hermes discovery reports fileSize: 0 (SQLite-backed, no
+              transcript file); showing "0KB" with a "Transcript size" tooltip
+              would be misleading, so the size is omitted when unavailable. */}
+          {!!session.fileSize && (
+            <span className="text-terminal-dimmer tabular-nums" title="Transcript size">
+              {formatSize(session.fileSize)}
+            </span>
+          )}
           <span
             className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(
               session.dataSource,

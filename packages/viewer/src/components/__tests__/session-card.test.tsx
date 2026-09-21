@@ -261,6 +261,18 @@ describe("LiveSessionCard adapter", () => {
     expect(container.textContent).not.toContain(" · ");
   });
 
+  it("omits the size when fileSize is 0 (SQLite-backed, no transcript file)", () => {
+    stubBrowserAPIs();
+    const { container } = render(
+      <LiveSessionCard session={{ ...summary, fileSize: 0 }} onOpen={() => {}} />,
+    );
+    // No misleading "0KB" with a "Transcript size" tooltip.
+    expect(container.querySelector('[title="Transcript size"]')).toBeNull();
+    expect(container.textContent).not.toContain("0KB");
+    // The storage badge still renders.
+    expect(screen.getByText("SQLite + JSONL supplement")).toBeTruthy();
+  });
+
   it("truncates an overlong slug so narrow cards cannot overflow", () => {
     stubBrowserAPIs();
     const longSlug = "a".repeat(120);
