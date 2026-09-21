@@ -640,6 +640,38 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
   });
 
+  it("does not entrust a viewer leave to a shipper reaped earlier in the same sweep", async () => {
+    const h = makeAlarmRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    // Network outage: both the shipper and viewer b go stale. The shipper
+    // is first in getWebSockets(), so the sweep reaps it before b.
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    // b's leave was not entrusted to the closing shipper: no notice went
+    // out and the viewer stays retryable.
+    const firstLeaves = first.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-left");
+    expect(firstLeaves).toEqual([]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // The CLI reconnects; the delayed viewer close retries the notice to
+    // the replacement shipper, which then drops the dead viewer's tails.
+    const second = helloVm(h);
+    await second.p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);
