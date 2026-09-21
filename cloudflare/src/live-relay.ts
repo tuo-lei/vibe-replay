@@ -701,7 +701,15 @@ export class LiveRelay {
         typeof attachment.lastSeen === "number" &&
         now - attachment.lastSeen > PRESENCE_SWEEP_AFTER_MS;
       try {
-        ws.serializeAttachment({ ...attachment, lastSeen: now } satisfies Attachment);
+        ws.serializeAttachment({
+          ...attachment,
+          lastSeen: now,
+          // A revived viewer starts a fresh presence epoch: if the sweep
+          // already sent viewer-left for the stale interval, clear the mark —
+          // otherwise the viewer's eventual departure would never notify the
+          // shipper again.
+          ...(revivedViewer ? { leaveNotified: false } : undefined),
+        } satisfies Attachment);
       } catch {
         // attachment unwritable — the sweep will eventually reap this socket
       }

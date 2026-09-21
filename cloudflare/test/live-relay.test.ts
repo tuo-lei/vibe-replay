@@ -707,6 +707,39 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
   });
 
+  it("clears the leave marker when a swept viewer revives via heartbeat", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    // b goes stale; the sweep sends viewer-left and marks it.
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    await h.relay.alarm();
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBe(true);
+    const vmNotices = () => vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t !== "roster");
+    expect(vmNotices()).toContainEqual({ t: "viewer-left", via: b.vid, viewers: 1 });
+
+    // A heartbeat dispatched after the sweep revives b before its socket
+    // closes: the marker must not survive the revival.
+    await h.relay.webSocketMessage(
+      b.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBe(false);
+
+    // b's eventual close notifies the shipper again instead of being
+    // swallowed by the stale marker.
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = vmNotices().filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([
+      { t: "viewer-left", via: b.vid, viewers: 1 },
+      { t: "viewer-left", via: b.vid, viewers: 1 },
+    ]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);
