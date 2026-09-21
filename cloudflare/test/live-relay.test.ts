@@ -406,6 +406,53 @@ describe("LiveRelay shipper presence notices", () => {
     ]);
   });
 
+  it("treats a heartbeat after staleness as a rejoin so a resynced shipper stops undercounting", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    // a goes stale (> 45 s without a heartbeat) while its socket stays open.
+    (a.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // Shipper reconnects mid-staleness: the hello-ok snapshot excludes a.
+    const second = helloVm(h);
+    await second.p;
+    const acks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(acks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+
+    // a resumes heartbeating before the sweep reaps it: the relay notifies
+    // the new shipper — a rejoin carrying the absolute count — so the CLI
+    // repairs its undercount instead of showing 0 until the next unrelated
+    // viewer transition.
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: a.vid, viewers: 1 }]);
+  });
+
+  it("a revived viewer re-notifies a continuously connected shipper without double counting", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    (a.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    await h.relay.webSocketMessage(
+      a.ws as unknown as WebSocket,
+      JSON.stringify({ t: "heartbeat" }),
+    );
+
+    // The relay still emits the rejoin notice — it cannot tell a resynced
+    // shipper from a continuously connected one — but the absolute count
+    // stays 1 and the CLI dedupes by vid, so no duplicate print or drift.
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      { t: "viewer-joined", via: a.vid, viewers: 1 },
+    ]);
+  });
+
   it("never leaks plaintext names into shipper notices", async () => {
     const h = makeRelay();
     const { ws: vm, p } = helloVm(h);

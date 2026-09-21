@@ -618,10 +618,37 @@ export class LiveRelay {
     // Plaintext liveness ping from a hello'd socket (viewer heartbeat or
     // anything the shipper sends outside frames). Refreshes the sweep clock.
     if (msg.t === "heartbeat") {
+      const now = Date.now();
+      // A viewer that missed heartbeats for over 45 s dropped out of the
+      // stale-filtered roster — and out of any hello-ok snapshot taken while
+      // it was stale. If it resumes heartbeating before the sweep reaps its
+      // still-open socket, the shipper would undercount it indefinitely: no
+      // join notice and no fresh snapshot would ever repair the count. Treat
+      // the revival as a rejoin and notify with the absolute count. A shipper
+      // that stayed connected throughout already tracks this vid, so its CLI
+      // dedupes the notice; a shipper that resynced mid-staleness gets its
+      // count fixed.
+      const revivedViewer =
+        attachment.role === "viewer" &&
+        typeof attachment.vid === "string" &&
+        typeof attachment.lastSeen === "number" &&
+        now - attachment.lastSeen > PRESENCE_SWEEP_AFTER_MS;
       try {
-        ws.serializeAttachment({ ...attachment, lastSeen: Date.now() } satisfies Attachment);
+        ws.serializeAttachment({ ...attachment, lastSeen: now } satisfies Attachment);
       } catch {
         // attachment unwritable — the sweep will eventually reap this socket
+      }
+      if (revivedViewer && attachment.role === "viewer" && typeof attachment.vid === "string") {
+        const vm = this.vmSocket();
+        if (vm)
+          this.sendQuietly(
+            vm,
+            JSON.stringify({
+              t: "viewer-joined",
+              via: attachment.vid,
+              viewers: this.viewers().length,
+            }),
+          );
       }
       return;
     }
