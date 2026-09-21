@@ -22,6 +22,12 @@
  *   hello; the relay stores and broadcasts the ciphertext verbatim and can
  *   never see the plaintext. Viewers decrypt names locally with the fragment
  *   key.
+ * - viewer-joined / viewer-left: plaintext control notices the relay sends
+ *   to the shipper socket when a viewer hello lands / a viewer socket
+ *   closes, plus a `viewers` count on the shipper's `hello-ok` ack so a
+ *   reconnecting shipper can resync its watcher display. Routing metadata
+ *   only — the shipper shows counts, never names (names are ciphertext it
+ *   cannot read).
  *
  * Uses the Hibernation API, so an idle box (VM holding its socket open with
  * nobody watching) costs ~zero duration billing: the runtime answers
@@ -488,7 +494,10 @@ export class LiveRelay {
           // share URL. Viewers can therefore never open the URL before the
           // relay knows the shipper. (A zombie hello returned early above
           // and gets no ack; its CLI exits on the session-ended instead.)
-          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok" }));
+          // `viewers` lets a (re)connecting shipper resync its watcher
+          // count: viewers that joined while it was away never sent it a
+          // join notice. Viewers get `welcome`, never `hello-ok`.
+          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok", viewers: this.viewers().length }));
           return;
         }
         // A viewer joining a dead box learns it immediately instead of
@@ -546,6 +555,12 @@ export class LiveRelay {
         this.sendQuietly(ws, JSON.stringify({ t: "welcome", vid }));
         this.ensureSweepAlarm();
         this.broadcastPresence();
+        // Tell the shipper a viewer joined so the CLI operator can see who
+        // is watching — symmetric with the viewer-left notice on close.
+        // If the shipper is away it learns the count from its next hello-ok
+        // instead; no notice is ever queued.
+        const vm = this.vmSocket();
+        if (vm) this.sendQuietly(vm, JSON.stringify({ t: "viewer-joined", via: vid }));
         return;
       }
       this.closeQuietly(ws, 1003, "hello first");

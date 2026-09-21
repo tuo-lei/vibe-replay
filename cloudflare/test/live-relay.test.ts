@@ -287,6 +287,96 @@ describe("LiveRelay multi-viewer", () => {
 });
 
 /**
+ * Shipper presence notices: the relay tells the shipper socket when viewers
+ * join/leave (and how many are attached at hello-ok) so the CLI operator
+ * can see who is watching. Routing metadata only — the shipper never sees
+ * names.
+ */
+describe("LiveRelay shipper presence notices", () => {
+  const controlNotices = (ws: MockSocket) =>
+    ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "viewer-joined" || m.t === "viewer-left");
+
+  it("notifies the shipper when a viewer joins", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid },
+      { t: "viewer-joined", via: b.vid },
+    ]);
+  });
+
+  it("sends no join notice when no shipper is attached (and does not crash)", async () => {
+    const h = makeRelay();
+    // No shipper hello: the viewer still gets a welcome; the shipper will
+    // learn the count from its hello-ok when it (re)connects.
+    const a = await helloViewer(h, LEI_CIPHER);
+    expect(a.ws.closed).toEqual([]);
+
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    // No retroactive join notices — but the ack carries the live count.
+    expect(controlNotices(vm)).toEqual([]);
+    const acks = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
+    expect(acks).toEqual([{ t: "hello-ok", viewers: 1 }]);
+  });
+
+  it("includes the live viewer count in the shipper's hello-ok", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+    const firstAcks = first.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "hello-ok");
+    expect(firstAcks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+
+    await helloViewer(h, LEI_CIPHER);
+    await helloViewer(h, WENDY_CIPHER);
+
+    // Shipper reconnects and displaces the first: the ack carries the live
+    // roster count so the CLI can resync its watcher display.
+    const second = helloVm(h);
+    await second.p;
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    const secondAcks = second.ws.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.t === "hello-ok");
+    expect(secondAcks).toEqual([{ t: "hello-ok", viewers: 2 }]);
+  });
+
+  it("sends viewer-left on close so join/leave notices stay symmetric", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+
+    h.sockets.splice(h.sockets.indexOf(a.ws), 1);
+    await h.relay.webSocketClose(a.ws as unknown as WebSocket);
+
+    expect(controlNotices(vm)).toEqual([
+      { t: "viewer-joined", via: a.vid },
+      { t: "viewer-left", via: a.vid },
+    ]);
+  });
+
+  it("never leaks plaintext names into shipper notices", async () => {
+    const h = makeRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    await helloViewer(h, LEI_CIPHER);
+    await helloViewer(h, WENDY_CIPHER);
+
+    expect(vm.sent.join("\n")).not.toContain("Lei");
+    expect(vm.sent.join("\n")).not.toContain("Wendy");
+  });
+});
+
+/**
  * Presence liveness: close frames are not reliably delivered (proxies,
  * mobile radios, tab kills), so the relay sweeps sockets that stop proving
  * liveness instead of letting them accumulate as roster ghosts.

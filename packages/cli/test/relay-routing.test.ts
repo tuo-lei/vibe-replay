@@ -566,3 +566,135 @@ describe("shipper list summaries", () => {
     expect(firstPrompts[1]!.endsWith("…")).toBe(true);
   });
 });
+
+describe("shipper viewer presence", () => {
+  function captureLogs() {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    return { logs, restore: () => void (console.log = origLog) };
+  }
+
+  async function connectedShipper(viewers?: number): Promise<FakeSocket> {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+    sock.onopen!();
+    // Ack the hello the way a current relay does (older relays omit
+    // `viewers`).
+    sock.onmessage!(
+      typeof viewers === "number"
+        ? { data: JSON.stringify({ t: "hello-ok", viewers }) }
+        : { data: JSON.stringify({ t: "hello-ok" }) },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    return sock;
+  }
+
+  const presenceLines = (logs: string[]) => logs.filter((l) => l.includes("→ viewer"));
+
+  it("prints join/leave lines with the watcher count", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v2" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer connected (2 watching)",
+        "  → viewer left (1 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores a duplicate join notice without double-counting", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer connected (1 watching)",
+        "  → viewer left (0 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("resyncs the count from hello-ok and tracks unknown vias against the base", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      // Two viewers were already attached when the shipper (re)connected:
+      // their vias were never announced, so hello-ok carries the count.
+      const sock = await connectedShipper(2);
+      expect(logs.some((l) => l.includes("2 viewers already watching"))).toBe(true);
+
+      // A leave for an unattributed via decrements the snapshot base.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v-old" }) });
+      // A fresh join is tracked by via on top of the base.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v-new" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual([
+        "  → viewer left (1 watching)",
+        "  → viewer connected (2 watching)",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("works with an older relay that omits the viewer count", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper();
+
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(logs.some((l) => l.includes("already watching"))).toBe(false);
+      expect(presenceLines(logs)).toEqual(["  → viewer connected (1 watching)"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores malformed/unknown control frames without dropping the connection", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      const sock = await connectedShipper(0);
+
+      // No `via`: must not print, must not throw, must not close.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-joined" }) });
+      sock.onmessage!({ data: JSON.stringify({ t: "some-future-control", x: 1 }) });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(presenceLines(logs)).toEqual([]);
+
+      // The connection still works: a ping gets a routed response.
+      sock.onmessage!({
+        data: JSON.stringify({
+          t: "frame",
+          iv: "mock-iv",
+          data: JSON.stringify({ seq: 42, cmd: "ping" }),
+        }),
+      });
+      await waitFor(() => sock.sent.length > 1, "ping answered after unknown frames");
+      expect(JSON.parse(lastOuter(sock).data as string)).toMatchObject({ seq: 42, ok: true });
+    } finally {
+      restore();
+    }
+  });
+});

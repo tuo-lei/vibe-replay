@@ -224,6 +224,18 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
   const shareUrl = `${origin}/live/${boxId}#${keyString}`;
 
   const tails = new Map<string, TailState>();
+  /**
+   * Viewer presence as the relay reports it. `viewerVias` holds the ids of
+   * viewers that joined since the last hello-ok; `viewerBaseCount` is the
+   * relay's snapshot count at that ack (viewers already attached then never
+   * sent a join notice). Together they drive the watcher count the CLI
+   * prints. Viewer display names travel as AES-GCM ciphertext the shipper
+   * cannot decrypt — counts only, never names.
+   */
+  const viewerVias = new Set<string>();
+  let viewerBaseCount = 0;
+  const viewerCount = (): number => viewerBaseCount + viewerVias.size;
+  const pluralViewers = (n: number): string => `${n} viewer${n === 1 ? "" : "s"}`;
   let ws: WebSocket | null = null;
   let stopped = false;
   /**
@@ -534,12 +546,40 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     // "session ended". (Acks on reconnects are harmless no-ops.)
     if (outer.t === "hello-ok") {
       resolveHelloOk();
+      // The relay reports how many viewers are attached right now, so a
+      // reconnecting shipper resyncs instead of showing a stale count.
+      // Older relays omit it — then transition tracking alone applies.
+      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+        viewerVias.clear();
+        viewerBaseCount = Math.max(0, Math.floor(outer.viewers));
+        if (viewerBaseCount > 0) {
+          console.log(`  → ${pluralViewers(viewerBaseCount)} already watching`);
+        }
+      }
+      return;
+    }
+    // Plaintext relay control: a viewer joined. Track the watcher count so
+    // the operator can see someone is watching. Older relays never send
+    // this; older shippers ignore the unknown `t` without dropping the
+    // connection — backward compatible both ways.
+    if (outer.t === "viewer-joined" && typeof outer.via === "string") {
+      if (!viewerVias.has(outer.via)) {
+        viewerVias.add(outer.via);
+        console.log(`  → viewer connected (${viewerCount()} watching)`);
+      }
       return;
     }
     // Plaintext relay control: a viewer left. Drop its id from every tail
-    // fan-out; tails with no subscribers left stop their poll loop.
+    // fan-out; tails with no subscribers left stop their poll loop. Also
+    // update the watcher count display.
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
       for (const id of tails.keys()) stopTail(id, outer.via);
+      if (!viewerVias.delete(outer.via)) {
+        // No tracked join for this id: it was already attached at the last
+        // hello-ok snapshot (or a notice was lost) — decrement the base.
+        viewerBaseCount = Math.max(0, viewerBaseCount - 1);
+      }
+      console.log(`  → viewer left (${viewerCount()} watching)`);
       return;
     }
     // The relay declared this box dead (we were swept as a ghost, or a
