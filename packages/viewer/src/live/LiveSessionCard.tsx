@@ -106,18 +106,16 @@ export function LiveSessionCard({
           <span className="text-terminal-dimmer tabular-nums" title="Transcript size">
             {formatSize(session.fileSize)}
           </span>
-          {(session.hasSqlite || session.hasSdk || session.dataSource) && (
-            <span
-              className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(
-                session.dataSource,
-                session.hasSqlite,
-                session.hasSdk,
-              )}`}
-              title={dataSourceLabel}
-            >
-              {dataSourceLabel}
-            </span>
-          )}
+          <span
+            className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(
+              session.dataSource,
+              session.hasSqlite,
+              session.hasSdk,
+            )}`}
+            title={dataSourceLabel}
+          >
+            {dataSourceLabel}
+          </span>
         </>
       }
       actions={

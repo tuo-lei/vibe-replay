@@ -243,6 +243,16 @@ describe("LiveSessionCard adapter", () => {
     expect(container.textContent).toContain("22.9MB");
   });
 
+  it("still renders the fallback badge for pre-change summaries without dataSource", () => {
+    stubBrowserAPIs();
+    const { hasSqlite, dataSource, ...legacy } = summary;
+    void hasSqlite;
+    void dataSource;
+    render(<LiveSessionCard session={legacy} onOpen={() => {}} />);
+    // formatDataSourceLabel's fallback: honest "JSONL", not a hidden badge.
+    expect(screen.getByText("JSONL")).toBeTruthy();
+  });
+
   it("falls back to time-only when the slug is missing", () => {
     stubBrowserAPIs();
     const { container } = render(
