@@ -559,8 +559,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     if (outer.t === "hello-ok") {
       resolveHelloOk();
       // The relay reports the absolute viewer count, so a reconnecting
-      // shipper resyncs instead of showing a stale count. Older relays
-      // omit it — then transition tracking alone applies.
+      // shipper resyncs instead of showing a stale count.
       if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
         viewerVias.clear();
         viewerCount = Math.max(0, Math.floor(outer.viewers));
@@ -568,6 +567,15 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
         if (viewerCount > 0) {
           console.log(`  → ${pluralViewers(viewerCount)} already watching`);
         }
+      } else {
+        // Legacy relay (or a rollback / mixed-version deployment): the ack
+        // carries no snapshot, so any count authority from a previous
+        // connection is stale — start a fresh unknown-count epoch instead
+        // of printing an old count for an audience that may have changed
+        // during the outage.
+        viewerVias.clear();
+        viewerCount = 0;
+        hasAuthoritativeCount = false;
       }
       return;
     }

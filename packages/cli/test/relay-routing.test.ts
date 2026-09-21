@@ -665,6 +665,30 @@ describe("shipper viewer presence", () => {
     }
   });
 
+  it("clears count authority when a reconnect ack omits the snapshot", async () => {
+    const { logs, restore } = captureLogs();
+    try {
+      // The shipper first talked to a current relay (authoritative count),
+      // then reconnected after a relay rollback: the new hello-ok carries
+      // no viewers, so the old count must not survive the epoch change.
+      const sock = await connectedShipper(2);
+      expect(logs.some((l) => l.includes("2 viewers already watching"))).toBe(true);
+
+      sock.onmessage!({ data: JSON.stringify({ t: "hello-ok" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // A legacy leave after the rollback reports the disconnect without
+      // resurrecting the stale "2 watching" count.
+      sock.onmessage!({ data: JSON.stringify({ t: "viewer-left", via: "v1" }) });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(presenceLines(logs)).toEqual(["  → viewer left"]);
+      expect(logs.some((l) => l.includes("2 watching"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
   it("never fabricates a count for a legacy relay that omits it", async () => {
     const { logs, restore } = captureLogs();
     try {
