@@ -1,5 +1,5 @@
 import { SessionCard } from "../components/SessionCard";
-import { providerDisplayName, shortModelName } from "../components/dashboard-utils";
+import { formatSize, providerDisplayName, shortModelName } from "../components/dashboard-utils";
 import { shortName, timeAgo } from "../utils/format";
 import type { RelaySessionSummary } from "./protocol";
 
@@ -9,9 +9,11 @@ import type { RelaySessionSummary } from "./protocol";
  * renders. No card markup lives here on purpose; visual changes belong in
  * `components/SessionCard.tsx` so both surfaces stay identical.
  *
- * Dashboard-only rows (prompt previews, usage details, outcome facts, CTAs)
- * need scan data and dashboard state, so the live card simply doesn't pass
+ * Slots the relay cannot feed (usage details, outcome facts, Share/Redo)
+ * need scan data or local dashboard state, so the live card doesn't pass
  * them. Durations and edit counts are discovery estimates, hence the "~".
+ * Cost is absent because discovery has no token-usage data for these
+ * providers — the card hides it rather than fabricating a number.
  */
 export function LiveSessionCard({
   session,
@@ -38,6 +40,7 @@ export function LiveSessionCard({
           {timeAgo(session.timestamp)}
         </span>
       }
+      prompts={session.firstPrompts}
       place={{
         project: session.project,
         projectLabel: shortName(session.project),
@@ -53,6 +56,29 @@ export function LiveSessionCard({
         editEstimated: true,
         compactionCount: session.compactionCount,
       }}
+      middle={
+        <div
+          className="text-xs font-mono text-terminal-dimmer tabular-nums"
+          title="Transcript size"
+        >
+          {formatSize(session.fileSize)}
+        </div>
+      }
+      actions={
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(session);
+          }}
+          aria-label={`Open ${title}`}
+          className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <polygon points="4 2 14 8 4 14" />
+          </svg>
+          View
+        </button>
+      }
     />
   );
 }

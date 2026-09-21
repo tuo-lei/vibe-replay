@@ -741,4 +741,6 @@ export interface RelaySessionSummary {
   durationMsEst?: number;
   /** Count of file-editing tool_use blocks (estimate). */
   editCountEst?: number;
+  /** Up to 2 prompt preview strings (cleaned user prompts from discovery). */
+  firstPrompts?: string[];
 }

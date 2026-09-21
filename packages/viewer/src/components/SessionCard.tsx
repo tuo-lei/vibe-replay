@@ -172,7 +172,7 @@ export interface SessionCardProps {
   timeMeta: ReactNode;
   /** Card menu (dashboard-only). */
   headerActions?: ReactNode;
-  // -- Row 2: user prompt previews (dashboard-only; needs scan data) --
+  // -- Row 2: user prompt previews --
   prompts?: string[];
   // -- Row 3: place --
   place: SessionCardPlace;

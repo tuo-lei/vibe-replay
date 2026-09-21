@@ -67,6 +67,8 @@ function summarize(info: SessionInfo): RelaySessionSummary {
     compactionCount: info.compactionCount,
     durationMsEst: info.durationMsEst,
     editCountEst: info.editCountEst,
+    // Prompt previews for the live card; the relay never ships full transcripts.
+    firstPrompts: info.prompts?.slice(0, 2),
   };
 }
 
