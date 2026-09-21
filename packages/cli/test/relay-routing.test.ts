@@ -39,6 +39,7 @@ const providerState = vi.hoisted(() => ({
     compactionCount: 1,
     durationMsEst: 60000,
     editCountEst: 3,
+    prompts: ["short prompt", "x".repeat(500)],
   },
 }));
 vi.mock("../src/providers/index.js", () => ({
@@ -536,5 +537,32 @@ describe("shipper list summaries", () => {
       durationMsEst: 60000,
       editCountEst: 3,
     });
+  });
+
+  it("truncates each prompt preview so one huge prompt can't blow the frame budget", async () => {
+    void startRelay({ relayOrigin: "http://localhost:1" });
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+    sock.onopen!();
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        data: JSON.stringify({ seq: 10, cmd: "list" }),
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "list response sent");
+    const outer = lastOuter(sock);
+    const payload = JSON.parse(outer.data as string) as {
+      seq: number;
+      ok: boolean;
+      data: { sessions: Record<string, unknown>[] };
+    };
+    const firstPrompts = payload.data.sessions[0]!["firstPrompts"] as string[];
+    expect(firstPrompts).toHaveLength(2);
+    expect(firstPrompts[0]).toBe("short prompt");
+    // 500-char prompt truncated to 300 + ellipsis.
+    expect(firstPrompts[1]!.length).toBe(301);
+    expect(firstPrompts[1]!.endsWith("…")).toBe(true);
   });
 });
