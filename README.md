@@ -215,7 +215,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
 - **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including OpenAI-compatible local or remote endpoints
 - **Ask Replay** — ask read-only questions about sessions, scenes, annotations, overlays, usage, coverage, projects, and Insights; get stable permalinks instead of opaque chat answers
-- **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
+- **Share & export** — Quick Share an E2E-encrypted replay directly from your running machine (up to 10 MB, no account or R2 upload), or publish via GitHub Gist/cloud; animated SVG, GIF, markdown, and HTML exports are also available. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
 - **Live mode** — `vibe-replay live` follows a running local session as new turns land on disk; SSH-backed live mode is intentionally disabled
@@ -274,6 +274,7 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   data stays hidden unless you enable it in Settings. The setting is browser-local and can be changed
   at any time.
 - **Quick preview** — open in browser instantly
+- **Quick Share** — create a temporary E2E-encrypted link for one replay without uploading it to R2; the link works while your local Vibe Replay process is running and is capped at 10 MB
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
 
@@ -288,9 +289,10 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 ## Security & Privacy
 
 - **Remote live sharing** — `vibe-replay relay` exposes sessions read-only (`list`/`get`/`search`/`tail` only) through an end-to-end encrypted pipe: AES-256-GCM with per-run keys in the URL fragment, relay forwards ciphertext it cannot read. The share URL is a bearer capability — treat it like a password and stop the CLI when done.
+- **Quick Share** — temporary replay links use the same E2E relay transport but expose only one sanitized replay (`get-replay`/`ping`), not the local session catalog. Replay content is not stored in R2 or D1; the 256-bit content key stays in the URL fragment. Quick Share rejects snapshots over 10 MB.
 - **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
-- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
+- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Replay content leaves your machine only when you explicitly Quick Share it (E2E-encrypted relay traffic), publish it (Gist/cloud upload), or invoke another explicit network feature. If you log in, aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
 - **Local AI setup** — AI Studio and Ask Replay use the embedded Pi provider and agent runtime.
   Credentials stay outside replay files and cloud uploads; AI requests only run after a configured
   provider and usable model are selected. When Pi's `settings.json` defines a default provider/model,

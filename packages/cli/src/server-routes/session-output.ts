@@ -11,6 +11,11 @@ import {
 } from "../overlays.js";
 import { loadSavedCloudInfo, publishCloudWithOverlays } from "../publishers/cloud.js";
 import { checkPublishStatus, loadSavedGistInfo, publishGist } from "../publishers/gist.js";
+import {
+  createQuickReplayShare,
+  QuickShareTooLargeError,
+  type QuickReplayShare,
+} from "../replay-share.js";
 import { getErrorMessage, requireSlug, safeTargetId } from "../server-core.js";
 import { resolveReplayDir } from "../server-replay-catalog.js";
 import { scanForSecrets } from "../scan.js";
@@ -26,8 +31,103 @@ interface SessionOutputRouteDeps {
 /** Session metadata, publishing, and export routes. */
 export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteDeps): void {
   const { baseDir, loadSession } = deps;
+  const quickShares = new Map<string, QuickReplayShare>();
+  const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
+
+  const loadShareableSession = async (slug: string, targetId?: string) => {
+    const rawSession = await loadSession(slug, targetId);
+    const overlaysData = await loadOverlays(baseDir, slug, targetId);
+    return sessionForExternalOutput(sessionWithEffectiveContent(rawSession, overlaysData));
+  };
 
   app.get("/api/gh-status", (c) => c.json(checkPublishStatus()));
+
+  // Ephemeral E2E share. The replay stays on this machine; Cloudflare only
+  // relays encrypted frames. One active share per replay is idempotent until
+  // the user stops it or the relay declares the box permanently ended.
+  app.get("/api/share/quick", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
+    try {
+      await loadSession(result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
+    const share = quickShares.get(quickShareKey(result.slug, targetId));
+    return c.json(
+      share
+        ? {
+            active: true,
+            url: share.url,
+            sizeBytes: share.sizeBytes,
+            maxBytes: share.maxBytes,
+          }
+        : { active: false },
+    );
+  });
+
+  app.post("/api/share/quick", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
+    const key = quickShareKey(result.slug, targetId);
+    const existing = quickShares.get(key);
+    if (existing) {
+      return c.json({
+        active: true,
+        url: existing.url,
+        sizeBytes: existing.sizeBytes,
+        maxBytes: existing.maxBytes,
+      });
+    }
+
+    try {
+      const targetSession = await loadShareableSession(result.slug, targetId);
+      const activeShare = { boxId: undefined as string | undefined };
+      const created = await createQuickReplayShare(targetSession, {
+        onEnded: () => {
+          if (activeShare.boxId && quickShares.get(key)?.boxId === activeShare.boxId) {
+            quickShares.delete(key);
+          }
+        },
+      });
+      activeShare.boxId = created.boxId;
+      quickShares.set(key, created);
+      return c.json({
+        active: true,
+        url: created.url,
+        sizeBytes: created.sizeBytes,
+        maxBytes: created.maxBytes,
+      });
+    } catch (err) {
+      if (err instanceof QuickShareTooLargeError) {
+        return c.json(
+          { error: err.message, sizeBytes: err.sizeBytes, maxBytes: err.maxBytes },
+          413,
+        );
+      }
+      const message = getErrorMessage(err);
+      if (message.startsWith("Session not found:")) {
+        return c.json({ error: "session not found" }, 404);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  app.delete("/api/share/quick", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
+    const key = quickShareKey(result.slug, targetId);
+    const share = quickShares.get(key);
+    quickShares.delete(key);
+    if (share) await share.stop();
+    return c.json({ ok: true });
+  });
 
   // Gist info for a session (requires slug)
   app.get("/api/gist-info", async (c) => {

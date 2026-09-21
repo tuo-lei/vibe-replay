@@ -9,6 +9,7 @@ import { sanitizeHtml, sanitizeSvg } from "../utils/sanitize";
 
 // Sync with MAX_EXPORT_TURNS in packages/cli/src/formatters/github.ts
 const MAX_EXPORT_TURNS = 8;
+const QUICK_SHARE_MAX = 10 * 1024 * 1024;
 
 interface Props {
   actions: AnnotationActions;
@@ -142,6 +143,13 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [gistPublishingLocal, setGistPublishingLocal] = useState(false);
   const [cloudSharing, setCloudSharing] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<Status>(null);
+  const [quickSharing, setQuickSharing] = useState(false);
+  const [quickShareStatus, setQuickShareStatus] = useState<Status>(null);
+  const [quickShareInfo, setQuickShareInfo] = useState<{
+    url: string;
+    sizeBytes: number;
+    maxBytes: number;
+  } | null>(null);
   const [cloudInfo, setCloudInfo] = useState<{
     id: string;
     url: string;
@@ -211,6 +219,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const GIST_MAX = 10 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
+  const quickShareTooBig = replaySize > QUICK_SHARE_MAX;
   const executableFeedback = useMemo(
     () => (session ? exportExecutableFeedback(session, annotations) : ""),
     [annotations, session],
@@ -314,6 +323,24 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         .catch(() => {});
     }
   }, [isEditor, publishGist, exportGithub, cloudFetch, refreshAuthAndCloudData]);
+
+  useEffect(() => {
+    if (!isEditor || !session) return;
+    fetch(apiUrl("/api/share/quick"))
+      .then((r) => r.json())
+      .then((data: any) => {
+        if (data?.active && data?.url) {
+          setQuickShareInfo({
+            url: data.url,
+            sizeBytes: data.sizeBytes ?? replaySize,
+            maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
+          });
+        } else {
+          setQuickShareInfo(null);
+        }
+      })
+      .catch(() => {});
+  }, [isEditor, session, replaySize]);
 
   // Re-check auth when login happens elsewhere (e.g. DashboardAuthStatus header)
   useEffect(() => {
@@ -469,6 +496,50 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       setCloudSharing(false);
     }
   }, [cloudInfo, cloudFetch]);
+
+  const handleQuickShare = useCallback(async () => {
+    if (!session || quickShareTooBig) return;
+    setQuickSharing(true);
+    setQuickShareStatus(null);
+    try {
+      const resp = await fetch(apiUrl("/api/share/quick"), { method: "POST" });
+      const data = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        url?: string;
+        sizeBytes?: number;
+        maxBytes?: number;
+      };
+      if (!resp.ok || !data.url) throw new Error(data.error || "Quick Share failed");
+      setQuickShareInfo({
+        url: data.url,
+        sizeBytes: data.sizeBytes ?? replaySize,
+        maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
+      });
+      setQuickShareStatus({ type: "success", text: "Sharing from this computer" });
+    } catch (e) {
+      setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setQuickSharing(false);
+    }
+  }, [session, quickShareTooBig, replaySize]);
+
+  const handleQuickShareStop = useCallback(async () => {
+    setQuickSharing(true);
+    setQuickShareStatus(null);
+    try {
+      const resp = await fetch(apiUrl("/api/share/quick"), { method: "DELETE" });
+      if (!resp.ok) {
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Failed to stop sharing");
+      }
+      setQuickShareInfo(null);
+      setQuickShareStatus({ type: "success", text: "Quick Share stopped" });
+    } catch (e) {
+      setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setQuickSharing(false);
+    }
+  }, []);
 
   /** Refresh storage usage after file operations */
   const refreshStorage = useCallback(() => {
@@ -675,6 +746,100 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                   >
                     {formatBytes(replaySize)} replay
                   </span>
+                )}
+              </div>
+
+              <div className="mb-4 bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono font-semibold text-terminal-green">
+                        Quick Share
+                      </span>
+                      <span className="ui-pill-compact bg-terminal-green-subtle text-terminal-green">
+                        E2E encrypted
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs font-sans text-terminal-dim leading-relaxed">
+                      The replay stays on this computer. The link works while Vibe Replay is
+                      running; Cloudflare only relays encrypted data.
+                    </p>
+                    <p className="mt-1.5 text-[10px] font-mono text-terminal-dimmer">
+                      Up to 10 MB · no sign-in · stopping the share kills the link
+                    </p>
+                  </div>
+                  {!quickShareInfo && (
+                    <button
+                      type="button"
+                      onClick={handleQuickShare}
+                      disabled={quickSharing || quickShareTooBig}
+                      className={`${btnBase} shrink-0 ${
+                        quickShareTooBig
+                          ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
+                          : "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis border border-terminal-green/20"
+                      }`}
+                    >
+                      {quickSharing
+                        ? "Starting…"
+                        : quickShareTooBig
+                          ? "Too large"
+                          : "Start sharing"}
+                    </button>
+                  )}
+                </div>
+
+                {quickShareTooBig && (
+                  <p className="mt-3 text-[11px] font-mono text-terminal-orange">
+                    Replay is {formatBytes(replaySize)} — Quick Share limit is 10 MB. Export HTML or
+                    publish a smaller replay instead.
+                  </p>
+                )}
+
+                {quickShareInfo && (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-terminal-green px-2 py-0.5 rounded-full bg-terminal-green-subtle">
+                        <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                        Sharing
+                      </span>
+                      <span className="text-[10px] font-mono text-terminal-dimmer">
+                        {formatBytes(quickShareInfo.sizeBytes)} snapshot
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
+                      <a
+                        href={quickShareInfo.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        referrerPolicy="no-referrer"
+                        className="flex-1 text-xs font-mono text-terminal-green hover:text-terminal-text transition-colors truncate"
+                      >
+                        {quickShareInfo.url}
+                      </a>
+                      <CopyButton text={quickShareInfo.url} />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleQuickShareStop}
+                        disabled={quickSharing}
+                        className={`${btnBase} bg-terminal-surface-hover text-terminal-red hover:bg-terminal-red-subtle border border-terminal-border`}
+                      >
+                        {quickSharing ? "Stopping…" : "Stop sharing"}
+                      </button>
+                      <span className="text-[10px] font-mono text-terminal-dimmer">
+                        Existing open tabs keep their loaded snapshot; new opens stop working.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {quickShareStatus && (
+                  <div
+                    className={`mt-3 text-[11px] font-mono ${quickShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                  >
+                    {quickShareStatus.text}
+                  </div>
                 )}
               </div>
 

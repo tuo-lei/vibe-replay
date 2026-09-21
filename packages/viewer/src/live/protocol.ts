@@ -12,7 +12,7 @@
  * Ported from the original hand-rolled viewer page so the React live viewer
  * reuses the exact same wire protocol.
  */
-import type { Scene } from "../types";
+import type { ReplaySession, Scene } from "../types";
 import type { RelaySessionSummary } from "@vibe-replay/types";
 
 export type { RelaySessionSummary };
@@ -516,6 +516,17 @@ export class LiveClient implements LiveRelay {
     }>({ cmd: "get", id: sessionId, offset, limit });
     if (!res.ok) throw new Error(res.error || "get failed");
     return res.data;
+  }
+
+  /** Fetch the single immutable replay exposed by an ephemeral Quick Share. */
+  async getReplay(): Promise<ReplaySession> {
+    const res = await this.cmd<{
+      ok: boolean;
+      error?: string;
+      data: { replay: ReplaySession };
+    }>({ cmd: "get-replay" });
+    if (!res.ok) throw new Error(res.error || "get replay failed");
+    return res.data.replay;
   }
 
   async search(q: string, limit = 10): Promise<RelaySearchHit[]> {

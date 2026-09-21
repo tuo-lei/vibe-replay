@@ -878,4 +878,13 @@ describe("Cloud API integration", () => {
       await prodMf.dispose();
     }
   });
+
+  it("redirects Quick Share URLs client-side while preserving the fragment", async () => {
+    const response = await dispatch("/share/abcdefghijklmnopqrstuv");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain('/view/?relay=abcdefghijklmnopqrstuv');
+    expect(html).toContain("+location.hash");
+  });
 });

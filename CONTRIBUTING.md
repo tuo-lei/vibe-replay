@@ -257,7 +257,7 @@ The viewer runs in three modes, determined at load time:
 |------|------------|--------------|
 | `embedded` | `window.__VIBE_REPLAY_DATA__` (injected by CLI) | Read-only playback |
 | `editor` | Fetch from localhost Hono server | Annotations, AI Coach, export, Gist |
-| `readonly` | `?gist=<id>` or `?url=<json>` | Read-only, hosted viewer |
+| `readonly` | `?relay=<boxId>`, `?cloud=<id>`, `?gist=<id>`, or `?url=<json>` | Read-only, hosted viewer |
 
 ### Adding a new provider
 
