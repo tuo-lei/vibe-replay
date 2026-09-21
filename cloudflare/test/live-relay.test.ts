@@ -571,6 +571,48 @@ describe("LiveRelay presence liveness sweep", () => {
     expect(leaves(vm)).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
   });
 
+  it("does not re-notify the shipper on later sweeps while the half-open socket lingers", async () => {
+    const h = makeAlarmRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+    const leaves = (ws: MockSocket) =>
+      ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+
+    await h.relay.alarm();
+    expect(leaves(vm)).toHaveLength(1);
+
+    // The half-open socket is still listed across later alarms (the exact
+    // delayed-close case): no repeated viewer-left, no rerun tail cleanup.
+    await h.relay.alarm();
+    await h.relay.alarm();
+    expect(leaves(vm)).toHaveLength(1);
+  });
+
+  it("retries the sweep leave notice when no shipper was attached", async () => {
+    const h = makeAlarmRelay();
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
+    (b.ws.attachment as { lastSeen: number }).lastSeen -= 60_000;
+
+    // No shipper attached: the sweep reaps the socket but cannot notify —
+    // and must not mark it notified, or the notice would be lost forever.
+    await h.relay.alarm();
+    expect(b.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((b.ws.attachment as { leaveNotified?: boolean }).leaveNotified).toBeUndefined();
+
+    // A shipper attaches before the delayed close: the close callback still
+    // delivers the leave, so the CLI drops the dead viewer's tails.
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    h.sockets.splice(h.sockets.indexOf(b.ws), 1);
+    await h.relay.webSocketClose(b.ws as unknown as WebSocket);
+    const leaves = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "viewer-left");
+    expect(leaves).toEqual([{ t: "viewer-left", via: b.vid, viewers: 1 }]);
+  });
+
   it("broadcasts the shrunken roster immediately after the sweep, before webSocketClose", async () => {
     const h = makeAlarmRelay();
     const a = await helloViewer(h, LEI_CIPHER);
