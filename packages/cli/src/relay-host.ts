@@ -1,20 +1,17 @@
 import {
-  decryptFrame,
-  encryptFrame,
-  exportKeyString,
-  generateContentKey,
-  randomBoxId,
-  type EncryptedFrame,
-} from "./relay-crypto.js";
+  createRelayTransport,
+  type RelayTransportContext,
+  type RelayTransportHandle,
+} from "./relay-transport.js";
 
-export const DEFAULT_RELAY_ORIGIN = "https://vibe-replay.com";
-export const RELAY_MAX_FRAME_BYTES = 4 * 1024 * 1024;
-export const RELAY_CHUNK_PLAINTEXT_BYTES = 512 * 1024;
-export const RELAY_MAX_CHUNKS = 64;
-export const RELAY_MAX_RESPONSE_BYTES = RELAY_CHUNK_PLAINTEXT_BYTES * RELAY_MAX_CHUNKS;
+export {
+  DEFAULT_RELAY_ORIGIN,
+  RELAY_CHUNK_PLAINTEXT_BYTES,
+  RELAY_MAX_CHUNKS,
+  RELAY_MAX_FRAME_BYTES,
+  RELAY_MAX_RESPONSE_BYTES,
+} from "./relay-transport.js";
 
-const KEEPALIVE_MS = 45_000;
-const DEAD_BOX_RETRY_EXIT_MS = 150_000;
 export const RELAY_STARTUP_TIMEOUT_MS = 30_000;
 
 export interface RelayHostOptions {
@@ -45,128 +42,20 @@ export interface RelayHostViewer {
   name: string;
 }
 
-function validateRelayOrigin(origin: string): void {
-  const u = new URL(origin);
-  const loopback =
-    u.hostname === "localhost" ||
-    u.hostname === "127.0.0.1" ||
-    u.hostname === "[::1]" ||
-    u.hostname === "::1";
-  if (u.protocol === "http:" && !loopback) {
-    throw new Error(
-      `refusing cleartext relay origin ${origin}: use https (http://localhost is allowed for local testing)`,
-    );
-  }
-}
-
-function splitUtf8(json: string, maxBytes: number): string[] {
-  const parts: string[] = [];
-  let cur = "";
-  let curBytes = 0;
-  for (const ch of json) {
-    const cp = ch.codePointAt(0) as number;
-    const bytes = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
-    if (curBytes + bytes > maxBytes && cur.length > 0) {
-      parts.push(cur);
-      cur = "";
-      curBytes = 0;
-    }
-    cur += ch;
-    curBytes += bytes;
-  }
-  if (cur.length > 0) parts.push(cur);
-  return parts;
+function encryptedPresenceFrame(value: unknown): { iv: string; data: string } | null {
+  if (typeof value !== "object" || value === null) return null;
+  const frame = value as Record<string, unknown>;
+  return typeof frame.iv === "string" && typeof frame.data === "string"
+    ? { iv: frame.iv, data: frame.data }
+    : null;
 }
 
 /**
- * Create one E2E-encrypted shipper attached to the shared LiveRelay Durable
- * Object. The relay sees only box/routing metadata and opaque ciphertext.
- * Command semantics stay entirely local to the caller.
+ * Product wrapper around the shared relay transport for single-replay Quick
+ * Share. It owns only the decrypted viewer roster; connection/crypto/chunking
+ * and command routing live in relay-transport.ts.
  */
 export async function createRelayHost(options: RelayHostOptions): Promise<RelayHostHandle> {
-  const origin = (options.relayOrigin ?? DEFAULT_RELAY_ORIGIN).replace(/\/$/, "");
-  validateRelayOrigin(origin);
-
-  const boxId = randomBoxId();
-  const { key, raw } = await generateContentKey();
-  const keyString = exportKeyString(raw);
-  const wsUrl = `${origin.replace(/^http/, "ws")}/live/${boxId}`;
-  const sharePath = (options.sharePath ?? "live").replace(/^\/+|\/+$/g, "");
-  const shareUrl = `${origin}/${sharePath}/${boxId}#${keyString}`;
-
-  let ws: WebSocket | null = null;
-  let stopped = false;
-  let reconnectDelayMs = 2000;
-  let everConnected = false;
-  let outageBeganAt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let resolveReady!: () => void;
-  let rejectReady!: (error: Error) => void;
-  let readySettled = false;
-  let startupTimer: ReturnType<typeof setTimeout> | null = null;
-  const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-
-  const settleReady = (): void => {
-    if (readySettled) return;
-    readySettled = true;
-    if (startupTimer) clearTimeout(startupTimer);
-    startupTimer = null;
-    resolveReady();
-  };
-
-  const failReady = (message: string): void => {
-    if (readySettled) return;
-    readySettled = true;
-    if (startupTimer) clearTimeout(startupTimer);
-    startupTimer = null;
-    rejectReady(new Error(message));
-  };
-
-  const sendFrame = async (payload: unknown, via?: string): Promise<boolean> => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
-    const outer = JSON.stringify({ t: "frame", ...frame, ...(via ? { via } : {}) });
-    if (Buffer.byteLength(outer, "utf8") > RELAY_MAX_FRAME_BYTES) return false;
-    try {
-      ws.send(outer);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const sendChunked = async (payload: Record<string, unknown>, via?: string): Promise<boolean> => {
-    const parts = splitUtf8(JSON.stringify(payload), RELAY_CHUNK_PLAINTEXT_BYTES);
-    if (parts.length === 0 || parts.length > RELAY_MAX_CHUNKS) return false;
-    for (let i = 0; i < parts.length; i++) {
-      if (
-        !(await sendFrame(
-          { seq: payload.seq, chunk: i, chunks: parts.length, data: parts[i] },
-          via,
-        ))
-      ) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const sendResponse = async (payload: Record<string, unknown>, via?: string): Promise<void> => {
-    if (await sendFrame(payload, via)) return;
-    if (await sendChunked(payload, via)) return;
-    await sendFrame({ seq: payload.seq, ok: false, error: "response too large to relay" }, via);
-  };
-
-  const keepaliveTimer = setInterval(() => {
-    void sendFrame({ keepalive: true });
-  }, KEEPALIVE_MS);
-  keepaliveTimer.unref?.();
-
-  let commandChain: Promise<void> = Promise.resolve();
-  let presenceChain: Promise<void> = Promise.resolve();
   const viewerPresence = new Map<string, string>();
 
   const snapshotViewers = (): RelayHostViewer[] =>
@@ -174,26 +63,14 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
 
   const emitPresence = (): void => options.onPresenceChange?.(snapshotViewers());
 
-  const queuePresence = (fn: () => Promise<void> | void): Promise<void> => {
-    const run = presenceChain.then(fn);
-    presenceChain = run.catch(() => {});
-    return run;
-  };
-
-  const decryptViewerName = async (value: unknown): Promise<string> => {
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      typeof (value as Record<string, unknown>).iv !== "string" ||
-      typeof (value as Record<string, unknown>).data !== "string"
-    ) {
-      return "Guest";
-    }
+  const decryptViewerName = async (
+    value: unknown,
+    context: RelayTransportContext,
+  ): Promise<string> => {
+    const frame = encryptedPresenceFrame(value);
+    if (!frame) return "Guest";
     try {
-      const name = await decryptFrame(key, boxId, {
-        iv: (value as Record<string, unknown>).iv as string,
-        data: (value as Record<string, unknown>).data as string,
-      });
+      const name = await context.decrypt(frame);
       return (
         name
           .replace(/\p{Cc}/gu, "")
@@ -205,155 +82,53 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
     }
   };
 
-  const endPermanently = (reason = "relay ended before it became ready"): void => {
-    if (stopped) return;
-    stopped = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    clearInterval(keepaliveTimer);
-    failReady(reason);
-    options.onConnectionChange?.("ended", reason);
-    options.onPermanentEnd?.();
-    try {
-      ws?.close(1000, "box ended");
-    } catch {
-      // already closed
+  const onControl = async (
+    message: Record<string, unknown>,
+    context: RelayTransportContext,
+  ): Promise<void> => {
+    if (message.t === "hello-ok") {
+      if (!Array.isArray(message.presence)) return;
+      const nextPresence = new Map<string, string>();
+      for (const item of message.presence) {
+        if (typeof item !== "object" || item === null) continue;
+        const record = item as Record<string, unknown>;
+        if (typeof record.vid !== "string") continue;
+        nextPresence.set(record.vid.slice(0, 64), await decryptViewerName(record.name, context));
+      }
+      viewerPresence.clear();
+      for (const [id, name] of nextPresence) viewerPresence.set(id, name);
+      emitPresence();
+      return;
+    }
+
+    if (message.t === "viewer-joined" && typeof message.via === "string") {
+      viewerPresence.set(message.via.slice(0, 64), await decryptViewerName(message.name, context));
+      emitPresence();
+      return;
+    }
+
+    if (message.t === "viewer-left" && typeof message.via === "string") {
+      viewerPresence.delete(message.via);
+      emitPresence();
+      options.onViewerLeft?.(message.via);
     }
   };
 
-  const onMessage = async (event: MessageEvent): Promise<void> => {
-    let outer: Record<string, unknown>;
-    try {
-      outer = JSON.parse(typeof event.data === "string" ? event.data : "{}");
-    } catch {
-      return;
-    }
-    if (outer.t === "hello-ok") {
-      await queuePresence(async () => {
-        if (Array.isArray(outer.presence)) {
-          const nextPresence = new Map<string, string>();
-          for (const item of outer.presence) {
-            if (typeof item !== "object" || item === null) continue;
-            const id = (item as Record<string, unknown>).vid;
-            if (typeof id !== "string") continue;
-            nextPresence.set(
-              id.slice(0, 64),
-              await decryptViewerName((item as Record<string, unknown>).name),
-            );
-          }
-          viewerPresence.clear();
-          for (const [id, name] of nextPresence) viewerPresence.set(id, name);
-          emitPresence();
-        }
-        settleReady();
-      });
-      return;
-    }
-    if (outer.t === "viewer-joined" && typeof outer.via === "string") {
-      const via = outer.via;
-      await queuePresence(async () => {
-        viewerPresence.set(via.slice(0, 64), await decryptViewerName(outer.name));
-        emitPresence();
-      });
-      return;
-    }
-    if (outer.t === "viewer-left" && typeof outer.via === "string") {
-      const via = outer.via;
-      await queuePresence(() => {
-        viewerPresence.delete(via);
-        emitPresence();
-        options.onViewerLeft?.(via);
-      });
-      return;
-    }
-    if (outer.t === "session-ended") {
-      endPermanently("relay session ended before it became ready");
-      return;
-    }
-    if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string") {
-      return;
-    }
-    const via = typeof outer.via === "string" ? outer.via : undefined;
-    let inner: Record<string, unknown>;
-    try {
-      inner = JSON.parse(await decryptFrame(key, boxId, { iv: outer.iv, data: outer.data }));
-    } catch {
-      return;
-    }
-    const run = commandChain.then(async () => {
-      const response = await options.handleCommand(inner, via);
-      await sendResponse(response, via);
-    });
-    commandChain = run.catch(() => {});
-    await run;
-  };
+  const transport: RelayTransportHandle = await createRelayTransport({
+    relayOrigin: options.relayOrigin,
+    sharePath: options.sharePath,
+    startupTimeoutMs: RELAY_STARTUP_TIMEOUT_MS,
+    handleCommand: options.handleCommand,
+    onControl,
+    onPermanentEnd: () => options.onPermanentEnd?.(),
+    onConnectionChange: options.onConnectionChange,
+  });
 
-  const connect = (): void => {
-    if (stopped) return;
-    const socket = new WebSocket(wsUrl);
-    ws = socket;
-    socket.onopen = () => {
-      reconnectDelayMs = 2000;
-      everConnected = true;
-      outageBeganAt = 0;
-      socket.send(JSON.stringify({ t: "hello", role: "vm" }));
-      options.onConnectionChange?.("connected");
-    };
-    socket.onmessage = (event) => void onMessage(event);
-    socket.onclose = (event) => {
-      if (stopped) return;
-      const reason = typeof event?.reason === "string" ? event.reason : "";
-      if (reason === "session ended" || reason === "box ended") {
-        endPermanently(`relay ${reason}`);
-        return;
-      }
-      if (everConnected) {
-        if (outageBeganAt === 0) outageBeganAt = Date.now();
-        if (Date.now() - outageBeganAt > DEAD_BOX_RETRY_EXIT_MS) {
-          endPermanently();
-          return;
-        }
-      }
-      options.onConnectionChange?.("retrying", `${reconnectDelayMs}`);
-      reconnectTimer = setTimeout(connect, reconnectDelayMs);
-      reconnectTimer.unref?.();
-      reconnectDelayMs = Math.min(30_000, reconnectDelayMs * 2);
-    };
-    socket.onerror = () => {
-      try {
-        socket.close();
-      } catch {
-        // onclose owns retry behavior
-      }
-    };
+  return {
+    boxId: transport.boxId,
+    shareUrl: transport.shareUrl,
+    ready: transport.ready,
+    viewers: snapshotViewers,
+    stop: transport.stop,
   };
-
-  const stop = async (): Promise<void> => {
-    if (stopped) return;
-    stopped = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    clearInterval(keepaliveTimer);
-    failReady("relay host stopped before it became ready");
-    try {
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ t: "goodbye", role: "vm" }));
-        // Give the small control frame one event-loop turn to flush.
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    } catch {
-      // The DO's disconnect grace is the fallback when goodbye is lost.
-    }
-    try {
-      ws?.close(1000, "shutdown");
-    } catch {
-      // already closed
-    }
-  };
-
-  startupTimer = setTimeout(
-    () => endPermanently(`relay did not become ready within ${RELAY_STARTUP_TIMEOUT_MS}ms`),
-    RELAY_STARTUP_TIMEOUT_MS,
-  );
-  startupTimer.unref?.();
-  connect();
-  return { boxId, shareUrl, ready, viewers: snapshotViewers, stop };
 }
