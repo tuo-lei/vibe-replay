@@ -44,11 +44,10 @@ const EVAL_CASES: EvalCase[] = [
     isRelevant: (text) => /latest/.test(text) && /(main|branch|feature)/.test(text),
   },
   {
-    query: "skill devspaces canonical",
-    intent: "Find skill work that involved Devspaces or canonical skill migration.",
-    relevanceNote: "skill plus devspaces/dev space/canonical/ROS CLI skill.",
-    isRelevant: (text) =>
-      /skill/.test(text) && /(devspaces|dev space|canonical|ros-?cli)/.test(text),
+    query: "skill migration canonical",
+    intent: "Find skill work involving canonical skill migration.",
+    relevanceNote: "skill plus migration/canonical/CLI context.",
+    isRelevant: (text) => /skill/.test(text) && /(migration|canonical|cli)/.test(text),
   },
   {
     query: "progressive loading metrics ready",

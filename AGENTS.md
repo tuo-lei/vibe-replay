@@ -100,7 +100,6 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **oxlint** for linting, **oxfmt** for formatting. The lefthook pre-commit hook runs both on staged files for every agent. Claude Code additionally fixes each file right after editing it; other agents should run `pnpm lint` themselves before finishing.
 - **Before commit**: run `pnpm lint:check` and fix any errors. Do NOT commit code that fails lint.
 - **Before PR**: run `pnpm verify`. Keep its stages sequential; concurrent full checks can cause integration-test timeouts.
-- **DevSpace PRs**: no `gh`/Git credentials is normal; do not stop or switch connectors. Commit first, then run `node /workspace/personal-mcp/scripts/publish-pr.mjs --branch agent/<name> --title '<title>'`. Use sibling `pr-status.mjs` / `merge-pr.mjs <n> squash`; publisher handles push/PR and requires `agent/*`.
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation
 - **After changes**: update AGENTS.md / README.md / CONTRIBUTING.md if anything becomes outdated. Never edit `CLAUDE.md` to record project knowledge — it is a shim (see [Agent setup](#agent-setup)).
@@ -160,6 +159,8 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 
 ## Agent setup
 
+Every agent reads this file. Only the plumbing differs.
+
 | Agent | Instructions | Skills |
 |-------|--------------|--------|
 | Codex | `AGENTS.md` (native) | `.agents/skills/` (native) |
@@ -168,11 +169,13 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | opencode | `AGENTS.md` (native) | — |
 | Claude Code | `CLAUDE.md` (`@AGENTS.md` + Claude-only notes) | `.claude/skills/` (native) |
 
-Claude Code reads `CLAUDE.md` / `.claude/skills/`; Codex/Pi use
-`AGENTS.md` / `.agents/skills/`:
+Shims exist because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
+because it discovers skills under `.claude/skills/` while Codex and Pi use
+`.agents/skills/`:
 
-- `CLAUDE.md` starts with `@AGENTS.md`; use an import rather than a symlink for
-  Windows compatibility.
+- `CLAUDE.md` is a real file whose first line is `@AGENTS.md`. An import is used
+  rather than a symlink because Windows symlinks need Administrator or Developer
+  Mode, and this repo supports Windows contributors.
 - The replay skill has exactly one real copy, at `skills/replay/` — the published
   path that `.claude-plugin/plugin.json` and the README install command point at.
   `.agents/skills/replay` and `.claude/skills/replay` are both symlinks into it.
