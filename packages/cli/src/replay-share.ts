@@ -26,6 +26,8 @@ export interface QuickReplayShare {
   boxId: string;
   sizeBytes: number;
   maxBytes: number;
+  startedAt: string;
+  viewers: () => Array<{ id: string; name: string }>;
   stop: () => Promise<void>;
 }
 
@@ -34,6 +36,7 @@ export async function createQuickReplayShare(
   options: { relayOrigin?: string; onEnded?: () => void } = {},
 ): Promise<QuickReplayShare> {
   const serialized = JSON.stringify(replay);
+  const startedAt = new Date().toISOString();
   const sizeBytes = Buffer.byteLength(serialized, "utf8");
   if (sizeBytes > QUICK_SHARE_MAX_BYTES) {
     throw new QuickShareTooLargeError(sizeBytes);
@@ -69,6 +72,8 @@ export async function createQuickReplayShare(
     boxId: host.boxId,
     sizeBytes,
     maxBytes: QUICK_SHARE_MAX_BYTES,
+    startedAt,
+    viewers: host.viewers,
     stop: host.stop,
   };
 }

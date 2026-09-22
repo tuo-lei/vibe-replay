@@ -149,6 +149,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     url: string;
     sizeBytes: number;
     maxBytes: number;
+    startedAt?: string;
+    viewers: Array<{ id: string; name: string }>;
   } | null>(null);
   const [cloudInfo, setCloudInfo] = useState<{
     id: string;
@@ -326,20 +328,32 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
   useEffect(() => {
     if (!isEditor || !session) return;
-    fetch(apiUrl("/api/share/quick"))
-      .then((r) => r.json())
-      .then((data: any) => {
-        if (data?.active && data?.url) {
-          setQuickShareInfo({
-            url: data.url,
-            sizeBytes: data.sizeBytes ?? replaySize,
-            maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
-          });
-        } else {
-          setQuickShareInfo(null);
-        }
-      })
-      .catch(() => {});
+    let cancelled = false;
+    const refresh = () => {
+      fetch(apiUrl("/api/share/quick"))
+        .then((r) => r.json())
+        .then((data: any) => {
+          if (cancelled) return;
+          if (data?.active && data?.url) {
+            setQuickShareInfo({
+              url: data.url,
+              sizeBytes: data.sizeBytes ?? replaySize,
+              maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
+              startedAt: data.startedAt,
+              viewers: Array.isArray(data.viewers) ? data.viewers : [],
+            });
+          } else {
+            setQuickShareInfo(null);
+          }
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [isEditor, session, replaySize]);
 
   // Re-check auth when login happens elsewhere (e.g. DashboardAuthStatus header)
@@ -508,14 +522,19 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         url?: string;
         sizeBytes?: number;
         maxBytes?: number;
+        startedAt?: string;
+        viewers?: Array<{ id: string; name: string }>;
       };
       if (!resp.ok || !data.url) throw new Error(data.error || "Quick Share failed");
       setQuickShareInfo({
         url: data.url,
         sizeBytes: data.sizeBytes ?? replaySize,
         maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
+        startedAt: data.startedAt,
+        viewers: data.viewers ?? [],
       });
       setQuickShareStatus({ type: "success", text: "Sharing from this computer" });
+      window.dispatchEvent(new Event("vibe-quick-share-change"));
     } catch (e) {
       setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -534,6 +553,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       }
       setQuickShareInfo(null);
       setQuickShareStatus({ type: "success", text: "Quick Share stopped" });
+      window.dispatchEvent(new Event("vibe-quick-share-change"));
     } catch (e) {
       setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -805,6 +825,33 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       <span className="text-[10px] font-mono text-terminal-dimmer">
                         {formatBytes(quickShareInfo.sizeBytes)} snapshot
                       </span>
+                      {quickShareInfo.startedAt && (
+                        <span className="text-[10px] font-mono text-terminal-dimmer">
+                          started {relativeTime(quickShareInfo.startedAt)}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-terminal-green">
+                        {quickShareInfo.viewers.length} viewing now
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg px-3 py-2">
+                      {quickShareInfo.viewers.length === 0 ? (
+                        <div className="text-[10px] font-mono text-terminal-dimmer">
+                          No one is viewing right now
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {quickShareInfo.viewers.map((viewer) => (
+                            <span
+                              key={viewer.id}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-terminal-green/20 bg-terminal-green-subtle px-2 py-1 text-[10px] font-mono text-terminal-green"
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full bg-terminal-green" />
+                              {viewer.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
                       <a

@@ -26,6 +26,7 @@ export interface RelayHostOptions {
     via?: string,
   ) => Promise<Record<string, unknown>>;
   onViewerLeft?: (via: string) => void;
+  onPresenceChange?: (viewers: RelayHostViewer[]) => void;
   onPermanentEnd?: () => void;
   onConnectionChange?: (state: "connected" | "retrying" | "ended", detail?: string) => void;
 }
@@ -35,7 +36,13 @@ export interface RelayHostHandle {
   shareUrl: string;
   /** Resolves once the relay has durably acknowledged the shipper hello. */
   ready: Promise<void>;
+  viewers: () => RelayHostViewer[];
   stop: () => Promise<void>;
+}
+
+export interface RelayHostViewer {
+  id: string;
+  name: string;
 }
 
 function validateRelayOrigin(origin: string): void {
@@ -159,6 +166,37 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
   keepaliveTimer.unref?.();
 
   let commandChain: Promise<void> = Promise.resolve();
+  const viewerPresence = new Map<string, string>();
+
+  const snapshotViewers = (): RelayHostViewer[] =>
+    [...viewerPresence.entries()].map(([id, name]) => ({ id, name }));
+
+  const emitPresence = (): void => options.onPresenceChange?.(snapshotViewers());
+
+  const decryptViewerName = async (value: unknown): Promise<string> => {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      typeof (value as Record<string, unknown>).iv !== "string" ||
+      typeof (value as Record<string, unknown>).data !== "string"
+    ) {
+      return "Guest";
+    }
+    try {
+      const name = await decryptFrame(key, boxId, {
+        iv: (value as Record<string, unknown>).iv as string,
+        data: (value as Record<string, unknown>).data as string,
+      });
+      return (
+        name
+          .replace(/\p{Cc}/gu, "")
+          .trim()
+          .slice(0, 32) || "Guest"
+      );
+    } catch {
+      return "Guest";
+    }
+  };
 
   const endPermanently = (reason = "relay ended before it became ready"): void => {
     if (stopped) return;
@@ -183,10 +221,30 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
       return;
     }
     if (outer.t === "hello-ok") {
+      if (Array.isArray(outer.presence)) {
+        viewerPresence.clear();
+        for (const item of outer.presence) {
+          if (typeof item !== "object" || item === null) continue;
+          const id = (item as Record<string, unknown>).vid;
+          if (typeof id !== "string") continue;
+          viewerPresence.set(
+            id.slice(0, 64),
+            await decryptViewerName((item as Record<string, unknown>).name),
+          );
+        }
+        emitPresence();
+      }
       settleReady();
       return;
     }
+    if (outer.t === "viewer-joined" && typeof outer.via === "string") {
+      viewerPresence.set(outer.via.slice(0, 64), await decryptViewerName(outer.name));
+      emitPresence();
+      return;
+    }
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
+      viewerPresence.delete(outer.via);
+      emitPresence();
       options.onViewerLeft?.(outer.via);
       return;
     }
@@ -280,5 +338,5 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
   );
   startupTimer.unref?.();
   connect();
-  return { boxId, shareUrl, ready, stop };
+  return { boxId, shareUrl, ready, viewers: snapshotViewers, stop };
 }

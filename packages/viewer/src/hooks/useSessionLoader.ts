@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BOX_ID_RE, LiveClient } from "../live/protocol";
+import { BOX_ID_RE, LiveClient, type ViewerPresence } from "../live/protocol";
+import { ensureViewerName } from "../live/viewer-name";
 import type { ReplaySession } from "../types";
 import { parseReplaySession } from "../utils/replaySchema";
 
@@ -13,6 +14,7 @@ type LoadState =
       mode: ViewerMode;
       gistOwner?: string;
       live?: LiveStatus;
+      quickShare?: QuickShareStatus;
     }
   | { status: "dashboard" }
   | { status: "error"; message: string };
@@ -39,6 +41,14 @@ export interface LiveStatus {
   cursorRowsChanged?: boolean;
   /** Time of the last Cursor diagnostics probe received by the viewer. */
   lastCursorProbe?: number;
+}
+
+export interface QuickShareStatus {
+  state: "connected" | "disconnected" | "ended";
+  viewers: ViewerPresence[];
+  selfVid: string | null;
+  displayName: string;
+  error?: string;
 }
 
 export interface LiveCursorDiagnostics {
@@ -74,6 +84,8 @@ interface LoadResult {
   mode: ViewerMode;
   gistOwner?: string;
   live?: LiveStatus;
+  quickShareClient?: LiveClient;
+  quickShareDisplayName?: string;
 }
 
 /**
@@ -88,6 +100,8 @@ interface LoadResult {
 export function useSessionLoader(): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const liveSourceRef = useRef<EventSource | null>(null);
+  const quickShareClientRef = useRef<LiveClient | null>(null);
+  const quickShareCleanupRef = useRef<(() => void)[]>([]);
   const loadGenerationRef = useRef(0);
 
   const closeLive = useCallback(() => {
@@ -97,9 +111,16 @@ export function useSessionLoader(): LoadState {
     }
   }, []);
 
+  const closeQuickShare = useCallback(() => {
+    for (const cleanup of quickShareCleanupRef.current.splice(0)) cleanup();
+    quickShareClientRef.current?.close();
+    quickShareClientRef.current = null;
+  }, []);
+
   const load = useCallback(() => {
     const generation = ++loadGenerationRef.current;
     closeLive();
+    closeQuickShare();
     setState({ status: "loading" });
 
     // Live mode is special — it streams updates rather than resolving once.
@@ -111,7 +132,10 @@ export function useSessionLoader(): LoadState {
 
     loadSession().then(
       (result) => {
-        if (loadGenerationRef.current !== generation) return;
+        if (loadGenerationRef.current !== generation) {
+          if (result !== "dashboard") result.quickShareClient?.close();
+          return;
+        }
         if (result === "dashboard") {
           setState({ status: "dashboard" });
         } else {
@@ -120,7 +144,43 @@ export function useSessionLoader(): LoadState {
             session: result.session,
             mode: result.mode,
             gistOwner: result.gistOwner,
+            ...(result.quickShareClient && result.quickShareDisplayName
+              ? {
+                  quickShare: {
+                    state: "connected" as const,
+                    viewers: [],
+                    selfVid: null,
+                    displayName: result.quickShareDisplayName,
+                  },
+                }
+              : {}),
           });
+          if (result.quickShareClient && result.quickShareDisplayName) {
+            const client = result.quickShareClient;
+            quickShareClientRef.current = client;
+            const updateQuickShare = (patch: Partial<QuickShareStatus>) => {
+              if (loadGenerationRef.current !== generation) return;
+              setState((current) => {
+                if (current.status !== "ready" || !current.quickShare) return current;
+                return {
+                  ...current,
+                  quickShare: { ...current.quickShare, ...patch },
+                };
+              });
+            };
+            quickShareCleanupRef.current.push(
+              client.onPresence((viewers, selfVid) =>
+                updateQuickShare({ viewers, selfVid, state: "connected", error: undefined }),
+              ),
+              client.onDisconnect((info) =>
+                updateQuickShare({
+                  state: "disconnected",
+                  error: info.reason || "Presence connection lost",
+                }),
+              ),
+              client.onSessionEnded(() => updateQuickShare({ state: "ended" })),
+            );
+          }
         }
       },
       (err) => {
@@ -128,7 +188,7 @@ export function useSessionLoader(): LoadState {
         setState({ status: "error", message: String(err.message || err) });
       },
     );
-  }, [closeLive]);
+  }, [closeLive, closeQuickShare]);
 
   useEffect(() => {
     load();
@@ -137,8 +197,9 @@ export function useSessionLoader(): LoadState {
     return () => {
       window.removeEventListener("popstate", onPopState);
       closeLive();
+      closeQuickShare();
     };
-  }, [load, closeLive]);
+  }, [load, closeLive, closeQuickShare]);
 
   return state;
 }
@@ -295,17 +356,22 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
   const relayBoxId = params.get("relay");
   if (relayBoxId) {
     if (!BOX_ID_RE.test(relayBoxId)) throw new Error("Invalid replay share link");
-    const client = await LiveClient.connect(relayBoxId, "Replay viewer");
+    const displayName = ensureViewerName();
+    const client = await LiveClient.connect(relayBoxId, displayName);
     try {
       const replay = await client.getReplay();
-      return { session: parseReplaySession(replay), mode: "readonly" };
+      return {
+        session: parseReplaySession(replay),
+        mode: "readonly",
+        quickShareClient: client,
+        quickShareDisplayName: displayName,
+      };
     } catch (error) {
+      client.close();
       if (error instanceof Error && error.message === "session-ended") {
         throw new Error("This Quick Share has ended", { cause: error });
       }
       throw error;
-    } finally {
-      client.close();
     }
   }
 

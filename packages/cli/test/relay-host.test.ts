@@ -56,4 +56,44 @@ describe("createRelayHost readiness", () => {
     expect(socket.close).toHaveBeenCalled();
     expect(onPermanentEnd).toHaveBeenCalledTimes(1);
   });
+
+  it("tracks encrypted viewer presence for the local host", async () => {
+    const onPresenceChange = vi.fn();
+    const host = await createRelayHost({
+      relayOrigin: "http://localhost:1",
+      handleCommand: async () => ({ ok: true }),
+      onPresenceChange,
+    });
+    const socket = FakeSocket.instances[0]!;
+    socket.readyState = FakeSocket.OPEN;
+    socket.onopen?.();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        t: "hello-ok",
+        viewers: 1,
+        presence: [{ vid: "viewer-1", name: { iv: "iv", data: "Blue Otter" } }],
+      }),
+    } as MessageEvent);
+    await host.ready;
+    await vi.waitFor(() =>
+      expect(host.viewers()).toEqual([{ id: "viewer-1", name: "Blue Otter" }]),
+    );
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        t: "viewer-joined",
+        via: "viewer-2",
+        viewers: 2,
+        name: { iv: "iv", data: "Wendy" },
+      }),
+    } as MessageEvent);
+    await vi.waitFor(() => expect(host.viewers()).toHaveLength(2));
+
+    socket.onmessage?.({
+      data: JSON.stringify({ t: "viewer-left", via: "viewer-1", viewers: 1 }),
+    } as MessageEvent);
+    await vi.waitFor(() => expect(host.viewers()).toEqual([{ id: "viewer-2", name: "Wendy" }]));
+    expect(onPresenceChange).toHaveBeenCalled();
+    await host.stop();
+  });
 });

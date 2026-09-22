@@ -607,7 +607,17 @@ export class LiveRelay {
           // `viewers` lets a (re)connecting shipper resync its watcher
           // count: viewers that joined while it was away never sent it a
           // join notice. Viewers get `welcome`, never `hello-ok`.
-          this.sendQuietly(ws, JSON.stringify({ t: "hello-ok", viewers: this.viewers().length }));
+          const currentViewers = this.viewers();
+          this.sendQuietly(
+            ws,
+            JSON.stringify({
+              t: "hello-ok",
+              viewers: currentViewers.length,
+              // Still ciphertext: the relay cannot read names. The shipper
+              // owns the fragment key and may decrypt this roster locally.
+              presence: currentViewers.map(({ vid, name }) => ({ vid, name })),
+            }),
+          );
           return;
         }
         // A viewer joining a dead box learns it immediately instead of
@@ -674,7 +684,12 @@ export class LiveRelay {
         if (vm)
           this.sendQuietly(
             vm,
-            JSON.stringify({ t: "viewer-joined", via: vid, viewers: this.viewers().length }),
+            JSON.stringify({
+              t: "viewer-joined",
+              via: vid,
+              viewers: this.viewers().length,
+              name,
+            }),
           );
         return;
       }
@@ -732,6 +747,7 @@ export class LiveRelay {
               t: "viewer-joined",
               via: attachment.vid,
               viewers: this.viewers().length,
+              name: attachment.name ?? null,
             }),
           );
       }

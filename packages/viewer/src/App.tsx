@@ -5,9 +5,11 @@ import LocalChatAssistant from "./components/LocalChatAssistant";
 import Player from "./components/Player";
 import type { ActiveView } from "./components/ViewTabBar";
 import { useOutsideClick } from "./hooks/useOutsideClick";
-import { useSessionLoader } from "./hooks/useSessionLoader";
+import { useSessionLoader, type QuickShareStatus } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
+import { saveViewerName } from "./live/viewer-name";
+import { apiUrl } from "./utils/api";
 
 function getActiveViewFromUrl(): ActiveView {
   const params = new URLSearchParams(window.location.search);
@@ -17,6 +19,131 @@ function getActiveViewFromUrl(): ActiveView {
 }
 
 const CLOUD_API = __CLOUD_API_URL__;
+
+interface AuthorQuickShareStatus {
+  active: boolean;
+  url?: string;
+  startedAt?: string;
+  viewers: Array<{ id: string; name: string }>;
+}
+
+function ViewerQuickShareBadge({ share }: { share: QuickShareStatus }) {
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(share.displayName);
+  const count = share.viewers.length;
+  const connected = share.state === "connected";
+  const label =
+    share.state === "ended" ? "Share ended" : connected ? `${count} viewing` : "Presence offline";
+  return (
+    <details className="relative">
+      <summary className="list-none cursor-pointer inline-flex items-center gap-1.5 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full bg-terminal-purple/10 text-terminal-purple uppercase tracking-wider border border-terminal-purple/20">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-terminal-green" : "bg-terminal-dim"}`}
+        />
+        Quick Share · {label}
+      </summary>
+      <div className="absolute left-0 top-full mt-2 w-64 rounded-xl border border-terminal-border-subtle bg-terminal-surface p-3 shadow-layer-xl z-50 normal-case tracking-normal">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-sans font-semibold text-terminal-text">
+            Shared snapshot
+          </span>
+          <span className="text-[10px] font-mono text-terminal-green">🔒 E2E</span>
+        </div>
+        <p className="mt-1 text-[10px] font-sans text-terminal-dim">
+          Replay content is fixed; viewer presence updates live.
+        </p>
+        <div className="mt-3 space-y-1.5">
+          {share.viewers.length === 0 ? (
+            <div className="text-[11px] font-mono text-terminal-dimmer">
+              No viewers visible right now
+            </div>
+          ) : (
+            share.viewers.map((viewer) => (
+              <div
+                key={viewer.vid}
+                className="flex items-center gap-2 text-xs font-mono text-terminal-dim"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                <span className="truncate">{viewer.name}</span>
+                {viewer.vid === share.selfVid && (
+                  <span className="text-terminal-dimmer">(you)</span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+        {editingName ? (
+          <form
+            className="mt-3 flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveViewerName(nameDraft);
+              window.location.reload();
+            }}
+          >
+            <input
+              value={nameDraft}
+              maxLength={32}
+              onChange={(event) => setNameDraft(event.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-terminal-border-subtle bg-terminal-bg px-2 py-1 text-[11px] font-mono text-terminal-text focus:outline-none focus:border-terminal-green/40"
+              aria-label="Display name"
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-terminal-green-subtle px-2 py-1 text-[10px] font-mono text-terminal-green"
+            >
+              Save
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            className="mt-3 text-[10px] font-mono text-terminal-blue hover:text-terminal-text"
+            onClick={() => {
+              setNameDraft(share.displayName);
+              setEditingName(true);
+            }}
+          >
+            Viewing as {share.displayName} · rename
+          </button>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function AuthorQuickShareBadge({ share }: { share: AuthorQuickShareStatus }) {
+  const count = share.viewers.length;
+  return (
+    <details className="relative">
+      <summary className="list-none cursor-pointer inline-flex items-center gap-1.5 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
+        <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
+        Sharing · {count}
+      </summary>
+      <div className="absolute left-0 top-full mt-2 w-60 rounded-xl border border-terminal-border-subtle bg-terminal-surface p-3 shadow-layer-xl z-50 normal-case tracking-normal">
+        <div className="text-xs font-sans font-semibold text-terminal-text">
+          Quick Share is active
+        </div>
+        <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+          {count === 0 ? "No one is viewing right now" : `${count} viewing now`}
+        </div>
+        {count > 0 && (
+          <div className="mt-2 space-y-1.5">
+            {share.viewers.map((viewer) => (
+              <div
+                key={viewer.id}
+                className="flex items-center gap-2 text-xs font-mono text-terminal-dim"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                <span className="truncate">{viewer.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
 
 function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
   const [auth, setAuth] = useState<{
@@ -247,7 +374,43 @@ export default function App() {
   const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
   const gistOwner = loadState.status === "ready" ? loadState.gistOwner : undefined;
   const live = loadState.status === "ready" ? loadState.live : undefined;
+  const quickShare = loadState.status === "ready" ? loadState.quickShare : undefined;
   const isEditor = viewerMode === "editor";
+  const [authorQuickShare, setAuthorQuickShare] = useState<AuthorQuickShareStatus | null>(null);
+
+  useEffect(() => {
+    if (!isEditor || !session) {
+      setAuthorQuickShare(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      fetch(apiUrl("/api/share/quick"))
+        .then((response) => response.json())
+        .then((data: any) => {
+          if (cancelled) return;
+          setAuthorQuickShare(
+            data?.active
+              ? {
+                  active: true,
+                  url: data.url,
+                  startedAt: data.startedAt,
+                  viewers: Array.isArray(data.viewers) ? data.viewers : [],
+                }
+              : null,
+          );
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 2000);
+    window.addEventListener("vibe-quick-share-change", refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("vibe-quick-share-change", refresh);
+    };
+  }, [isEditor, session]);
 
   const [activeView, setActiveView] = useState<ActiveView>(getActiveViewFromUrl());
   const returnToLandingRef = useRef<(() => void) | null>(null);
@@ -439,6 +602,10 @@ export default function App() {
                   : live.error || "Reconnecting..."}
               </span>
             </span>
+          )}
+          {quickShare && <ViewerQuickShareBadge share={quickShare} />}
+          {isEditor && authorQuickShare?.active && (
+            <AuthorQuickShareBadge share={authorQuickShare} />
           )}
         </div>
 
