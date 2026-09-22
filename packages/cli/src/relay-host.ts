@@ -166,12 +166,19 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
   keepaliveTimer.unref?.();
 
   let commandChain: Promise<void> = Promise.resolve();
+  let presenceChain: Promise<void> = Promise.resolve();
   const viewerPresence = new Map<string, string>();
 
   const snapshotViewers = (): RelayHostViewer[] =>
     [...viewerPresence.entries()].map(([id, name]) => ({ id, name }));
 
   const emitPresence = (): void => options.onPresenceChange?.(snapshotViewers());
+
+  const queuePresence = (fn: () => Promise<void> | void): Promise<void> => {
+    const run = presenceChain.then(fn);
+    presenceChain = run.catch(() => {});
+    return run;
+  };
 
   const decryptViewerName = async (value: unknown): Promise<string> => {
     if (
@@ -221,31 +228,41 @@ export async function createRelayHost(options: RelayHostOptions): Promise<RelayH
       return;
     }
     if (outer.t === "hello-ok") {
-      if (Array.isArray(outer.presence)) {
-        viewerPresence.clear();
-        for (const item of outer.presence) {
-          if (typeof item !== "object" || item === null) continue;
-          const id = (item as Record<string, unknown>).vid;
-          if (typeof id !== "string") continue;
-          viewerPresence.set(
-            id.slice(0, 64),
-            await decryptViewerName((item as Record<string, unknown>).name),
-          );
+      await queuePresence(async () => {
+        if (Array.isArray(outer.presence)) {
+          const nextPresence = new Map<string, string>();
+          for (const item of outer.presence) {
+            if (typeof item !== "object" || item === null) continue;
+            const id = (item as Record<string, unknown>).vid;
+            if (typeof id !== "string") continue;
+            nextPresence.set(
+              id.slice(0, 64),
+              await decryptViewerName((item as Record<string, unknown>).name),
+            );
+          }
+          viewerPresence.clear();
+          for (const [id, name] of nextPresence) viewerPresence.set(id, name);
+          emitPresence();
         }
-        emitPresence();
-      }
-      settleReady();
+        settleReady();
+      });
       return;
     }
     if (outer.t === "viewer-joined" && typeof outer.via === "string") {
-      viewerPresence.set(outer.via.slice(0, 64), await decryptViewerName(outer.name));
-      emitPresence();
+      const via = outer.via;
+      await queuePresence(async () => {
+        viewerPresence.set(via.slice(0, 64), await decryptViewerName(outer.name));
+        emitPresence();
+      });
       return;
     }
     if (outer.t === "viewer-left" && typeof outer.via === "string") {
-      viewerPresence.delete(outer.via);
-      emitPresence();
-      options.onViewerLeft?.(outer.via);
+      const via = outer.via;
+      await queuePresence(() => {
+        viewerPresence.delete(via);
+        emitPresence();
+        options.onViewerLeft?.(via);
+      });
       return;
     }
     if (outer.t === "session-ended") {

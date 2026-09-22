@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const cryptoState = vi.hoisted(() => ({
+  decrypt: vi.fn(async (_key: unknown, _boxId: string, frame: { data: string }) => frame.data),
+}));
+
 vi.mock("../src/relay-crypto.js", () => ({
-  decryptFrame: async (_key: unknown, _boxId: string, frame: { data: string }) => frame.data,
+  decryptFrame: cryptoState.decrypt,
   encryptFrame: async (_key: unknown, _boxId: string, plaintext: string) => ({
     iv: "mock-iv",
     data: plaintext,
@@ -36,6 +40,10 @@ const { createRelayHost, RELAY_STARTUP_TIMEOUT_MS } = await import("../src/relay
 afterEach(() => {
   vi.useRealTimers();
   FakeSocket.instances = [];
+  cryptoState.decrypt.mockReset();
+  cryptoState.decrypt.mockImplementation(
+    async (_key: unknown, _boxId: string, frame: { data: string }) => frame.data,
+  );
 });
 
 describe("createRelayHost readiness", () => {
@@ -94,6 +102,46 @@ describe("createRelayHost readiness", () => {
     } as MessageEvent);
     await vi.waitFor(() => expect(host.viewers()).toEqual([{ id: "viewer-2", name: "Wendy" }]));
     expect(onPresenceChange).toHaveBeenCalled();
+    await host.stop();
+  });
+
+  it("does not resurrect a viewer that leaves while their name is decrypting", async () => {
+    let releaseName: ((value: string) => void) | undefined;
+    cryptoState.decrypt.mockImplementation(
+      async (_key: unknown, _boxId: string, frame: { data: string }) => {
+        if (frame.data !== "slow-name") return frame.data;
+        return await new Promise<string>((resolve) => {
+          releaseName = resolve;
+        });
+      },
+    );
+    const host = await createRelayHost({
+      relayOrigin: "http://localhost:1",
+      handleCommand: async () => ({ ok: true }),
+    });
+    const socket = FakeSocket.instances[0]!;
+    socket.readyState = FakeSocket.OPEN;
+    socket.onopen?.();
+    socket.onmessage?.({
+      data: JSON.stringify({ t: "hello-ok", viewers: 0, presence: [] }),
+    } as MessageEvent);
+    await host.ready;
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        t: "viewer-joined",
+        via: "viewer-slow",
+        viewers: 1,
+        name: { iv: "iv", data: "slow-name" },
+      }),
+    } as MessageEvent);
+    socket.onmessage?.({
+      data: JSON.stringify({ t: "viewer-left", via: "viewer-slow", viewers: 0 }),
+    } as MessageEvent);
+
+    await vi.waitFor(() => expect(releaseName).toBeTypeOf("function"));
+    releaseName!("Slow Viewer");
+    await vi.waitFor(() => expect(host.viewers()).toEqual([]));
     await host.stop();
   });
 });
