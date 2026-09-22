@@ -83,6 +83,9 @@ vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
 
 const { startRelay } = await import("../src/relay.js");
 
+const startTestRelay = () =>
+  startRelay({ relayOrigin: "http://localhost:1", installSignalHandlers: false });
+
 afterEach(() => {
   FakeSocket.instances = [];
   providerState.scenes = [];
@@ -99,7 +102,7 @@ async function waitFor(fn: () => boolean, label: string): Promise<void> {
 
 describe("shipper viewer routing", () => {
   it("echoes the relay's `via` tag on command responses", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -121,7 +124,7 @@ describe("shipper viewer routing", () => {
   });
 
   it("echoes `via` on error responses too", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -142,7 +145,7 @@ describe("shipper viewer routing", () => {
   });
 
   it("omits `via` when the inbound frame had none (legacy single viewer)", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -163,7 +166,7 @@ describe("shipper viewer routing", () => {
 
   it("shares one tail poll loop between two viewers, keyed by `via`", async () => {
     providerState.discoverCalls = 0;
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -200,7 +203,7 @@ describe("shipper viewer routing", () => {
 
   it("drops a departed viewer's tails on `viewer-left`", async () => {
     providerState.discoverCalls = 0;
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -244,7 +247,7 @@ describe("shipper chunked responses", () => {
       i,
       pad: "x".repeat(1000),
     }));
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -282,7 +285,7 @@ describe("shipper chunked responses", () => {
   });
 
   it("still sends small responses as a single unchunked frame", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -315,7 +318,7 @@ describe("shipper chunked responses (UTF-8 bytes)", () => {
       i,
       pad: "中".repeat(300),
     }));
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -362,7 +365,7 @@ describe("shipper dead-box retry exit", () => {
   }
 
   it("exits instead of retrying forever once a once-live box is certainly dead", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!(); // the box was live once
@@ -388,7 +391,7 @@ describe("shipper dead-box retry exit", () => {
   });
 
   it("keeps retrying when it never connected (the relay may not be up yet)", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     // Never opens: no box existed yet, so there is nothing to declare dead.
@@ -413,7 +416,7 @@ describe("shipper dead-box retry exit", () => {
   });
 
   it("a short outage keeps retrying with the same box id", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -435,7 +438,7 @@ describe("shipper dead-box retry exit", () => {
     // Regression: the outage clock used to start when the connection was
     // *established*, so a deploy blip on a 9-minute-old connection exited
     // immediately instead of riding the normal reconnect path.
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -475,7 +478,7 @@ describe("shipper hello gating", () => {
       logs.push(args.map(String).join(" "));
     };
     try {
-      void startRelay({ relayOrigin: "http://localhost:1" });
+      void startTestRelay();
       await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
       const sock = FakeSocket.instances[0]!;
       sock.onopen!();
@@ -498,7 +501,7 @@ describe("shipper hello gating", () => {
 
 describe("shipper list summaries", () => {
   it("ships the shared RelaySessionSummary fields (filter/card data)", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[0]!;
     sock.onopen!();
@@ -540,7 +543,7 @@ describe("shipper list summaries", () => {
   });
 
   it("truncates each prompt preview so one huge prompt can't blow the frame budget", async () => {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
     sock.onopen!();
@@ -578,7 +581,7 @@ describe("shipper viewer presence", () => {
   }
 
   async function connectedShipper(viewers?: number): Promise<FakeSocket> {
-    void startRelay({ relayOrigin: "http://localhost:1" });
+    void startTestRelay();
     await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
     const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
     sock.onopen!();

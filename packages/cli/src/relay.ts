@@ -17,21 +17,19 @@
  */
 
 import { statSync } from "node:fs";
-import {
-  decryptFrame,
-  encryptFrame,
-  exportKeyString,
-  generateContentKey,
-  randomBoxId,
-  type EncryptedFrame,
-} from "./relay-crypto.js";
 import { getAllProviders, deduplicateSessionsByProvider } from "./providers/index.js";
+import {
+  createRelayTransport,
+  DEFAULT_RELAY_ORIGIN,
+  RELAY_MAX_FRAME_BYTES,
+  type RelayTransportHandle,
+} from "./relay-transport.js";
 import { transformToReplay } from "./transform.js";
 import { CLI_VERSION } from "./version.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import type { RelaySessionSummary } from "@vibe-replay/types";
 
-export const DEFAULT_RELAY_ORIGIN = "https://vibe-replay.com";
+export { DEFAULT_RELAY_ORIGIN };
 
 /** Allowlisted read-only commands. Anything else is rejected. */
 const ALLOWED_COMMANDS = new Set(["list", "get", "search", "tail", "untail", "ping"]);
@@ -39,11 +37,6 @@ const ALLOWED_COMMANDS = new Set(["list", "get", "search", "tail", "untail", "pi
 const SEARCH_SESSION_CAP = 40;
 const SEARCH_SNIPPET_CHARS = 160;
 const TAIL_POLL_MS = 2000;
-const MAX_FRAME_BYTES = 4 * 1024 * 1024;
-/** Plaintext bytes per chunk of a chunked command response. */
-const CHUNK_PLAINTEXT_BYTES = 512 * 1024;
-/** Hard cap: 64 chunks × 512 KiB = 32 MiB per command response. */
-const MAX_CHUNKS = 64;
 /** Max sessions with an active live-tail poll loop (shared by all viewers). */
 const MAX_TAILS = 8;
 /** Re-resolve a tailed session's files this often — /resume continuations
@@ -196,33 +189,11 @@ interface TailState {
 
 export interface RelayOptions {
   relayOrigin?: string;
+  /** CLI entrypoints install SIGINT/SIGTERM handlers; tests/embedders may opt out. */
+  installSignalHandlers?: boolean;
 }
 
 export async function startRelay(options: RelayOptions = {}): Promise<void> {
-  const origin = (options.relayOrigin ?? DEFAULT_RELAY_ORIGIN).replace(/\/$/, "");
-  // The viewer page is the trust anchor for browser-side E2EE: the content key
-  // lives in the URL fragment, so a cleartext non-loopback origin would let an
-  // on-path attacker swap the viewer page and steal the key before AES-GCM
-  // ever protects the relay frames.
-  {
-    const u = new URL(origin);
-    const loopback =
-      u.hostname === "localhost" ||
-      u.hostname === "127.0.0.1" ||
-      u.hostname === "[::1]" ||
-      u.hostname === "::1";
-    if (u.protocol === "http:" && !loopback) {
-      throw new Error(
-        `refusing cleartext relay origin ${origin}: use https (http://localhost is allowed for local testing)`,
-      );
-    }
-  }
-  const boxId = randomBoxId();
-  const { key, raw } = await generateContentKey();
-  const keyString = exportKeyString(raw);
-  const wsUrl = `${origin.replace(/^http/, "ws")}/live/${boxId}`;
-  const shareUrl = `${origin}/live/${boxId}#${keyString}`;
-
   const tails = new Map<string, TailState>();
   /**
    * Viewer presence as the relay reports it. A current relay sends an
@@ -234,8 +205,8 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
    * leave is still reported (and still clears tail state), but without a
    * count, so the console never presents a fabricated "0 watching".
    * `viewerVias` only dedupes join prints. Viewer display names travel as
-   * AES-GCM ciphertext the shipper cannot decrypt — counts only, never
-   * names.
+   * AES-GCM ciphertext; this multi-session relay intentionally does not
+   * decrypt or display them, so its operator UI remains count-only.
    */
   const viewerVias = new Set<string>();
   let viewerCount = 0;
@@ -248,129 +219,9 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
    */
   let hasAuthoritativeCount = false;
   const pluralViewers = (n: number): string => `${n} viewer${n === 1 ? "" : "s"}`;
-  let ws: WebSocket | null = null;
-  let stopped = false;
-  /**
-   * Resolves when the relay acks our first hello. The share URL is printed
-   * only after this: the relay's durable "this box had a shipper" write has
-   * landed by then, so no viewer can ever open the URL first and lose a
-   * race against the shipper's hello.
-   */
-  let resolveHelloOk!: () => void;
-  const helloOk = new Promise<void>((resolve) => {
-    resolveHelloOk = resolve;
-  });
-  let reconnectDelayMs = 2000;
-  /**
-   * Whether the shipper ever held a working relay connection. The relay
-   * declares a shipperless box dead after 90 s, so an outage far past that
-   * means this box id can never come back: retrying it forever is
-   * pointless. Past the threshold the shipper exits so the
-   * supervisor/watchdog mints a fresh URL. A shipper that never connected
-   * keeps retrying — the relay may simply not be up yet.
-   *
-   * The outage clock starts when a live connection DROPS, not when it was
-   * established: a transient blip (deploy restart, proxy hiccup) on a
-   * long-lived connection must ride the normal reconnect/backoff path,
-   * not exit immediately because the connection was old.
-   */
-  let everConnected = false;
-  /** When the current outage began (0 = connected or never dropped). */
-  let outageBeganAt = 0;
-  const DEAD_BOX_RETRY_EXIT_MS = 150_000;
-
-  /** Returns false when the socket is down or the frame is oversized — the
-   *  caller decides whether to retry or send a smaller correlated error.
-   *  `via` is the relay-visible routing tag: the relay attaches the
-   *  requesting viewer's id to inbound frames, the shipper echoes it back,
-   *  and the relay routes the reply to that viewer. Omitted for
-   *  viewer-independent traffic (keepalive), which the relay broadcasts. */
-  const sendFrame = async (payload: unknown, via?: string): Promise<boolean> => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    const frame: EncryptedFrame = await encryptFrame(key, boxId, JSON.stringify(payload));
-    const outer = JSON.stringify({ t: "frame", ...frame, ...(via ? { via } : {}) });
-    // Measured in UTF-8 bytes like the relay does: outer.length counts
-    // UTF-16 code units and would let multi-byte text slip a >4MiB frame
-    // past this gate (the relay would then kill the socket with 1009).
-    if (Buffer.byteLength(outer, "utf8") > MAX_FRAME_BYTES) return false;
-    try {
-      ws.send(outer);
-    } catch {
-      return false;
-    }
-    return true;
-  };
-
-  /**
-   * Split a command response that doesn't fit one frame into individually
-   * encrypted chunks. Each chunk carries `{seq, chunk, chunks, data}` inside
-   * its encrypted payload (the relay strips any outer plaintext beyond
-   * iv/data/via, so chunk metadata must live inside the ciphertext); the
-   * viewer reassembles by seq. Chunks are measured in UTF-8 bytes and split
-   * on code-point boundaries, so multi-byte text is never torn
-   * mid-character. Keeps every frame far under MAX_FRAME_BYTES
-   * no matter how large a session is.
-   */
-  const sendChunked = async (payload: Record<string, unknown>, via?: string): Promise<boolean> => {
-    const json = JSON.stringify(payload);
-    // Measured in UTF-8 bytes (not UTF-16 code units) and split on
-    // code-point boundaries, so multi-byte text is never torn mid-character
-    // and the documented size cap holds for non-ASCII transcripts too.
-    const parts: string[] = [];
-    let cur = "";
-    let curBytes = 0;
-    for (const ch of json) {
-      // UTF-8 byte length of one code point via arithmetic (far cheaper
-      // than Buffer.byteLength per character on multi-MB payloads).
-      const cp = ch.codePointAt(0) as number;
-      const b = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
-      if (curBytes + b > CHUNK_PLAINTEXT_BYTES && cur.length > 0) {
-        parts.push(cur);
-        cur = "";
-        curBytes = 0;
-      }
-      cur += ch;
-      curBytes += b;
-    }
-    if (cur.length > 0) parts.push(cur);
-    if (parts.length === 0 || parts.length > MAX_CHUNKS) return false;
-    for (let i = 0; i < parts.length; i++) {
-      const ok = await sendFrame(
-        { seq: payload.seq, chunk: i, chunks: parts.length, data: parts[i] },
-        via,
-      );
-      if (!ok) return false;
-    }
-    return true;
-  };
-
-  /**
-   * Deliver a command response: one frame when it fits, chunked when it
-   * doesn't, and a small correlated error only when even chunking can't
-   * deliver it — so the viewer never waits out the full timeout on a
-   * dropped reply.
-   */
-  const sendResponse = async (payload: Record<string, unknown>, via?: string): Promise<void> => {
-    if (await sendFrame(payload, via)) return;
-    if (await sendChunked(payload, via)) return;
-    await sendFrame({ seq: payload.seq, ok: false, error: "response too large to relay" }, via);
-  };
-
-  /**
-   * Idle WebSocket connections get reaped by middleboxes (the egress proxy
-   * kills ours after ~5 minutes of silence), which makes every viewer that
-   * loads during the reconnect window hang until its command times out.
-   * Send a tiny encrypted no-op frame on a timer to keep the path alive.
-   * The relay drops it when no viewer is attached; a connected viewer
-   * decrypts it and ignores the unknown payload. Never goes through cmd()
-   * (no seq, no pending entry) — it is one-way traffic, not a request.
-   */
-  const KEEPALIVE_MS = 45_000;
-  const keepaliveTimer = setInterval(() => {
-    void sendFrame({ keepalive: true });
-  }, KEEPALIVE_MS);
-  // Don't hold the process open for the timer alone (Ctrl+C path aside).
-  keepaliveTimer.unref?.();
+  let transport: RelayTransportHandle | null = null;
+  const sendFrame = (payload: unknown, via?: string): Promise<boolean> =>
+    transport ? transport.sendFrame(payload, via) : Promise.resolve(false);
 
   /** Unsubscribe one viewer (or everyone when `via` is omitted, e.g. shutdown). */
   const stopTail = (sessionId: string, via?: string): void => {
@@ -449,7 +300,7 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
           if (results.every(Boolean)) {
             tail.sceneCount = current.scenes.length;
             tail.dirty = false;
-          } else if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_FRAME_BYTES) {
+          } else if (Buffer.byteLength(JSON.stringify(payload), "utf8") > RELAY_MAX_FRAME_BYTES) {
             // Oversized batches can never be delivered; skip with a visible
             // gap marker instead of retrying forever.
             tail.sceneCount = current.scenes.length;
@@ -540,231 +391,121 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
     }
   };
 
-  // Serialize command handling: concurrent parse/discovery work from
-  // several viewers has no backpressure otherwise.
-  let commandChain: Promise<void> = Promise.resolve();
-
-  const onMessage = async (event: MessageEvent): Promise<void> => {
-    let outer: Record<string, unknown>;
-    try {
-      outer = JSON.parse(typeof event.data === "string" ? event.data : "{}");
-    } catch {
-      return;
-    }
-    // The relay acks our hello once the box claim (and its durable write)
-    // has landed. The share URL is printed only after this ack, so a
-    // viewer can never open the URL before the relay knows the shipper —
-    // an opener can never race the shipper's first hello into a false
-    // "session ended". (Acks on reconnects are harmless no-ops.)
-    if (outer.t === "hello-ok") {
-      resolveHelloOk();
-      // The relay reports the absolute viewer count, so a reconnecting
-      // shipper resyncs instead of showing a stale count.
-      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
+  const handleControl = (message: Record<string, unknown>): void => {
+    if (message.t === "hello-ok") {
+      if (typeof message.viewers === "number" && Number.isFinite(message.viewers)) {
         viewerVias.clear();
-        viewerCount = Math.max(0, Math.floor(outer.viewers));
+        viewerCount = Math.max(0, Math.floor(message.viewers));
         hasAuthoritativeCount = true;
         if (viewerCount > 0) {
           console.log(`  → ${pluralViewers(viewerCount)} already watching`);
         }
       } else {
-        // Legacy relay (or a rollback / mixed-version deployment): the ack
-        // carries no snapshot, so any count authority from a previous
-        // connection is stale — start a fresh unknown-count epoch instead
-        // of printing an old count for an audience that may have changed
-        // during the outage.
         viewerVias.clear();
         viewerCount = 0;
         hasAuthoritativeCount = false;
       }
       return;
     }
-    // Plaintext relay control: a viewer joined. Track the watcher count so
-    // the operator can see someone is watching. Older relays never send
-    // this; older shippers ignore the unknown `t` without dropping the
-    // connection — backward compatible both ways.
-    if (outer.t === "viewer-joined" && typeof outer.via === "string") {
-      // The relay's absolute count is authoritative — apply it even for a
-      // vid we already track. A viewer that went stale and revived rejoins
-      // with the true count (e.g. another viewer joined while it was
-      // stale); discarding the notice as a "duplicate" would freeze the
-      // console on the undercount indefinitely. Only the connected log
-      // line is deduplicated, never the count.
-      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
-        viewerCount = Math.max(0, Math.floor(outer.viewers));
+
+    if (message.t === "viewer-joined" && typeof message.via === "string") {
+      const via = message.via;
+      if (typeof message.viewers === "number" && Number.isFinite(message.viewers)) {
+        viewerCount = Math.max(0, Math.floor(message.viewers));
         hasAuthoritativeCount = true;
-      } else if (!viewerVias.has(outer.via)) {
-        // Relays that predate the count field: +1 per untracked join.
+      } else if (!viewerVias.has(via)) {
         viewerCount += 1;
       }
-      if (!viewerVias.has(outer.via)) {
-        viewerVias.add(outer.via);
+      if (!viewerVias.has(via)) {
+        viewerVias.add(via);
         console.log(`  → viewer connected (${viewerCount} watching)`);
       }
       return;
     }
-    // Plaintext relay control: a viewer left. Drop its id from every tail
-    // fan-out; tails with no subscribers left stop their poll loop. Also
-    // update the watcher count display.
-    if (outer.t === "viewer-left" && typeof outer.via === "string") {
-      for (const id of tails.keys()) stopTail(id, outer.via);
-      const tracked = viewerVias.delete(outer.via);
-      if (typeof outer.viewers === "number" && Number.isFinite(outer.viewers)) {
-        // Absolute count from the relay is authoritative — never decrement
-        // a snapshot that may not have included this viewer (e.g. a stale
-        // viewer reaped after a shipper reconnect).
-        viewerCount = Math.max(0, Math.floor(outer.viewers));
+
+    if (message.t === "viewer-left" && typeof message.via === "string") {
+      const via = message.via;
+      for (const id of tails.keys()) stopTail(id, via);
+      const tracked = viewerVias.delete(via);
+      if (typeof message.viewers === "number" && Number.isFinite(message.viewers)) {
+        viewerCount = Math.max(0, Math.floor(message.viewers));
         hasAuthoritativeCount = true;
         console.log(`  → viewer left (${viewerCount} watching)`);
       } else if (tracked) {
-        // Only decrement for a join we actually tracked; the leave then
-        // carries a real transition, not a fabricated zero.
         viewerCount = Math.max(0, viewerCount - 1);
         console.log(`  → viewer left (${viewerCount} watching)`);
       } else if (hasAuthoritativeCount) {
-        // The relay gave us an absolute count before but omitted it on
-        // this notice — keep the last known count, never drift it down
-        // for an unattributed leave.
         console.log(`  → viewer left (${viewerCount} watching)`);
       } else {
-        // Legacy relay: hello-ok carried no count and such a relay only
-        // ever sends viewer-left, so there is no honest count to show —
-        // report the disconnect without inventing "0 watching".
         console.log("  → viewer left");
       }
-      return;
     }
-    // The relay declared this box dead (we were swept as a ghost, or a
-    // duplicate shipper took over). This URL will never work again —
-    // exit so the supervisor/watchdog restarts with a fresh URL instead
-    // of sitting on a dead box id.
-    if (outer.t === "session-ended") {
-      console.log("\n  ✕ The relay ended this session (box expired). This URL is dead.");
-      console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
-      stopped = true;
-      try {
-        ws?.close(1000, "box ended");
-      } catch {
-        // ignore
-      }
-      process.exit(0);
-    }
-    if (outer.t !== "frame" || typeof outer.iv !== "string" || typeof outer.data !== "string")
-      return; // Relay-visible routing tag: which viewer sent this frame. Echoed back on
-    // the response so the relay can route it to the right viewer.
-    const via = typeof outer.via === "string" ? outer.via : undefined;
-    let inner: Record<string, unknown>;
-    try {
-      inner = JSON.parse(await decryptFrame(key, boxId, { iv: outer.iv, data: outer.data }));
-    } catch {
-      return; // not for us — ignore
-    }
-    const run = commandChain.then(async () => {
-      const response = await handleCommand(inner, via);
-      await sendResponse(response, via);
-    });
-    commandChain = run.catch(() => {});
-    await run;
   };
 
-  const connect = (): void => {
-    if (stopped) return;
-    const socket = new WebSocket(wsUrl);
-    ws = socket;
-    socket.onopen = () => {
-      reconnectDelayMs = 2000;
-      everConnected = true;
-      outageBeganAt = 0;
-      socket.send(JSON.stringify({ t: "hello", role: "vm" }));
-      console.log("  ✓ Connected to relay. Waiting for viewer…\n");
-    };
-    socket.onmessage = (event) => void onMessage(event);
-    socket.onclose = (ev) => {
-      if (stopped) return;
-      // The relay ended the box (goodbye raced a zombie, or the sweep
-      // declared us a ghost): reconnecting with this box id can never work.
-      // Exit instead of retrying so the supervisor restarts with a new URL.
-      const reason = typeof ev?.reason === "string" ? ev.reason : "";
-      if (reason === "session ended" || reason === "box ended") {
-        console.log("\n  ✕ The relay ended this session. This URL is dead.");
-        console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
-        stopped = true;
-        process.exit(0);
-      }
-      // We once had this box, but the relay has been unreachable far past
-      // its 90 s end grace: this box id is dead for good. Exit so the
-      // supervisor restarts with a fresh URL instead of pointlessly
-      // retrying a box id the relay will only ever reject as a zombie.
-      // The outage clock starts when the connection DROPS: a transient blip
-      // on a long-lived connection rides the normal retry path below.
-      if (everConnected) {
-        if (outageBeganAt === 0) outageBeganAt = Date.now();
-        if (Date.now() - outageBeganAt > DEAD_BOX_RETRY_EXIT_MS) {
-          const goneSec = Math.round((Date.now() - outageBeganAt) / 1000);
-          console.log(`\n  ✕ Relay unreachable for ${goneSec}s — this box id is dead.`);
-          console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
-          stopped = true;
-          process.exit(0);
-        }
-      }
-      console.log(`  ↻ Relay connection lost — retrying in ${reconnectDelayMs / 1000}s…`);
-      setTimeout(connect, reconnectDelayMs);
-      reconnectDelayMs = Math.min(30000, reconnectDelayMs * 2);
-    };
-    socket.onerror = () => {
-      try {
-        socket.close();
-      } catch {
-        // handled by onclose
-      }
-    };
-  };
-
-  const shutdown = (): void => {
-    stopped = true;
-    clearInterval(keepaliveTimer);
+  const stopTails = (): void => {
     for (const id of tails.keys()) stopTail(id);
-    // Tell the relay the box is dead so viewers see "session ended"
-    // immediately instead of waiting for the end grace. Best-effort: the
-    // grace path covers a lost goodbye.
-    try {
-      ws?.send(JSON.stringify({ t: "goodbye", role: "vm" }));
-    } catch {
-      // socket not open — the grace path covers this
+  };
+
+  const exitForDeadBox = (reason: string): void => {
+    stopTails();
+    if (reason.startsWith("relay unreachable for ")) {
+      const seconds = reason.slice("relay unreachable for ".length);
+      console.log(`\n  ✕ Relay unreachable for ${seconds} — this box id is dead.`);
+    } else {
+      console.log("\n  ✕ The relay ended this session. This URL is dead.");
     }
+    console.log("  Exiting — restart `vibe-relay relay` to mint a new URL.\n");
+    process.exit(0);
   };
-  const exitAfterFlush = (): void => {
-    // Give the goodbye a beat to flush before the socket closes.
-    setTimeout(() => {
-      try {
-        ws?.close(1000, "shutdown");
-      } catch {
-        // ignore
-      }
-      process.exit(0);
-    }, 300);
-  };
-  process.on("SIGINT", () => {
-    console.log("\n  Relay stopped. The share URL is now dead.\n");
-    shutdown();
-    exitAfterFlush();
-  });
-  process.on("SIGTERM", () => {
-    console.log("\n  Relay stopping (SIGTERM). The share URL is now dead.\n");
-    shutdown();
-    exitAfterFlush();
-  });
 
   console.log(`\n  ${"vibe-replay relay"} — E2E-encrypted live session sharing\n`);
   console.log("  Connecting to relay…");
-  connect();
+  transport = await createRelayTransport({
+    relayOrigin: options.relayOrigin ?? DEFAULT_RELAY_ORIGIN,
+    handleCommand,
+    onControl: handleControl,
+    onPermanentEnd: exitForDeadBox,
+    onConnectionChange: (state, detail) => {
+      if (state === "connected") {
+        console.log("  ✓ Connected to relay. Waiting for viewer…\n");
+      } else if (state === "retrying") {
+        console.log(`  ↻ Relay connection lost — retrying in ${Number(detail) / 1000}s…`);
+      }
+    },
+    // The relay CLI historically keeps trying until its first successful
+    // connection. Only Quick Share uses a bounded startup timeout.
+    startupTimeoutMs: null,
+    goodbyeFlushMs: 300,
+  });
+
+  let shuttingDown = false;
+  const shutdown = (message: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(message);
+    stopTails();
+    void transport?.stop().finally(() => process.exit(0));
+  };
+  if (options.installSignalHandlers !== false) {
+    process.once("SIGINT", () => shutdown("\n  Relay stopped. The share URL is now dead.\n"));
+    process.once("SIGTERM", () =>
+      shutdown("\n  Relay stopping (SIGTERM). The share URL is now dead.\n"),
+    );
+  }
+
   // The URL is only real once the relay has acked our hello: until then no
   // viewer could reach this box anyway, and printing earlier would let a
-  // fast opener race the shipper's first hello. If the relay is down, this
-  // simply waits — connect() keeps retrying in the background.
-  await helloOk;
+  // fast opener race the shipper's first hello.
+  try {
+    await transport.ready;
+  } catch {
+    // Permanent-end handling above exits the relay process. Keep the wrapper
+    // from surfacing a second unhandled readiness rejection while that exit
+    // path is running (tests replace process.exit with a throwing stub).
+    return;
+  }
   console.log("  Share this URL (it contains the encryption key — treat it like a password):");
-  console.log(`\n  ${shareUrl}\n`);
+  console.log(`\n  ${transport.shareUrl}\n`);
   console.log("  The relay only forwards ciphertext; it can never read your sessions.");
   console.log("  Press Ctrl+C to stop — the URL dies immediately.\n");
   // Keep the process alive; the WS + timers hold the event loop.
