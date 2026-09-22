@@ -28,11 +28,19 @@ interface SessionOutputRouteDeps {
   loadSession: (slug: string, targetId?: string) => Promise<ReplaySession>;
 }
 
+export interface SessionOutputRouteHandle {
+  stopQuickShares: () => Promise<void>;
+}
+
 /** Session metadata, publishing, and export routes. */
-export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteDeps): void {
+export function registerSessionOutputRoutes(
+  app: Hono,
+  deps: SessionOutputRouteDeps,
+): SessionOutputRouteHandle {
   const { baseDir, loadSession } = deps;
   const quickShares = new Map<string, QuickReplayShare>();
   const quickShareCreates = new Map<string, Promise<QuickReplayShare>>();
+  let stopping = false;
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
 
   const loadShareableSession = async (slug: string, targetId?: string) => {
@@ -46,16 +54,11 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
   // Ephemeral E2E share. The replay stays on this machine; Cloudflare only
   // relays encrypted frames. One active share per replay is idempotent until
   // the user stops it or the relay declares the box permanently ended.
-  app.get("/api/share/quick", async (c) => {
+  app.get("/api/share/quick", (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
-    try {
-      await loadSession(result.slug, targetId);
-    } catch {
-      return c.json({ error: "session not found" }, 404);
-    }
     const share = quickShares.get(quickShareKey(result.slug, targetId));
     return c.json(
       share
@@ -76,6 +79,7 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
+    if (stopping) return c.json({ error: "server shutting down" }, 503);
     const key = quickShareKey(result.slug, targetId);
     const existing = quickShares.get(key);
     if (existing) {
@@ -103,6 +107,10 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
             },
           });
           activeShare.boxId = created.boxId;
+          if (stopping) {
+            await created.stop();
+            throw new Error("server shutting down");
+          }
           quickShares.set(key, created);
           return created;
         })();
@@ -460,4 +468,13 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
       return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
+
+  return {
+    stopQuickShares: async () => {
+      stopping = true;
+      const active = [...new Set(quickShares.values())];
+      quickShares.clear();
+      await Promise.allSettled(active.map((share) => share.stop()));
+    },
+  };
 }

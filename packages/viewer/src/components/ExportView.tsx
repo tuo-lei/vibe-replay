@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { ViewerMode } from "../hooks/useSessionLoader";
+import { parseQuickShareInfo, type QuickShareInfo } from "../quick-share";
 import type { ReplaySession } from "../types";
 import { apiUrl } from "../utils/api";
 import { exportExecutableFeedback } from "../utils/feedback-export";
@@ -16,6 +17,8 @@ interface Props {
   viewerMode: ViewerMode;
   readOnly: boolean;
   session?: ReplaySession;
+  quickShareInfo: QuickShareInfo | null;
+  onQuickShareInfoChange: (info: QuickShareInfo | null) => void;
 }
 
 interface GistInfo {
@@ -113,7 +116,14 @@ function FilePath({ label, path }: { label: string; path: string }) {
   );
 }
 
-export default function ExportView({ actions, viewerMode, readOnly, session }: Props) {
+export default function ExportView({
+  actions,
+  viewerMode,
+  readOnly,
+  session,
+  quickShareInfo,
+  onQuickShareInfoChange,
+}: Props) {
   const {
     hasUnsaved,
     canSaveHtml,
@@ -145,13 +155,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [cloudStatus, setCloudStatus] = useState<Status>(null);
   const [quickSharing, setQuickSharing] = useState(false);
   const [quickShareStatus, setQuickShareStatus] = useState<Status>(null);
-  const [quickShareInfo, setQuickShareInfo] = useState<{
-    url: string;
-    sizeBytes: number;
-    maxBytes: number;
-    startedAt?: string;
-    viewers: Array<{ id: string; name: string }>;
-  } | null>(null);
   const [cloudInfo, setCloudInfo] = useState<{
     id: string;
     url: string;
@@ -326,36 +329,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     }
   }, [isEditor, publishGist, exportGithub, cloudFetch, refreshAuthAndCloudData]);
 
-  useEffect(() => {
-    if (!isEditor || !session) return;
-    let cancelled = false;
-    const refresh = () => {
-      fetch(apiUrl("/api/share/quick"))
-        .then((r) => r.json())
-        .then((data: any) => {
-          if (cancelled) return;
-          if (data?.active && data?.url) {
-            setQuickShareInfo({
-              url: data.url,
-              sizeBytes: data.sizeBytes ?? replaySize,
-              maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
-              startedAt: data.startedAt,
-              viewers: Array.isArray(data.viewers) ? data.viewers : [],
-            });
-          } else {
-            setQuickShareInfo(null);
-          }
-        })
-        .catch(() => {});
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [isEditor, session, replaySize]);
-
   // Re-check auth when login happens elsewhere (e.g. DashboardAuthStatus header)
   useEffect(() => {
     if (!isEditor) return;
@@ -519,28 +492,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       const resp = await fetch(apiUrl("/api/share/quick"), { method: "POST" });
       const data = (await resp.json().catch(() => ({}))) as {
         error?: string;
-        url?: string;
-        sizeBytes?: number;
-        maxBytes?: number;
-        startedAt?: string;
-        viewers?: Array<{ id: string; name: string }>;
       };
-      if (!resp.ok || !data.url) throw new Error(data.error || "Quick Share failed");
-      setQuickShareInfo({
-        url: data.url,
-        sizeBytes: data.sizeBytes ?? replaySize,
-        maxBytes: data.maxBytes ?? QUICK_SHARE_MAX,
-        startedAt: data.startedAt,
-        viewers: data.viewers ?? [],
+      const info = parseQuickShareInfo(data, {
+        sizeBytes: replaySize,
+        maxBytes: QUICK_SHARE_MAX,
       });
+      if (!resp.ok || !info) throw new Error(data.error || "Quick Share failed");
+      onQuickShareInfoChange(info);
       setQuickShareStatus({ type: "success", text: "Sharing from this computer" });
-      window.dispatchEvent(new Event("vibe-quick-share-change"));
     } catch (e) {
       setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setQuickSharing(false);
     }
-  }, [session, quickShareTooBig, replaySize]);
+  }, [session, quickShareTooBig, replaySize, onQuickShareInfoChange]);
 
   const handleQuickShareStop = useCallback(async () => {
     setQuickSharing(true);
@@ -551,15 +516,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         const data = (await resp.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || "Failed to stop sharing");
       }
-      setQuickShareInfo(null);
+      onQuickShareInfoChange(null);
       setQuickShareStatus({ type: "success", text: "Quick Share stopped" });
-      window.dispatchEvent(new Event("vibe-quick-share-change"));
     } catch (e) {
       setQuickShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setQuickSharing(false);
     }
-  }, []);
+  }, [onQuickShareInfoChange]);
 
   /** Refresh storage usage after file operations */
   const refreshStorage = useCallback(() => {
