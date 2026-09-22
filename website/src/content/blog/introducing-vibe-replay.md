@@ -86,6 +86,6 @@ npx vibe-replay
 
 One command. It discovers sessions from supported local providers, lets you pick one, and generates an interactive replay.
 
-The output is a single self-contained HTML file. No server, no account, no external requests. Open it in any browser, share it anywhere. Or sign in and [share it to the cloud](/explore/).
+The output is a single self-contained HTML file. No server or account is required for local use, and it makes no automatic external requests. Remote images load only after an explicit click. Open it in any browser, share it anywhere. Or sign in and [share it to the cloud](/explore/).
 
 **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore Public Replays](/explore/)**

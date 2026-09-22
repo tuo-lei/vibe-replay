@@ -197,7 +197,7 @@ For the full picture — token burn over time, context window growth, tool distr
 npx vibe-replay
 ```
 
-One command. It discovers supported local providers, you pick a session, and it generates a self-contained HTML replay. No server, no account, no external requests. Open it in any browser, share it with your team, or [publish it to the cloud](/explore/).
+One command. It discovers supported local providers, you pick a session, and it generates a self-contained HTML replay. No server or account is required for local use, and the replay makes no automatic external requests. Remote images load only after an explicit click. Open it in any browser, share it with your team, or [publish it to the cloud](/explore/).
 
 Your `~/.claude/` directory is a goldmine. Stop grepping through JSONL.
 

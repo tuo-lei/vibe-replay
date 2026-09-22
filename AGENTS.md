@@ -7,7 +7,7 @@ tool-specific file.
 
 ## What is this
 
-vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi. The editor's AI Studio uses the embedded Pi provider registry and agent loop rather than requiring a separate AI CLI.
+vibe-replay turns AI coding sessions into animated, interactive, self-contained HTML replays. Supports Claude (Code/Desktop/Cowork), Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot. AI Studio embeds Pi's provider registry and agent loop; no separate AI CLI is required.
 
 pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `packages/types` (shared types), `website/` (Astro), `cloudflare/` (Workers API).
 
@@ -100,6 +100,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **oxlint** for linting, **oxfmt** for formatting. The lefthook pre-commit hook runs both on staged files for every agent. Claude Code additionally fixes each file right after editing it; other agents should run `pnpm lint` themselves before finishing.
 - **Before commit**: run `pnpm lint:check` and fix any errors. Do NOT commit code that fails lint.
 - **Before PR**: run `pnpm verify`. Keep its stages sequential; concurrent full checks can cause integration-test timeouts.
+- **DevSpace PRs**: no `gh`/Git credentials is normal; do not stop or switch connectors. Commit first, then run `node /workspace/personal-mcp/scripts/publish-pr.mjs --branch agent/<name> --title '<title>'`. Use sibling `pr-status.mjs` / `merge-pr.mjs <n> squash`; publisher handles push/PR and requires `agent/*`.
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation
 - **After changes**: update AGENTS.md / README.md / CONTRIBUTING.md if anything becomes outdated. Never edit `CLAUDE.md` to record project knowledge — it is a shim (see [Agent setup](#agent-setup)).
@@ -159,8 +160,6 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 
 ## Agent setup
 
-Every agent reads this file. Only the plumbing differs.
-
 | Agent | Instructions | Skills |
 |-------|--------------|--------|
 | Codex | `AGENTS.md` (native) | `.agents/skills/` (native) |
@@ -169,13 +168,11 @@ Every agent reads this file. Only the plumbing differs.
 | opencode | `AGENTS.md` (native) | — |
 | Claude Code | `CLAUDE.md` (`@AGENTS.md` + Claude-only notes) | `.claude/skills/` (native) |
 
-Shims exist because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
-because it discovers skills under `.claude/skills/` while Codex and Pi use
-`.agents/skills/`:
+Claude Code reads `CLAUDE.md` / `.claude/skills/`; Codex/Pi use
+`AGENTS.md` / `.agents/skills/`:
 
-- `CLAUDE.md` is a real file whose first line is `@AGENTS.md`. An import is used
-  rather than a symlink because Windows symlinks need Administrator or Developer
-  Mode, and this repo supports Windows contributors.
+- `CLAUDE.md` starts with `@AGENTS.md`; use an import rather than a symlink for
+  Windows compatibility.
 - The replay skill has exactly one real copy, at `skills/replay/` — the published
   path that `.claude-plugin/plugin.json` and the README install command point at.
   `.agents/skills/replay` and `.claude/skills/replay` are both symlinks into it.
@@ -190,8 +187,8 @@ turns back into a copy, or if `AGENTS.md` outgrows the size limit below.
 
 Keep `AGENTS.md` **under 32 KiB** — Codex's default `project_doc_max_bytes`. Past
 it Codex truncates the file and silently stops reading later sections. The guard
-test enforces this. **Headroom is currently roughly 3 KiB**, so a large addition
-needs a split rather than an append.
+test enforces this. Check the actual file size before adding content; if space is
+tight, split rather than append.
 
 To split, move a package's gotchas into a nested pair inside that package:
 

@@ -18,6 +18,8 @@ One command. One self-contained HTML file. Every prompt, every thought, every to
 npx vibe-replay
 ```
 
+> **Release note:** Muse support, Quick Share, and `vibe-replay relay` are on current `main` and will ship in the next npm release. `npx vibe-replay` runs the currently published package.
+
 > Also available as a [Claude Code plugin](#claude-code-plugin) — your agent generates replays automatically during PR creation.
 
 > **[Watch a live demo &rarr;](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
@@ -148,7 +150,7 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 ### What the plugin gives your agent
 
 - **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
-- **Search past sessions** — uses `vibe-replay sessions` to find Claude, Cursor, Codex, OpenCode, Hermes, Muse, and Pi sessions by project, provider, or fuzzy query
+- **Search past sessions** — uses `vibe-replay sessions` to find Claude, Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot sessions by project, provider, or fuzzy query
 - **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
