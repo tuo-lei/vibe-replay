@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySession } from "../src/types.js";
 
 const relayState = vi.hoisted(() => ({
@@ -52,6 +52,10 @@ beforeEach(() => {
   relayState.ready = Promise.resolve();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("Quick Replay Share", () => {
   it("exposes only the single replay and ping commands", async () => {
     const session = replay();
@@ -88,5 +92,26 @@ describe("Quick Replay Share", () => {
     relayState.ready = Promise.reject(new Error("relay startup failed"));
     await expect(createQuickReplayShare(replay())).rejects.toThrow("relay startup failed");
     expect(relayState.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse the Cloud API override as the relay origin", async () => {
+    vi.stubEnv("VIBE_REPLAY_API_URL", "http://localhost:8787");
+
+    await createQuickReplayShare(replay());
+
+    expect(relayState.create).toHaveBeenCalledWith(
+      expect.objectContaining({ relayOrigin: "https://vibe-replay.com" }),
+    );
+  });
+
+  it("supports a dedicated relay origin override", async () => {
+    vi.stubEnv("VIBE_REPLAY_API_URL", "http://localhost:8787");
+    vi.stubEnv("VIBE_REPLAY_RELAY_ORIGIN", "http://localhost:9999");
+
+    await createQuickReplayShare(replay());
+
+    expect(relayState.create).toHaveBeenCalledWith(
+      expect.objectContaining({ relayOrigin: "http://localhost:9999" }),
+    );
   });
 });
