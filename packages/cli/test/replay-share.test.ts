@@ -22,6 +22,7 @@ vi.mock("../src/relay-host.js", () => ({
       shareUrl:
         "https://vibe-replay.com/share/abcdefghijklmnopqrstuv#abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
       ready: relayState.ready,
+      viewers: () => [],
       stop: relayState.stop,
     };
   }),
@@ -80,6 +81,7 @@ describe("Quick Replay Share", () => {
 
     expect(share.url).toContain("/share/");
     expect(share.maxBytes).toBe(10 * 1024 * 1024);
+    expect(share.viewers()).toEqual([]);
   });
 
   it("rejects an oversized replay before opening a relay connection", async () => {

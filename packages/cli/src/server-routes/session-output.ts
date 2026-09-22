@@ -64,6 +64,8 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
             url: share.url,
             sizeBytes: share.sizeBytes,
             maxBytes: share.maxBytes,
+            startedAt: share.startedAt,
+            viewers: share.viewers(),
           }
         : { active: false },
     );
@@ -82,6 +84,8 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
         url: existing.url,
         sizeBytes: existing.sizeBytes,
         maxBytes: existing.maxBytes,
+        startedAt: existing.startedAt,
+        viewers: existing.viewers(),
       });
     }
 
@@ -115,6 +119,8 @@ export function registerSessionOutputRoutes(app: Hono, deps: SessionOutputRouteD
         url: created.url,
         sizeBytes: created.sizeBytes,
         maxBytes: created.maxBytes,
+        startedAt: created.startedAt,
+        viewers: created.viewers(),
       });
     } catch (err) {
       if (err instanceof QuickShareTooLargeError) {

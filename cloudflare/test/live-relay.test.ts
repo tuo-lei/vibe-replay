@@ -290,14 +290,21 @@ describe("LiveRelay multi-viewer", () => {
 /**
  * Shipper presence notices: the relay tells the shipper socket when viewers
  * join/leave (and how many are attached at hello-ok) so the CLI operator
- * can see who is watching. Routing metadata only — the shipper never sees
- * names.
+ * can see who is watching. Display names stay ciphertext at the relay; the
+ * shipper receives that ciphertext and may decrypt it locally with the
+ * fragment key.
  */
 describe("LiveRelay shipper presence notices", () => {
   const controlNotices = (ws: MockSocket) =>
     ws.sent
       .map((s) => JSON.parse(s))
       .filter((m) => m.t === "viewer-joined" || m.t === "viewer-left");
+  const joined = (via: string, viewers: number, name: unknown) => ({
+    t: "viewer-joined",
+    via,
+    viewers,
+    name,
+  });
 
   it("notifies the shipper when a viewer joins", async () => {
     const h = makeRelay();
@@ -307,8 +314,8 @@ describe("LiveRelay shipper presence notices", () => {
     const b = await helloViewer(h, WENDY_CIPHER);
 
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid, viewers: 1 },
-      { t: "viewer-joined", via: b.vid, viewers: 2 },
+      joined(a.vid, 1, LEI_CIPHER),
+      joined(b.vid, 2, WENDY_CIPHER),
     ]);
   });
 
@@ -324,7 +331,9 @@ describe("LiveRelay shipper presence notices", () => {
     // No retroactive join notices — but the ack carries the live count.
     expect(controlNotices(vm)).toEqual([]);
     const acks = vm.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
-    expect(acks).toEqual([{ t: "hello-ok", viewers: 1 }]);
+    expect(acks).toEqual([
+      { t: "hello-ok", viewers: 1, presence: [{ vid: a.vid, name: LEI_CIPHER }] },
+    ]);
   });
 
   it("includes the live viewer count in the shipper's hello-ok", async () => {
@@ -332,10 +341,10 @@ describe("LiveRelay shipper presence notices", () => {
     const first = helloVm(h);
     await first.p;
     const firstAcks = first.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
-    expect(firstAcks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+    expect(firstAcks).toEqual([{ t: "hello-ok", viewers: 0, presence: [] }]);
 
-    await helloViewer(h, LEI_CIPHER);
-    await helloViewer(h, WENDY_CIPHER);
+    const a = await helloViewer(h, LEI_CIPHER);
+    const b = await helloViewer(h, WENDY_CIPHER);
 
     // Shipper reconnects and displaces the first: the ack carries the live
     // roster count so the CLI can resync its watcher display.
@@ -343,7 +352,16 @@ describe("LiveRelay shipper presence notices", () => {
     await second.p;
     expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
     const secondAcks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
-    expect(secondAcks).toEqual([{ t: "hello-ok", viewers: 2 }]);
+    expect(secondAcks).toEqual([
+      {
+        t: "hello-ok",
+        viewers: 2,
+        presence: [
+          { vid: a.vid, name: LEI_CIPHER },
+          { vid: b.vid, name: WENDY_CIPHER },
+        ],
+      },
+    ]);
   });
 
   it("routes join notices to the new shipper during takeover, not the closing socket", async () => {
@@ -363,7 +381,7 @@ describe("LiveRelay shipper presence notices", () => {
     // with a stale count from its earlier hello-ok snapshot.
     const v = await helloViewer(h, LEI_CIPHER);
     expect(controlNotices(first.ws)).toEqual([]);
-    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+    expect(controlNotices(second.ws)).toEqual([joined(v.vid, 1, LEI_CIPHER)]);
   });
 
   it("ignores a delayed goodbye from a displaced shipper after takeover", async () => {
@@ -388,7 +406,7 @@ describe("LiveRelay shipper presence notices", () => {
     // the join notice; the displaced socket gets nothing further.
     const v = await helloViewer(h, LEI_CIPHER);
     expect(controlNotices(first.ws)).toEqual([]);
-    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: v.vid, viewers: 1 }]);
+    expect(controlNotices(second.ws)).toEqual([joined(v.vid, 1, LEI_CIPHER)]);
   });
 
   it("does not route frames from a displaced shipper to viewers", async () => {
@@ -419,7 +437,7 @@ describe("LiveRelay shipper presence notices", () => {
     await h.relay.webSocketClose(a.ws as unknown as WebSocket);
 
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      joined(a.vid, 1, LEI_CIPHER),
       { t: "viewer-left", via: a.vid, viewers: 0 },
     ]);
   });
@@ -443,8 +461,8 @@ describe("LiveRelay shipper presence notices", () => {
     // shipper that resynced from a hello-ok snapshot excluding stale b
     // must not decrement anything on this notice.
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid, viewers: 1 },
-      { t: "viewer-joined", via: b.vid, viewers: 2 },
+      joined(a.vid, 1, LEI_CIPHER),
+      joined(b.vid, 2, WENDY_CIPHER),
       { t: "viewer-left", via: b.vid, viewers: 1 },
     ]);
   });
@@ -462,7 +480,7 @@ describe("LiveRelay shipper presence notices", () => {
     const second = helloVm(h);
     await second.p;
     const acks = second.ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === "hello-ok");
-    expect(acks).toEqual([{ t: "hello-ok", viewers: 0 }]);
+    expect(acks).toEqual([{ t: "hello-ok", viewers: 0, presence: [] }]);
 
     // a resumes heartbeating before the sweep reaps it: the relay notifies
     // the new shipper — a rejoin carrying the absolute count — so the CLI
@@ -472,7 +490,7 @@ describe("LiveRelay shipper presence notices", () => {
       a.ws as unknown as WebSocket,
       JSON.stringify({ t: "heartbeat" }),
     );
-    expect(controlNotices(second.ws)).toEqual([{ t: "viewer-joined", via: a.vid, viewers: 1 }]);
+    expect(controlNotices(second.ws)).toEqual([joined(a.vid, 1, LEI_CIPHER)]);
   });
 
   it("a revived viewer re-notifies a continuously connected shipper without double counting", async () => {
@@ -491,8 +509,8 @@ describe("LiveRelay shipper presence notices", () => {
     // shipper from a continuously connected one — but the absolute count
     // stays 1 and the CLI dedupes by vid, so no duplicate print or drift.
     expect(controlNotices(vm)).toEqual([
-      { t: "viewer-joined", via: a.vid, viewers: 1 },
-      { t: "viewer-joined", via: a.vid, viewers: 1 },
+      joined(a.vid, 1, LEI_CIPHER),
+      joined(a.vid, 1, LEI_CIPHER),
     ]);
   });
 

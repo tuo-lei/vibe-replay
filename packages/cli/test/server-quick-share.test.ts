@@ -63,11 +63,19 @@ describe("Quick Share routes", () => {
       boxId: "box",
       sizeBytes: 123,
       maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [{ id: "viewer-1", name: "Blue Otter" }],
       stop: vi.fn(async () => {}),
     });
 
     const [firstResponse, secondResponse] = await Promise.all([first, second]);
-    expect(await firstResponse.json()).toEqual(await secondResponse.json());
+    const firstBody = await firstResponse.json();
+    expect(firstBody).toEqual(await secondResponse.json());
+    expect(firstBody).toMatchObject({
+      active: true,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: [{ id: "viewer-1", name: "Blue Otter" }],
+    });
     expect(quickShareState.create).toHaveBeenCalledTimes(1);
   });
 });

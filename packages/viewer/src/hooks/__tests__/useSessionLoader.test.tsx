@@ -41,6 +41,7 @@ function setSearch(search: string) {
 afterEach(() => {
   cleanup();
   relayState.connect.mockReset();
+  window.localStorage.clear();
   win.__VIBE_REPLAY_DATA__ = undefined;
   win.__VIBE_REPLAY_EDITOR__ = undefined;
   setSearch("/");
@@ -100,17 +101,46 @@ describe("useSessionLoader", () => {
   it("loads an E2E Quick Share replay through the relay client", async () => {
     const getReplay = vi.fn().mockResolvedValue(fakeSession);
     const close = vi.fn();
-    relayState.connect.mockResolvedValue({ getReplay, close });
+    let presenceHandler:
+      | ((viewers: Array<{ vid: string; name: string }>, selfVid: string | null) => void)
+      | undefined;
+    const onPresence = vi.fn((handler) => {
+      presenceHandler = handler;
+      return vi.fn();
+    });
+    const onDisconnect = vi.fn(() => vi.fn());
+    const onSessionEnded = vi.fn(() => vi.fn());
+    relayState.connect.mockResolvedValue({
+      getReplay,
+      close,
+      onPresence,
+      onDisconnect,
+      onSessionEnded,
+    });
+    window.localStorage.setItem("vibe-replay:viewer-name", "Blue Otter");
     setSearch("?relay=abcdefghijklmnopqrstuv");
 
-    const { result } = renderHook(() => useSessionLoader());
+    const { result, unmount } = renderHook(() => useSessionLoader());
     await waitFor(() => expect(result.current.status).toBe("ready"));
     if (result.current.status !== "ready") throw new Error("unreachable");
 
     expect(result.current.mode).toBe("readonly");
     expect(result.current.session).toEqual(fakeSession);
-    expect(relayState.connect).toHaveBeenCalledWith("abcdefghijklmnopqrstuv", "Replay viewer");
+    expect(relayState.connect).toHaveBeenCalledWith("abcdefghijklmnopqrstuv", "Blue Otter");
     expect(getReplay).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    expect(result.current.quickShare).toMatchObject({
+      state: "connected",
+      displayName: "Blue Otter",
+    });
+
+    presenceHandler?.([{ vid: "viewer-1", name: "Blue Otter" }], "viewer-1");
+    await waitFor(() => {
+      if (result.current.status !== "ready") throw new Error("unreachable");
+      expect(result.current.quickShare?.viewers).toEqual([{ vid: "viewer-1", name: "Blue Otter" }]);
+    });
+
+    unmount();
     expect(close).toHaveBeenCalledTimes(1);
   });
 
