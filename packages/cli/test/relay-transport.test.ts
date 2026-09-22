@@ -192,4 +192,13 @@ describe("relay transport", () => {
       }),
     ).rejects.toThrow("refusing cleartext relay origin");
   });
+
+  it("rejects non-HTTP relay origin protocols", async () => {
+    await expect(
+      createRelayTransport({
+        relayOrigin: "ftp://relay.example.test",
+        handleCommand: async () => ({ ok: true }),
+      }),
+    ).rejects.toThrow("unsupported relay origin protocol ftp:");
+  });
 });

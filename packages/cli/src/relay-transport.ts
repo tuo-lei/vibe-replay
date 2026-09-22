@@ -58,11 +58,14 @@ function validateRelayOrigin(origin: string): void {
     url.hostname === "127.0.0.1" ||
     url.hostname === "[::1]" ||
     url.hostname === "::1";
-  if (url.protocol === "http:" && !loopback) {
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && loopback) return;
+  if (url.protocol === "http:") {
     throw new Error(
       `refusing cleartext relay origin ${origin}: use https (http://localhost is allowed for local testing)`,
     );
   }
+  throw new Error(`unsupported relay origin protocol ${url.protocol}: use https`);
 }
 
 function splitUtf8(value: string, maxBytes: number): string[] {
