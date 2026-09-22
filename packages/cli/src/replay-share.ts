@@ -40,7 +40,12 @@ export async function createQuickReplayShare(
   }
 
   const host: RelayHostHandle = await createRelayHost({
-    relayOrigin: options.relayOrigin ?? process.env.VIBE_REPLAY_API_URL ?? DEFAULT_RELAY_ORIGIN,
+    // Keep relay routing independent from the Cloud API override. In dev,
+    // VIBE_REPLAY_API_URL defaults to http://localhost:8787 for auth/publish,
+    // but Quick Share should still use the production relay unless a relay
+    // origin is explicitly configured.
+    relayOrigin:
+      options.relayOrigin ?? process.env.VIBE_REPLAY_RELAY_ORIGIN ?? DEFAULT_RELAY_ORIGIN,
     sharePath: "share",
     onPermanentEnd: options.onEnded,
     handleCommand: async (message) => {
