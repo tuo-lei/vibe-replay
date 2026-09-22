@@ -148,7 +148,7 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 ### What the plugin gives your agent
 
 - **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
-- **Search past sessions** — uses `vibe-replay sessions` to find Claude, Cursor, Codex, OpenCode, Hermes, Muse, and Pi sessions by project, provider, or fuzzy query
+- **Search past sessions** — uses `vibe-replay sessions` to find Claude, Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot sessions by project, provider, or fuzzy query
 - **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
