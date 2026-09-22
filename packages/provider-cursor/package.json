@@ -51,7 +51,7 @@
     "sql.js": "^1.14.2"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.2",
     "@vibe-replay/replay-core": "workspace:*",
     "vitest": "^4.1.11"
   }
