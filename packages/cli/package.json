@@ -47,13 +47,13 @@
     "chalk": "^6.0.0",
     "commander": "^15.0.0",
     "gifenc": "^1.0.3",
-    "hono": "^4.13.5",
-    "open": "^11.0.2",
+    "hono": "^4.13.8",
+    "open": "^11.0.4",
     "ora": "^9.4.1",
     "sql.js": "^1.14.2"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.2",
     "@vibe-replay/provider-claude-code": "workspace:*",
     "@vibe-replay/provider-codex": "workspace:*",
     "@vibe-replay/provider-contract": "workspace:*",
@@ -69,7 +69,7 @@
     "@vibe-replay/types": "workspace:*",
     "@vitest/coverage-v8": "4.1.11",
     "tsup": "^8.3.0",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
