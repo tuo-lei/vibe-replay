@@ -95,6 +95,7 @@ describe("Quick Replay Share", () => {
   });
 
   it("does not reuse the Cloud API override as the relay origin", async () => {
+    vi.stubEnv("VIBE_REPLAY_RELAY_ORIGIN", undefined);
     vi.stubEnv("VIBE_REPLAY_API_URL", "http://localhost:8787");
 
     await createQuickReplayShare(replay());
