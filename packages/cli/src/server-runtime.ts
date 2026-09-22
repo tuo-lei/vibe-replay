@@ -1108,7 +1108,7 @@ export async function startServer(
     loadSession: (slug, targetId) => loadSessionFromDisk(baseDir, slug, targetId),
   });
 
-  registerSessionOutputRoutes(app, {
+  const sessionOutputRoutes = registerSessionOutputRoutes(app, {
     baseDir,
     loadSession: (slug, targetId) => loadSessionFromDisk(baseDir, slug, targetId),
   });
@@ -1233,13 +1233,23 @@ export async function startServer(
     },
   );
 
-  // Keep alive until Ctrl+C
+  // Keep alive until the process is asked to stop. Quick Share owns outbound
+  // relay sockets, so close them cleanly before exiting rather than leaving
+  // viewers waiting for the relay's disconnect grace period.
   await new Promise<void>((resolve) => {
-    process.on("SIGINT", () => {
-      console.log(chalk.dim("\n  Server stopped.\n"));
-      resolve();
-      process.exit(0);
-    });
+    let shuttingDown = false;
+    const shutdown = () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      _server.close();
+      void sessionOutputRoutes.stopQuickShares().finally(() => {
+        console.log(chalk.dim("\n  Server stopped.\n"));
+        resolve();
+        process.exit(0);
+      });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
   });
 }
 

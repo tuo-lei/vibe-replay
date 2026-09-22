@@ -9,6 +9,7 @@ import { useSessionLoader, type QuickShareStatus } from "./hooks/useSessionLoade
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
 import { saveViewerName } from "./live/viewer-name";
+import { parseQuickShareInfo, type QuickShareInfo } from "./quick-share";
 import { apiUrl } from "./utils/api";
 
 function getActiveViewFromUrl(): ActiveView {
@@ -19,13 +20,6 @@ function getActiveViewFromUrl(): ActiveView {
 }
 
 const CLOUD_API = __CLOUD_API_URL__;
-
-interface AuthorQuickShareStatus {
-  active: boolean;
-  url?: string;
-  startedAt?: string;
-  viewers: Array<{ id: string; name: string }>;
-}
 
 function ViewerQuickShareBadge({ share }: { share: QuickShareStatus }) {
   const [editingName, setEditingName] = useState(false);
@@ -112,7 +106,7 @@ function ViewerQuickShareBadge({ share }: { share: QuickShareStatus }) {
   );
 }
 
-function AuthorQuickShareBadge({ share }: { share: AuthorQuickShareStatus }) {
+function AuthorQuickShareBadge({ share }: { share: QuickShareInfo }) {
   const count = share.viewers.length;
   return (
     <details className="relative">
@@ -376,7 +370,8 @@ export default function App() {
   const live = loadState.status === "ready" ? loadState.live : undefined;
   const quickShare = loadState.status === "ready" ? loadState.quickShare : undefined;
   const isEditor = viewerMode === "editor";
-  const [authorQuickShare, setAuthorQuickShare] = useState<AuthorQuickShareStatus | null>(null);
+  const [authorQuickShare, setAuthorQuickShare] = useState<QuickShareInfo | null>(null);
+  const authorQuickShareActive = authorQuickShare !== null;
 
   useEffect(() => {
     if (!isEditor || !session) {
@@ -384,33 +379,32 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    const refresh = () => {
-      fetch(apiUrl("/api/share/quick"))
-        .then((response) => response.json())
-        .then((data: any) => {
-          if (cancelled) return;
-          setAuthorQuickShare(
-            data?.active
-              ? {
-                  active: true,
-                  url: data.url,
-                  startedAt: data.startedAt,
-                  viewers: Array.isArray(data.viewers) ? data.viewers : [],
-                }
-              : null,
-          );
-        })
-        .catch(() => {});
+    let refreshGeneration = 0;
+    const refresh = async () => {
+      const generation = ++refreshGeneration;
+      try {
+        const response = await fetch(apiUrl("/api/share/quick"));
+        if (!response.ok) return;
+        const info = parseQuickShareInfo(await response.json());
+        if (!cancelled && generation === refreshGeneration) setAuthorQuickShare(info);
+      } catch {
+        // A transient local-server error should not make the share badge flicker.
+      }
     };
-    refresh();
-    const interval = window.setInterval(refresh, 2000);
-    window.addEventListener("vibe-quick-share-change", refresh);
+    void refresh();
+    // Presence is useful at near-real-time cadence only while a share is active.
+    // Keep a slow inactive poll as a cross-tab fallback without continuously
+    // hammering the local server when Quick Share is unused.
+    const interval = window.setInterval(
+      () => void refresh(),
+      authorQuickShareActive ? 2000 : 15000,
+    );
     return () => {
       cancelled = true;
+      refreshGeneration += 1;
       window.clearInterval(interval);
-      window.removeEventListener("vibe-quick-share-change", refresh);
     };
-  }, [isEditor, session]);
+  }, [isEditor, session, authorQuickShareActive]);
 
   const [activeView, setActiveView] = useState<ActiveView>(getActiveViewFromUrl());
   const returnToLandingRef = useRef<(() => void) | null>(null);
@@ -604,9 +598,7 @@ export default function App() {
             </span>
           )}
           {quickShare && <ViewerQuickShareBadge share={quickShare} />}
-          {isEditor && authorQuickShare?.active && (
-            <AuthorQuickShareBadge share={authorQuickShare} />
-          )}
+          {isEditor && authorQuickShare && <AuthorQuickShareBadge share={authorQuickShare} />}
         </div>
 
         {/* Tabs (editor) */}
@@ -911,6 +903,8 @@ export default function App() {
         setActiveView={handleViewChange}
         returnToLandingRef={returnToLandingRef}
         live={live}
+        quickShareInfo={authorQuickShare}
+        onQuickShareInfoChange={setAuthorQuickShare}
       />
       {isEditor && (
         <LocalChatAssistant

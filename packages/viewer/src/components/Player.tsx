@@ -4,6 +4,7 @@ import { useOverlays } from "../hooks/useOverlays";
 import { usePlayback } from "../hooks/usePlayback";
 import type { LiveStatus, ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
+import type { QuickShareInfo } from "../quick-share";
 import type { ReplaySession, Scene } from "../types";
 import AiStudioDrawer from "./AiStudioDrawer";
 import AnnotationPanel from "./AnnotationPanel";
@@ -30,7 +31,12 @@ interface Props {
   returnToLandingRef?: React.MutableRefObject<(() => void) | null>;
   /** When set, the session is being streamed from a running CLI process */
   live?: LiveStatus;
+  /** Author-side Quick Share status is owned by App so header/export stay in sync. */
+  quickShareInfo?: QuickShareInfo | null;
+  onQuickShareInfoChange?: (info: QuickShareInfo | null) => void;
 }
+
+const ignoreQuickShareChange = (_info: QuickShareInfo | null): void => {};
 
 function flashJumpTarget(el: HTMLElement) {
   el.classList.remove("jump-target-flash");
@@ -135,6 +141,8 @@ export default function Player({
   setActiveView,
   returnToLandingRef,
   live,
+  quickShareInfo = null,
+  onQuickShareInfoChange = ignoreQuickShareChange,
 }: Props) {
   const isLive = !!live;
   // Live payloads are editor-streamed, but they have no stable replay slug
@@ -1147,6 +1155,8 @@ export default function Player({
               viewerMode={effectiveViewerMode}
               readOnly={isReadOnly}
               session={effectiveSession}
+              quickShareInfo={quickShareInfo}
+              onQuickShareInfoChange={onQuickShareInfoChange}
             />
           )}
         </div>

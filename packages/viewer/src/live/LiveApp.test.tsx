@@ -279,7 +279,7 @@ describe("LiveApp", () => {
         tailHandler = h;
         return () => {};
       },
-      get: async (_id, offset, limit) => {
+      get: async (_id, offset, _limit) => {
         // A live turn lands while the catch-up page is in flight.
         if (emitLive) {
           emitLive = false;

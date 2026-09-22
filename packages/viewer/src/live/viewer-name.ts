@@ -24,14 +24,6 @@ export function saveViewerName(raw: string): string {
   return name;
 }
 
-export function clearViewerName(): void {
-  try {
-    window.localStorage.removeItem(VIEWER_NAME_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 export function ensureViewerName(): string {
   const stored = readStoredViewerName();
   if (stored) return stored;
