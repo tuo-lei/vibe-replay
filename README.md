@@ -18,6 +18,8 @@ One command. One self-contained HTML file. Every prompt, every thought, every to
 npx vibe-replay
 ```
 
+> **Release note:** Muse support, Quick Share, and `vibe-replay relay` are on current `main` and will ship in the next npm release. `npx vibe-replay` runs the currently published package.
+
 > Also available as a [Claude Code plugin](#claude-code-plugin) — your agent generates replays automatically during PR creation.
 
 > **[Watch a live demo &rarr;](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**

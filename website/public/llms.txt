@@ -4,6 +4,8 @@
 
 vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Muse `~/agents/<agent-id>/sessions/`, Pi `~/.pi/agent/sessions/`, Grok Bot `/home/box/agent-data/agent-transcripts` or `~/.grok-bot/agent-transcripts`), then renders recorded prompts, AI responses, tool calls, file diffs, and available thinking blocks as a scrubbable timeline. Try Grok Bot with `npx vibe-replay@latest -p grok-bot` (vibe-replay 0.2.10+). Watch demo: https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Local HTML output has all viewer assets inlined and makes no automatic external requests.
 
+Release note: Muse support, Quick Share, and `vibe-replay relay` are on current `main` and will ship in the next npm release; `npx vibe-replay` uses the currently published package.
+
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
 License: MIT
