@@ -123,4 +123,37 @@ describe("Quick Share routes", () => {
       503,
     );
   });
+
+  it("waits for in-flight share creation during server cleanup", async () => {
+    const stop = vi.fn(async () => {});
+    const app = new Hono();
+    const routes = registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const createResponse = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(1));
+
+    let cleanupDone = false;
+    const cleanup = routes.stopQuickShares().then(() => {
+      cleanupDone = true;
+    });
+    await Promise.resolve();
+    expect(cleanupDone).toBe(false);
+
+    quickShareState.resolve!({
+      url: "https://vibe-replay.com/share/box#key",
+      boxId: "box",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop,
+    });
+
+    expect((await createResponse).status).toBe(500);
+    await cleanup;
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
 });

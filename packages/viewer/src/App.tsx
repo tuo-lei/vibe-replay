@@ -379,12 +379,14 @@ export default function App() {
       return;
     }
     let cancelled = false;
+    let refreshGeneration = 0;
     const refresh = async () => {
+      const generation = ++refreshGeneration;
       try {
         const response = await fetch(apiUrl("/api/share/quick"));
         if (!response.ok) return;
         const info = parseQuickShareInfo(await response.json());
-        if (!cancelled) setAuthorQuickShare(info);
+        if (!cancelled && generation === refreshGeneration) setAuthorQuickShare(info);
       } catch {
         // A transient local-server error should not make the share badge flicker.
       }
@@ -399,6 +401,7 @@ export default function App() {
     );
     return () => {
       cancelled = true;
+      refreshGeneration += 1;
       window.clearInterval(interval);
     };
   }, [isEditor, session, authorQuickShareActive]);

@@ -472,6 +472,7 @@ export function registerSessionOutputRoutes(
   return {
     stopQuickShares: async () => {
       stopping = true;
+      await Promise.allSettled(quickShareCreates.values());
       const active = [...new Set(quickShares.values())];
       quickShares.clear();
       await Promise.allSettled(active.map((share) => share.stop()));
