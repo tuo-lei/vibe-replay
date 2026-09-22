@@ -282,7 +282,13 @@ export async function createRelayTransport(
       }
       options.onConnectionChange?.("retrying", `${reconnectDelayMs}`);
       reconnectTimer = setTimeout(connect, reconnectDelayMs);
-      reconnectTimer.unref?.();
+      // IMPORTANT: this timer must stay referenced (never unref'ed). When the
+      // WebSocket closes, the socket no longer holds the event loop, the
+      // keepalive timer is unref'ed, and `await new Promise(() => {})` at the
+      // bottom of `relay` does not hold the loop either — so this is the only
+      // thing keeping the process alive. Unref'ing it drains the event loop
+      // and Node exits silently (code 0) instead of reconnecting, which killed
+      // the production shipper on 2026-09-22.
       reconnectDelayMs = Math.min(30_000, reconnectDelayMs * 2);
     };
     socket.onerror = () => {
