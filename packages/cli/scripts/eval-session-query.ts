@@ -47,7 +47,7 @@ const EVAL_CASES: EvalCase[] = [
     query: "skill migration canonical",
     intent: "Find skill work involving canonical skill migration.",
     relevanceNote: "skill plus migration/canonical/CLI context.",
-    isRelevant: (text) => /skill/.test(text) && /(migration|canonical|cli)/.test(text),
+    isRelevant: (text) => /skill/.test(text) && /(migration|canonical|\bcli\b)/.test(text),
   },
   {
     query: "progressive loading metrics ready",
