@@ -184,6 +184,46 @@ describe("relay transport", () => {
     await transport.stop();
   });
 
+  it("keeps the reconnect timer referenced so a dropped socket cannot drain the event loop", async () => {
+    // Regression for the 2026-09-22 production crash: the reconnect timer was
+    // unref'ed, so when the WebSocket closed (the socket no longer holding the
+    // loop, the keepalive timer already unref'ed, and relay.ts's terminal
+    // `await new Promise(() => {})` holding nothing), the event loop drained
+    // and Node exited silently with code 0 instead of reconnecting. Fake
+    // timers cannot simulate unref's exit semantics, so this test uses real
+    // timers and asserts on hasRef() directly.
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    try {
+      const transport = await createRelayTransport({
+        relayOrigin: "http://localhost:1",
+        goodbyeFlushMs: 0,
+        handleCommand: async () => ({ ok: true }),
+      });
+      const socket = FakeSocket.instances[0]!;
+      socket.onopen?.();
+      socket.onmessage?.({ data: JSON.stringify({ t: "hello-ok" }) } as MessageEvent);
+      await transport.ready;
+
+      socket.onclose?.({ reason: "" } as CloseEvent);
+
+      // The reconnect path is the only setTimeout scheduled in this window
+      // (goodbyeFlushMs: 0, no startupTimeoutMs) — every captured timer must
+      // stay referenced, otherwise a transient disconnect silently kills the
+      // process instead of reconnecting.
+      const timers = setTimeoutSpy.mock.results
+        .map((result) => result.value as ReturnType<typeof setTimeout>)
+        .filter((timer) => timer != null);
+      expect(timers.length).toBeGreaterThan(0);
+      for (const timer of timers) {
+        expect(timer.hasRef()).toBe(true);
+      }
+
+      await transport.stop();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it("rejects cleartext non-loopback relay origins", async () => {
     await expect(
       createRelayTransport({

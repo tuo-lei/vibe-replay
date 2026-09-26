@@ -85,7 +85,7 @@ describe("resolveGenerateInputs", () => {
       [
         makeSession({
           slug: "6d8dd9bc",
-          sessionId: "cursor-session-devspaces",
+          sessionId: "cursor-session-remote-workspace",
           filePaths: [],
           toolPaths: [],
         }),
@@ -94,7 +94,7 @@ describe("resolveGenerateInputs", () => {
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     expect(resolved.value.paths).toHaveLength(0);
-    expect(resolved.value.sessionInfo?.sessionId).toBe("cursor-session-devspaces");
+    expect(resolved.value.sessionInfo?.sessionId).toBe("cursor-session-remote-workspace");
   });
 
   it("matches session by normalized project path when slug collides", () => {

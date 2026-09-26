@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPanel, { getSettingsSectionFromUrl } from "../SettingsPanel";
 
 const source = {
-  id: "remote-devspace",
-  sshHost: "dev.ros.example",
-  label: "ROS devspace",
+  id: "build-host",
+  sshHost: "build.example",
+  label: "Build server",
   providers: ["codex", "claude-code"],
   connectTimeoutMs: 10_000,
 };
@@ -44,7 +44,7 @@ beforeEach(() => {
         });
       }
       if (url.endsWith("/api/settings/remote-sources/test")) {
-        return jsonResponse({ ok: true, message: "Connected to ROS devspace." });
+        return jsonResponse({ ok: true, message: "Connected to build server." });
       }
       if (url.endsWith("/api/settings/remote-sources") && init?.method === "PUT") {
         const body = JSON.parse(String(init.body));
@@ -67,9 +67,9 @@ describe("SettingsPanel", () => {
   it("loads and displays configured SSH sources", async () => {
     render(<SettingsPanel />);
 
-    await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
-    expect(screen.getByText("remote-devspace")).toBeDefined();
-    expect(screen.getByText("dev.ros.example")).toBeDefined();
+    await waitFor(() => expect(screen.getByText("Build server")).toBeDefined());
+    expect(screen.getByText("build-host")).toBeDefined();
+    expect(screen.getByText("build.example")).toBeDefined();
     expect(screen.getByText("Codex")).toBeDefined();
     expect(screen.getByText("AI providers")).toBeDefined();
     expect(screen.getByLabelText("Custom AI endpoint")).toBeDefined();
@@ -92,7 +92,7 @@ describe("SettingsPanel", () => {
 
   it("persists the SSH data setting from Settings", async () => {
     render(<SettingsPanel />);
-    await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Build server")).toBeDefined());
 
     const consent = screen.getByLabelText(
       "Allow SSH session data to be sent to the configured AI provider",
@@ -139,7 +139,7 @@ describe("SettingsPanel", () => {
       expect(getSettingsSectionFromUrl()).toBe("remote");
       render(<SettingsPanel />);
 
-      await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
+      await waitFor(() => expect(screen.getByText("Build server")).toBeDefined());
       expect(screen.getByRole("button", { name: /^Remote SSH/ }).getAttribute("aria-current")).toBe(
         "location",
       );
@@ -167,14 +167,14 @@ describe("SettingsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain("Connected to ROS devspace."),
+      expect(screen.getByRole("status").textContent).toContain("Connected to build server."),
     );
     expect(JSON.stringify(vi.mocked(fetch).mock.calls)).not.toContain("password");
   });
 
   it("validates and saves a new SSH source", async () => {
     render(<SettingsPanel />);
-    await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Build server")).toBeDefined());
 
     fireEvent.click(screen.getByRole("button", { name: "+ Add SSH source" }));
     fireEvent.change(screen.getByLabelText("Stable id"), { target: { value: "remote-lab" } });

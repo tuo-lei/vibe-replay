@@ -7,7 +7,7 @@ tool-specific file.
 
 ## What is this
 
-vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi. The editor's AI Studio uses the embedded Pi provider registry and agent loop rather than requiring a separate AI CLI.
+vibe-replay turns AI coding sessions into animated, interactive, self-contained HTML replays. Supports Claude (Code/Desktop/Cowork), Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot. AI Studio embeds Pi's provider registry and agent loop; no separate AI CLI is required.
 
 pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `packages/types` (shared types), `website/` (Astro), `cloudflare/` (Workers API).
 
@@ -190,8 +190,8 @@ turns back into a copy, or if `AGENTS.md` outgrows the size limit below.
 
 Keep `AGENTS.md` **under 32 KiB** — Codex's default `project_doc_max_bytes`. Past
 it Codex truncates the file and silently stops reading later sections. The guard
-test enforces this. **Headroom is currently roughly 3 KiB**, so a large addition
-needs a split rather than an append.
+test enforces this. Check the actual file size before adding content; if space is
+tight, split rather than append.
 
 To split, move a package's gotchas into a nested pair inside that package:
 

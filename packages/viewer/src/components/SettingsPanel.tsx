@@ -733,7 +733,7 @@ export default function SettingsPanel() {
                       value={draft.id}
                       disabled={editingId !== null}
                       onChange={(event) => setDraft({ ...draft, id: event.target.value })}
-                      placeholder="remote-devspace"
+                      placeholder="build-host"
                       autoComplete="off"
                     />
                     <span className="block text-[10px] font-sans text-terminal-dimmer">
@@ -750,7 +750,7 @@ export default function SettingsPanel() {
                       className={INPUT_CLASS}
                       value={draft.label}
                       onChange={(event) => setDraft({ ...draft, label: event.target.value })}
-                      placeholder="ROS devspace"
+                      placeholder="Build server"
                       autoComplete="off"
                     />
                   </label>

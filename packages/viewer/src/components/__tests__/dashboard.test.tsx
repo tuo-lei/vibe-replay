@@ -119,10 +119,10 @@ describe("remote source diagnostics", () => {
   it("uses the configured remote label instead of exposing its internal id", () => {
     expect(
       remoteSourceFailureLabels({
-        failedProviders: ["ssh:remote-devspace"],
-        remoteSources: [{ id: "remote-devspace", label: "ROS devspace" }],
+        failedProviders: ["ssh:build-host"],
+        remoteSources: [{ id: "build-host", label: "Build server" }],
       }),
-    ).toEqual(["ROS devspace"]);
+    ).toEqual(["Build server"]);
   });
 });
 

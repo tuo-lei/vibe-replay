@@ -34,6 +34,12 @@ describe("AGENTS.md", () => {
     expect(agents).toContain("# AGENTS.md — vibe-replay");
     expect(Buffer.byteLength(agents, "utf-8")).toBeLessThan(CODEX_PROJECT_DOC_MAX_BYTES);
   });
+
+  it("stays portable instead of depending on a machine-specific workspace path", async () => {
+    const agents = await readFile(join(REPO_ROOT, "AGENTS.md"), "utf-8");
+
+    expect(agents).not.toMatch(/\/workspace\//);
+  });
 });
 
 describe("CLAUDE.md", () => {
