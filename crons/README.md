@@ -32,6 +32,16 @@ The body after the frontmatter is the prompt itself, written for an agent. Write
 
 These prompts run **inside an agent**. To schedule one, wire the `PROMPT.md` into your agent's scheduler (a Muse cron, a Grok bot scheduler, a Hermes/OpenClaw scheduled job, …) — the agent reads the prompt and runs it in its own environment.
 
+The repository currently defines these maintenance handoffs (all times `America/Los_Angeles`):
+
+| Task | Schedule | Durable cross-run state |
+| --- | --- | --- |
+| `daily-code-quality` | Daily 07:00 | GitHub PR history and the `[automation] daily-code-quality ledger` issue |
+| `weekly-deps-update` | Monday 02:00 | GitHub PRs and the `[deps] weekly summary` issue |
+| `weekly-readme-docs-sync` | Wednesday 02:00 | GitHub merged/open PR history and scheduler run log |
+
+These files do not activate a schedule on their own. The scheduler needs an isolated repository checkout, `pnpm`, GitHub permissions for PRs/issues/comments, and access to current-head Codex review; otherwise its run must report the missing capability rather than relax the merge rules. The review requirement is retained from the previous routines and may still consume Codex review capacity even when a different bot does the coding.
+
 If a task needs machine-local data (local sessions, credentials, paired devices), state that in the prompt body so nobody tries to run it somewhere it can't work. The provider-audit prompt does this: it only audits providers with sessions on the machine it's running on.
 
 ## Adding a task
