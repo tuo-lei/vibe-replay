@@ -122,6 +122,71 @@ describe("Quick Share routes", () => {
     );
   });
 
+  it("accepts an SSH snapshot whose storage slug differs from its source slug", async () => {
+    const app = new Hono();
+    const remote = {
+      ...replay(),
+      meta: {
+        ...replay().meta,
+        slug: "provider-source-slug",
+        location: { kind: "ssh", id: "remote-dev" },
+      },
+    } as ReplaySession;
+    const loadSession = vi.fn(async () => remote);
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession,
+    });
+    quickShareState.create.mockResolvedValue({
+      url: "https://vibe-replay.com/share/box#key",
+      boxId: "box",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop: vi.fn(async () => {}),
+    });
+
+    const response = await app.request(
+      "/api/share/quick?slug=provider-source-slug--ssh-scoped--id-session&targetId=remote-dev",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replay: remote }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(loadSession).toHaveBeenCalledWith(
+      "provider-source-slug--ssh-scoped--id-session",
+      "remote-dev",
+    );
+  });
+
+  it("rejects a supplied snapshot for a different canonical session", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+    const wrong = {
+      ...replay(),
+      meta: { ...replay().meta, sessionId: "other-session" },
+    } as ReplaySession;
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replay: wrong }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: "quick share replay does not match requested session",
+    });
+    expect(quickShareState.create).not.toHaveBeenCalled();
+  });
+
   it("cancels an in-flight share when DELETE wins the race", async () => {
     const stop = vi.fn(async () => {});
     const app = new Hono();

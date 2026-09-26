@@ -101,11 +101,27 @@ export function registerSessionOutputRoutes(
       if (!pending) {
         pending = (async () => {
           const supplied = body?.replay;
-          const targetSession = supplied
-            ? sessionForExternalOutput(supplied)
-            : await loadShareableSession(result.slug, targetId);
-          if (targetSession.meta.slug !== result.slug) {
-            throw new Error("quick share replay does not match requested slug");
+          let targetSession: ReplaySession;
+          if (supplied) {
+            // The URL/storage slug may be location-scoped (notably SSH
+            // replays), while meta.slug intentionally remains the provider's
+            // original source slug. Validate the client snapshot against the
+            // canonical replay identity instead of comparing those slugs.
+            const canonical = await loadSession(result.slug, targetId);
+            const canonicalTargetId =
+              canonical.meta.location?.kind === "ssh" ? canonical.meta.location.id : undefined;
+            const suppliedTargetId =
+              supplied.meta.location?.kind === "ssh" ? supplied.meta.location.id : undefined;
+            if (
+              supplied.meta.sessionId !== canonical.meta.sessionId ||
+              supplied.meta.provider !== canonical.meta.provider ||
+              suppliedTargetId !== canonicalTargetId
+            ) {
+              throw new Error("quick share replay does not match requested session");
+            }
+            targetSession = sessionForExternalOutput(supplied);
+          } else {
+            targetSession = await loadShareableSession(result.slug, targetId);
           }
           const activeShare = { boxId: undefined as string | undefined };
           const created = await createQuickReplayShare(targetSession, {
