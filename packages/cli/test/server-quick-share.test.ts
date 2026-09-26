@@ -8,6 +8,7 @@ const quickShareState = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/replay-share.js", () => ({
+  QUICK_SHARE_MAX_BYTES: 10 * 1024 * 1024,
   QuickShareTooLargeError: class QuickShareTooLargeError extends Error {},
   createQuickReplayShare: quickShareState.create,
 }));
@@ -184,6 +185,27 @@ describe("Quick Share routes", () => {
     expect(await response.json()).toEqual({
       error: "quick share replay does not match requested session",
     });
+    expect(quickShareState.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized Quick Share request before JSON parsing", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(11 * 1024 * 1024),
+      },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "Quick Share request is too large" });
     expect(quickShareState.create).not.toHaveBeenCalled();
   });
 

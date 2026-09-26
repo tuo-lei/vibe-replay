@@ -13,6 +13,7 @@ import { loadSavedCloudInfo, publishCloudWithOverlays } from "../publishers/clou
 import { checkPublishStatus, loadSavedGistInfo, publishGist } from "../publishers/gist.js";
 import {
   createQuickReplayShare,
+  QUICK_SHARE_MAX_BYTES,
   QuickShareTooLargeError,
   type QuickReplayShare,
 } from "../replay-share.js";
@@ -22,6 +23,46 @@ import { scanForSecrets } from "../scan.js";
 import type { ReplaySession } from "../types.js";
 
 const INVALID_TARGET_ID_ERROR = "invalid targetId";
+const QUICK_SHARE_REQUEST_MAX_BYTES = QUICK_SHARE_MAX_BYTES + 64 * 1024;
+
+class QuickShareRequestTooLargeError extends Error {}
+
+async function readQuickShareRequestBody(
+  request: Request,
+): Promise<{ replay?: ReplaySession } | null> {
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > QUICK_SHARE_REQUEST_MAX_BYTES) {
+    throw new QuickShareRequestTooLargeError("Quick Share request is too large");
+  }
+  if (!request.body) return null;
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > QUICK_SHARE_REQUEST_MAX_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new QuickShareRequestTooLargeError("Quick Share request is too large");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as { replay?: ReplaySession };
+  } catch {
+    return null;
+  }
+}
 
 interface SessionOutputRouteDeps {
   baseDir: string;
@@ -83,7 +124,15 @@ export function registerSessionOutputRoutes(
     if (stopping) return c.json({ error: "server shutting down" }, 503);
     const key = quickShareKey(result.slug, targetId);
     const epoch = quickShareEpoch.get(key) ?? 0;
-    const body = (await c.req.json().catch(() => null)) as { replay?: ReplaySession } | null;
+    let body: { replay?: ReplaySession } | null;
+    try {
+      body = await readQuickShareRequestBody(c.req.raw);
+    } catch (err) {
+      if (err instanceof QuickShareRequestTooLargeError) {
+        return c.json({ error: err.message, maxBytes: QUICK_SHARE_REQUEST_MAX_BYTES }, 413);
+      }
+      throw err;
+    }
     const existing = quickShares.get(key);
     if (existing) {
       return c.json({
