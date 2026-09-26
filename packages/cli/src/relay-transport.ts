@@ -4,6 +4,7 @@ import {
   exportKeyString,
   generateContentKey,
   randomBoxId,
+  randomShipperCapability,
   type EncryptedFrame,
 } from "./relay-crypto.js";
 
@@ -99,6 +100,7 @@ export async function createRelayTransport(
   validateRelayOrigin(origin);
 
   const boxId = randomBoxId();
+  const shipperCapability = randomShipperCapability();
   const { key, raw } = await generateContentKey();
   const keyString = exportKeyString(raw);
   const wsUrl = `${origin.replace(/^http/, "ws")}/live/${boxId}`;
@@ -260,7 +262,7 @@ export async function createRelayTransport(
       reconnectDelayMs = 2000;
       everConnected = true;
       outageBeganAt = 0;
-      socket.send(JSON.stringify({ t: "hello", role: "vm" }));
+      socket.send(JSON.stringify({ t: "hello", role: "vm", claim: shipperCapability }));
       options.onConnectionChange?.("connected");
     };
     socket.onmessage = (event) => void onMessage(event);
@@ -308,7 +310,7 @@ export async function createRelayTransport(
     failReady("relay transport stopped before it became ready");
     try {
       if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ t: "goodbye", role: "vm" }));
+        ws.send(JSON.stringify({ t: "goodbye", role: "vm", claim: shipperCapability }));
         const flushMs = options.goodbyeFlushMs ?? 25;
         if (flushMs > 0) await new Promise((resolve) => setTimeout(resolve, flushMs));
       }

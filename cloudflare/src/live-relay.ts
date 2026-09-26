@@ -62,6 +62,8 @@ export interface NameCipher {
 
 interface Attachment {
   role: Role;
+  /** Shipper only: private capability established by the first modern VM hello. */
+  shipperClaim?: string;
   /** Viewer only: relay-assigned routing id, handed out in `welcome`. */
   vid?: string;
   /**
@@ -132,6 +134,8 @@ const VM_GONE_AT_KEY = "vmGoneAt";
  * and the shipper hasn't re-hello'd yet".
  */
 const VM_SEEN_KEY = "vmSeen";
+/** Private shipper capability. Relay-visible, but never present in a share URL. */
+const VM_CLAIM_KEY = "vmClaim";
 /**
  * How long a viewer hello waits for a shipper hello that may still be in
  * flight (or moments away — e.g. the shipper re-helloing after a deploy
@@ -186,6 +190,8 @@ function newVid(): string {
 
 export class LiveRelay {
   private ctx: DurableObjectState;
+  /** In-memory mirror for test harnesses without Durable Object storage. */
+  private shipperClaim: string | null = null;
   /**
    * Resolvers for viewer hellos waiting on a possibly-imminent shipper
    * hello. Drained (notified) every time a shipper hello finishes — the
@@ -198,6 +204,50 @@ export class LiveRelay {
 
   constructor(ctx: DurableObjectState) {
     this.ctx = ctx;
+  }
+
+  /**
+   * Authorize a VM hello. A modern shipper establishes a random capability
+   * before the share URL is exposed; subsequent VM takeovers must present the
+   * same value. Legacy shippers without a claim are accepted only while no
+   * capability has ever been established, and their `goodbye` cannot end the
+   * box immediately (the normal disconnect grace still cleans it up).
+   */
+  private async authorizeShipperClaim(value: unknown): Promise<string | null | false> {
+    const claim =
+      typeof value === "string" &&
+      value.length >= 32 &&
+      value.length <= 128 &&
+      B64URL_RE.test(value)
+        ? value
+        : null;
+
+    if (this.shipperClaim) return claim === this.shipperClaim ? this.shipperClaim : false;
+
+    const storage = this.ctx.storage;
+    if (storage?.get && storage?.put) {
+      try {
+        const stored = await storage.get<string>(VM_CLAIM_KEY);
+        if (typeof stored === "string" && stored.length > 0) {
+          this.shipperClaim = stored;
+          return claim === stored ? stored : false;
+        }
+        if (!claim) return null;
+        await storage.put(VM_CLAIM_KEY, claim);
+        this.shipperClaim = claim;
+        return claim;
+      } catch {
+        // Storage-backed boxes fail closed: losing claim state must never
+        // allow an arbitrary viewer to seize the VM role.
+        return false;
+      }
+    }
+
+    // Plain unit-test harnesses have no durable storage. Preserve the same
+    // semantics for the lifetime of this LiveRelay instance.
+    if (!claim) return null;
+    this.shipperClaim = claim;
+    return claim;
   }
 
   /** Durable "a shipper once claimed this box" flag; false on any storage trouble. */
@@ -565,6 +615,11 @@ export class LiveRelay {
               this.closeQuietly(ws, 1000, "box ended");
               return;
             }
+            const shipperClaim = await this.authorizeShipperClaim(msg.claim);
+            if (shipperClaim === false) {
+              this.closeQuietly(ws, 1008, "invalid shipper claim");
+              return;
+            }
             // One shipper per box: a new shipper takes over from the old one.
             const existing = this.vmSocket();
             if (existing && existing !== ws) {
@@ -586,7 +641,11 @@ export class LiveRelay {
               }
               this.closeQuietly(existing, 1000, "replaced");
             }
-            ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
+            ws.serializeAttachment({
+              role: "vm",
+              lastSeen: Date.now(),
+              ...(shipperClaim ? { shipperClaim } : {}),
+            } satisfies Attachment);
             // The shipper reconnected inside the end grace — cancel it.
             try {
               await this.ctx.storage.delete(VM_GONE_AT_KEY);
@@ -758,7 +817,12 @@ export class LiveRelay {
     // goodbye — no grace needed, since a clean shutdown never reconnects
     // with this box id. Viewers learn it immediately.
     if (msg.t === "goodbye" && attachment.role === "vm") {
-      await this.endBox();
+      // Only a VM authenticated with the private capability may permanently
+      // end the box. Legacy shippers fall back to the ordinary close/grace
+      // path, preserving compatibility without trusting a public box id.
+      if (attachment.shipperClaim && msg.claim === attachment.shipperClaim) {
+        await this.endBox();
+      }
       return;
     }
 

@@ -40,6 +40,7 @@ export function registerSessionOutputRoutes(
   const { baseDir, loadSession } = deps;
   const quickShares = new Map<string, QuickReplayShare>();
   const quickShareCreates = new Map<string, Promise<QuickReplayShare>>();
+  const quickShareEpoch = new Map<string, number>();
   let stopping = false;
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
 
@@ -81,6 +82,8 @@ export function registerSessionOutputRoutes(
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     if (stopping) return c.json({ error: "server shutting down" }, 503);
     const key = quickShareKey(result.slug, targetId);
+    const epoch = quickShareEpoch.get(key) ?? 0;
+    const body = (await c.req.json().catch(() => null)) as { replay?: ReplaySession } | null;
     const existing = quickShares.get(key);
     if (existing) {
       return c.json({
@@ -97,7 +100,13 @@ export function registerSessionOutputRoutes(
       let pending = quickShareCreates.get(key);
       if (!pending) {
         pending = (async () => {
-          const targetSession = await loadShareableSession(result.slug, targetId);
+          const supplied = body?.replay;
+          const targetSession = supplied
+            ? sessionForExternalOutput(supplied)
+            : await loadShareableSession(result.slug, targetId);
+          if (targetSession.meta.slug !== result.slug) {
+            throw new Error("quick share replay does not match requested slug");
+          }
           const activeShare = { boxId: undefined as string | undefined };
           const created = await createQuickReplayShare(targetSession, {
             onEnded: () => {
@@ -107,9 +116,9 @@ export function registerSessionOutputRoutes(
             },
           });
           activeShare.boxId = created.boxId;
-          if (stopping) {
+          if (stopping || (quickShareEpoch.get(key) ?? 0) !== epoch) {
             await created.stop();
-            throw new Error("server shutting down");
+            throw new Error(stopping ? "server shutting down" : "quick share stopped");
           }
           quickShares.set(key, created);
           return created;
@@ -151,9 +160,15 @@ export function registerSessionOutputRoutes(
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     const key = quickShareKey(result.slug, targetId);
+    quickShareEpoch.set(key, (quickShareEpoch.get(key) ?? 0) + 1);
+    const pending = quickShareCreates.get(key);
     const share = quickShares.get(key);
     quickShares.delete(key);
     if (share) await share.stop();
+    if (pending) await pending.catch(() => {});
+    const createdAfterWait = quickShares.get(key);
+    quickShares.delete(key);
+    if (createdAfterWait && createdAfterWait !== share) await createdAfterWait.stop();
     return c.json({ ok: true });
   });
 

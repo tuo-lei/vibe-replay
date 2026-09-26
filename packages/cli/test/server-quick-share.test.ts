@@ -93,6 +93,65 @@ describe("Quick Share routes", () => {
     expect(quickShareState.create).toHaveBeenCalledTimes(1);
   });
 
+  it("uses a supplied current replay snapshot for Quick Share", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+    const current = { ...replay(), annotations: [{ id: "current" }] } as ReplaySession;
+    quickShareState.create.mockResolvedValue({
+      url: "https://vibe-replay.com/share/box#key",
+      boxId: "box",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop: vi.fn(async () => {}),
+    });
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replay: current }),
+    });
+    expect(response.status).toBe(200);
+    expect(quickShareState.create).toHaveBeenCalledWith(
+      expect.objectContaining({ annotations: [{ id: "current" }] }),
+      expect.anything(),
+    );
+  });
+
+  it("cancels an in-flight share when DELETE wins the race", async () => {
+    const stop = vi.fn(async () => {});
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const createResponse = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(1));
+    const deleteResponse = app.request("/api/share/quick?slug=session-1", { method: "DELETE" });
+
+    quickShareState.resolve!({
+      url: "https://vibe-replay.com/share/box#key",
+      boxId: "box",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop,
+    });
+
+    expect((await createResponse).status).toBe(500);
+    expect((await deleteResponse).status).toBe(200);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(await (await app.request("/api/share/quick?slug=session-1")).json()).toEqual({
+      active: false,
+    });
+  });
+
   it("stops active shares during server cleanup", async () => {
     const stop = vi.fn(async () => {});
     quickShareState.create.mockResolvedValue({

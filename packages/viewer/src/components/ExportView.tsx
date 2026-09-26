@@ -21,6 +21,13 @@ interface Props {
   onQuickShareInfoChange: (info: QuickShareInfo | null) => void;
 }
 
+export function quickShareReplay(
+  session: ReplaySession,
+  annotations: ReplaySession["annotations"],
+): ReplaySession {
+  return { ...session, annotations };
+}
+
 interface GistInfo {
   gistId: string;
   gistUrl: string;
@@ -216,10 +223,11 @@ export default function ExportView({
   }, []);
 
   // Compute replay JSON size
-  const replaySize = useMemo(
-    () => (session ? new TextEncoder().encode(JSON.stringify(session)).byteLength : 0),
-    [session],
-  );
+  const replaySize = useMemo(() => {
+    if (!session) return 0;
+    return new TextEncoder().encode(JSON.stringify(quickShareReplay(session, annotations)))
+      .byteLength;
+  }, [session, annotations]);
   const CLOUD_MAX = 10 * 1024 * 1024;
   const GIST_MAX = 10 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
@@ -489,7 +497,11 @@ export default function ExportView({
     setQuickSharing(true);
     setQuickShareStatus(null);
     try {
-      const resp = await fetch(apiUrl("/api/share/quick"), { method: "POST" });
+      const resp = await fetch(apiUrl("/api/share/quick"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replay: quickShareReplay(session, annotations) }),
+      });
       const data = (await resp.json().catch(() => ({}))) as {
         error?: string;
       };
@@ -505,7 +517,7 @@ export default function ExportView({
     } finally {
       setQuickSharing(false);
     }
-  }, [session, quickShareTooBig, replaySize, onQuickShareInfoChange]);
+  }, [session, annotations, quickShareTooBig, replaySize, onQuickShareInfoChange]);
 
   const handleQuickShareStop = useCallback(async () => {
     setQuickSharing(true);

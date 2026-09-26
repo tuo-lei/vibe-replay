@@ -13,6 +13,7 @@ vi.mock("../src/relay-crypto.js", () => ({
   exportKeyString: () => "k".repeat(43),
   generateContentKey: async () => ({ key: {}, raw: new Uint8Array(32) }),
   randomBoxId: () => "b".repeat(22),
+  randomShipperCapability: () => "s".repeat(43),
 }));
 
 class FakeSocket {

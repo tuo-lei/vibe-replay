@@ -19,6 +19,7 @@
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const BOX_ID_BYTES = 16;
+const CAPABILITY_BYTES = 32;
 
 function base64urlEncode(bytes: Uint8Array<ArrayBuffer>): string {
   return Buffer.from(bytes).toString("base64url");
@@ -36,6 +37,11 @@ function aadFor(boxId: string): Uint8Array<ArrayBuffer> {
 /** Unguessable routing id. Also used as the AAD domain separator. */
 export function randomBoxId(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(BOX_ID_BYTES)));
+}
+
+/** Relay-visible shipper capability. Never included in the public share URL. */
+export function randomShipperCapability(): string {
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(CAPABILITY_BYTES)));
 }
 
 export interface ContentKey {

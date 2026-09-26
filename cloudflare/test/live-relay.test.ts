@@ -43,6 +43,8 @@ interface Harness {
   sockets: MockSocket[];
 }
 
+const VM_CLAIM = "s".repeat(43);
+
 function makeRelay(): Harness {
   const sockets: MockSocket[] = [];
   const ctx = {
@@ -54,14 +56,14 @@ function makeRelay(): Harness {
   return { relay: new LiveRelay(ctx), sockets };
 }
 
-const helloVm = (h: Harness) => {
+const helloVm = (h: Harness, claim: string | undefined = VM_CLAIM) => {
   const ws = mockSocket();
   h.sockets.push(ws);
   return {
     ws,
     p: h.relay.webSocketMessage(
       ws as unknown as WebSocket,
-      JSON.stringify({ t: "hello", role: "vm" }),
+      JSON.stringify({ t: "hello", role: "vm", ...(claim ? { claim } : {}) }),
     ),
   };
 };
@@ -264,6 +266,18 @@ describe("LiveRelay multi-viewer", () => {
     expect(second.ws.closed).toEqual([]);
   });
 
+  it("rejects a VM takeover that does not present the established shipper claim", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(first.ws.closed).toEqual([]);
+  });
+
   it("closes sockets that speak before hello", async () => {
     const h = makeRelay();
     const ws = mockSocket();
@@ -399,7 +413,7 @@ describe("LiveRelay shipper presence notices", () => {
     // not endBox() a box the replacement shipper now owns.
     await h.relay.webSocketMessage(
       first.ws as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye" }),
+      JSON.stringify({ t: "goodbye", claim: VM_CLAIM }),
     );
 
     // The box is still alive: a viewer can hello and the new shipper gets
@@ -934,7 +948,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
 
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
 
     expect(h.store.get("ended")).toBe(true);
@@ -992,6 +1006,22 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await h.relay.webSocketMessage(
       a.ws as unknown as WebSocket,
       JSON.stringify({ t: "goodbye", role: "viewer" }),
+    );
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("a public-box client cannot impersonate the shipper and end the box", async () => {
+    const h = makeStorageRelay();
+    const { p } = helloVm(h);
+    await p;
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+
+    await h.relay.webSocketMessage(
+      attacker.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: "a".repeat(43) }),
     );
     expect(h.store.get("ended")).toBeUndefined();
   });
@@ -1089,7 +1119,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await p2;
     await h.relay.webSocketMessage(
       vm2 as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
     expect(await probe()).toEqual({ status: "ended" });
   });
@@ -1226,7 +1256,7 @@ describe("LiveRelay box lifecycle — stale viewer sockets", () => {
 
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
 
     // Both learn it — the stale socket is not silently left on a dead box.
@@ -1243,7 +1273,7 @@ describe("LiveRelay box lifecycle — stale viewer sockets", () => {
     const a = await helloViewer(h, LEI_CIPHER);
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
     expect(h.store.get("ended")).toBe(true);
 

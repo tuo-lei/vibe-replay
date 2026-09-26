@@ -99,6 +99,7 @@ export function boxIdFromPath(pathname: string): string | null {
 interface Pending {
   resolve: (v: Record<string, unknown>) => void;
   reject: (e: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -312,6 +313,13 @@ export class LiveClient implements LiveRelay {
     if (typeof data !== "string") return;
     const p = this.pending.get(seq);
     if (!p) return; // unknown or already-timed-out command
+    if (p.timer) clearTimeout(p.timer);
+    p.timer = setTimeout(() => {
+      if (this.pending.get(seq) !== p) return;
+      this.pending.delete(seq);
+      this.chunkBufs.delete(seq);
+      p.reject(new Error("timeout"));
+    }, COMMAND_TIMEOUT_MS);
     let buf = this.chunkBufs.get(seq);
     if (!buf) {
       buf = { chunks, parts: Array.from<string>({ length: chunks }), received: 0 };
@@ -323,6 +331,7 @@ export class LiveClient implements LiveRelay {
     if (buf.received === buf.chunks) {
       this.chunkBufs.delete(seq);
       this.pending.delete(seq);
+      if (p.timer) clearTimeout(p.timer);
       try {
         p.resolve(JSON.parse(buf.parts.join("")) as Record<string, unknown>);
       } catch {
@@ -401,6 +410,7 @@ export class LiveClient implements LiveRelay {
     if (p) {
       this.pending.delete(inner.seq as number);
       this.chunkBufs.delete(inner.seq as number);
+      if (p.timer) clearTimeout(p.timer);
       p.resolve(inner);
     }
   }
@@ -414,7 +424,10 @@ export class LiveClient implements LiveRelay {
   private handleSessionEnded(): void {
     if (this.closed) return;
     this.intentionalClose = true;
-    for (const [, p] of this.pending) p.reject(new Error("session-ended"));
+    for (const [, p] of this.pending) {
+      if (p.timer) clearTimeout(p.timer);
+      p.reject(new Error("session-ended"));
+    }
     this.pending.clear();
     this.chunkBufs.clear();
     for (const h of this.sessionEndedHandlers) {
@@ -431,7 +444,10 @@ export class LiveClient implements LiveRelay {
     if (this.closed) return;
     this.closed = true;
     this.stopHeartbeat();
-    for (const [, p] of this.pending) p.reject(new Error("disconnected"));
+    for (const [, p] of this.pending) {
+      if (p.timer) clearTimeout(p.timer);
+      p.reject(new Error("disconnected"));
+    }
     this.pending.clear();
     this.chunkBufs.clear();
     if (this.intentionalClose) return;
@@ -480,12 +496,13 @@ export class LiveClient implements LiveRelay {
       this.seq += 1;
       const seq = this.seq;
       obj.seq = seq;
-      this.pending.set(seq, {
+      const pending: Pending = {
         resolve: (v) => resolve(v as unknown as T),
         reject,
-      });
+      };
+      this.pending.set(seq, pending);
       this.encryptFrame(obj).catch(reject);
-      setTimeout(() => {
+      pending.timer = setTimeout(() => {
         const p = this.pending.get(seq);
         if (p) {
           this.pending.delete(seq);
