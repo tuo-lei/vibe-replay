@@ -37,8 +37,8 @@ The repository currently defines these maintenance handoffs (all times `America/
 | Task | Schedule | Durable cross-run state |
 | --- | --- | --- |
 | `daily-code-quality` | Daily 07:00 | GitHub PR history and the `[automation] daily-code-quality ledger` issue |
-| `weekly-deps-update` | Monday 02:00 | GitHub PRs and the `[deps] weekly summary` issue |
-| `weekly-readme-docs-sync` | Wednesday 02:00 | GitHub merged/open PR history and scheduler run log |
+| `weekly-deps-update` | Monday 02:00 | GitHub PRs, the `[deps] weekly summary` issue, and a dedicated run ledger issue |
+| `weekly-readme-docs-sync` | Wednesday 02:00 | GitHub merged/open PR history and a dedicated run ledger issue |
 
 These files do not activate a schedule on their own. The scheduler needs an isolated repository checkout, `pnpm`, GitHub permissions for PRs/issues/comments, and access to current-head Codex review; otherwise its run must report the missing capability rather than relax the merge rules. The review requirement is retained from the previous routines and may still consume Codex review capacity even when a different bot does the coding.
 
