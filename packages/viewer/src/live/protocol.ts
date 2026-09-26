@@ -313,6 +313,14 @@ export class LiveClient implements LiveRelay {
     if (typeof data !== "string") return;
     const p = this.pending.get(seq);
     if (!p) return; // unknown or already-timed-out command
+    let buf = this.chunkBufs.get(seq);
+    if (!buf) {
+      buf = { chunks, parts: Array.from<string>({ length: chunks }), received: 0 };
+      this.chunkBufs.set(seq, buf);
+    }
+    if (buf.chunks !== chunks || buf.parts[chunk] !== undefined) return;
+    // Only accepted progress extends the inactivity deadline. Duplicate or
+    // inconsistent frames must not keep a command alive indefinitely.
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       if (this.pending.get(seq) !== p) return;
@@ -320,12 +328,6 @@ export class LiveClient implements LiveRelay {
       this.chunkBufs.delete(seq);
       p.reject(new Error("timeout"));
     }, COMMAND_TIMEOUT_MS);
-    let buf = this.chunkBufs.get(seq);
-    if (!buf) {
-      buf = { chunks, parts: Array.from<string>({ length: chunks }), received: 0 };
-      this.chunkBufs.set(seq, buf);
-    }
-    if (buf.chunks !== chunks || buf.parts[chunk] !== undefined) return;
     buf.parts[chunk] = data;
     buf.received += 1;
     if (buf.received === buf.chunks) {

@@ -277,6 +277,40 @@ describe("LiveClient chunked responses", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not extend the command deadline for duplicate chunks", async () => {
+    vi.useFakeTimers();
+    try {
+      const { LiveClient } = await import("./protocol");
+      const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+        "encrypt",
+        "decrypt",
+      ]);
+      const fakeWs = { send: () => {}, close: () => {}, readyState: 1 };
+      // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+      const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+      const pending = client.getReplay();
+      const rejection = expect(pending).rejects.toThrow("timeout");
+      const firstChunk = await encryptFrameFor(key, "test-box", {
+        seq: 1,
+        chunk: 0,
+        chunks: 2,
+        data: '{"ok":true,',
+      });
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      await client.handleMessage({ data: JSON.stringify(firstChunk) });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await client.handleMessage({ data: JSON.stringify(firstChunk) });
+      // The accepted chunk set a new 30 s deadline at t=25 s. Replaying that
+      // same chunk at t=45 s must not move the deadline past t=55 s.
+      await vi.advanceTimersByTimeAsync(10_001);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /** Encrypt a roster display name the way the hello handshake does. */
