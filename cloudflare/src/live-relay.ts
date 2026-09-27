@@ -234,6 +234,20 @@ export class LiveRelay {
     this.ctx = ctx;
   }
 
+  /** True only when a syntactically valid private claim commits to this public box id. */
+  private async claimCommitsToCurrentBox(value: unknown): Promise<boolean> {
+    if (
+      typeof value !== "string" ||
+      value.length < 32 ||
+      value.length > 128 ||
+      !B64URL_RE.test(value) ||
+      this.boxId === null
+    ) {
+      return false;
+    }
+    return (await shipperClaimBoxId(value)) === this.boxId;
+  }
+
   /**
    * Authorize a VM hello. A modern shipper establishes a random capability
    * before the share URL is exposed; subsequent VM takeovers must present the
@@ -718,9 +732,17 @@ export class LiveRelay {
                 // share recipient displace it. If the legacy socket actually
                 // drops, vmSocket() disappears and the legitimate claimless
                 // reconnect is accepted below during the normal grace window.
+                //
+                // Rolling-deploy exception: a modern CLI may have connected
+                // to the previous Worker, which ignored its then-unknown
+                // claim field and left an unclaimed attachment behind. Its
+                // private claim still commits to the public box id, so it can
+                // authenticate before the stale pre-upgrade socket is swept.
                 if (existingAttachment?.role === "vm" && !existingAttachment.shipperClaim) {
-                  this.closeQuietly(ws, 1008, "legacy shipper already connected");
-                  return;
+                  if (!(await this.claimCommitsToCurrentBox(msg.claim))) {
+                    this.closeQuietly(ws, 1008, "legacy shipper already connected");
+                    return;
+                  }
                 }
               } catch {
                 this.closeQuietly(ws, 1008, "invalid shipper state");

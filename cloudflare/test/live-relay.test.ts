@@ -1112,6 +1112,27 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     ).toBe(true);
   });
 
+  it("lets a committed modern reconnect replace a half-open pre-upgrade VM", async () => {
+    const h = makeStorageRelay();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+
+    // Simulate the old Worker accepting the modern CLI's hello but ignoring
+    // its unknown claim field: the socket is live and vmSeen is durable, yet
+    // the attachment and storage contain no shipper claim.
+    const preUpgrade = helloVm(h, null);
+    await preUpgrade.p;
+    expect(preUpgrade.ws.closed).toEqual([]);
+    expect(h.store.get("vmSeen")).toBe(true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+
+    const reconnect = helloVm(h, VM_CLAIM);
+    await reconnect.p;
+
+    expect(reconnect.ws.closed).toEqual([]);
+    expect(preUpgrade.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(h.store.get("vmClaim")).toBe(VM_CLAIM);
+  });
+
   it("does not let a share holder claim a truly legacy random box", async () => {
     const h = makeStorageRelay();
     h.store.set("vmSeen", true);
