@@ -1042,15 +1042,22 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.get("ended")).toBeUndefined();
   });
 
-  it("does not let a second legacy VM replace an already-seen legacy shipper", async () => {
+  it("keeps an already-seen legacy box legacy across reconnects", async () => {
     const h = makeStorageRelay();
     const first = helloVm(h, null);
     await first.p;
 
     const second = helloVm(h, null);
     await second.p;
-    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
-    expect(first.ws.closed).toEqual([]);
+    expect(second.ws.closed).toEqual([]);
+    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+
+    await h.relay.webSocketMessage(
+      second.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm" }),
+    );
+    expect(h.store.get("ended")).toBeUndefined();
   });
 
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {

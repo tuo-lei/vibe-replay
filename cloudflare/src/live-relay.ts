@@ -235,13 +235,13 @@ export class LiveRelay {
           this.shipperClaim = stored;
           return claim === stored ? stored : false;
         }
-        // A legacy box that has already had a shipper cannot be upgraded by
-        // an unauthenticated reconnect: once the public URL exists, any
-        // viewer knows the box id and could otherwise become the first
-        // claimant. Modern shippers already have a stored claim and take the
-        // branch above; first-time legacy shippers are still accepted before
-        // vmSeen is persisted.
-        if (boxSeenBefore) return false;
+        // A legacy box that has already had a shipper can reconnect only as
+        // legacy. Once the public URL exists, any viewer knows the box id, so
+        // a later caller must never be allowed to become the first claimant
+        // and gain permanent-goodbye authority. Claimless reconnects remain
+        // compatible with pre-capability CLIs, but they never acquire that
+        // authority and stay on the ordinary disconnect/grace lifecycle.
+        if (boxSeenBefore && claim) return false;
         if (!claim) return null;
         await storage.put(VM_CLAIM_KEY, claim);
         this.shipperClaim = claim;
@@ -255,7 +255,7 @@ export class LiveRelay {
 
     // Plain unit-test harnesses have no durable storage. Preserve the same
     // semantics for the lifetime of this LiveRelay instance.
-    if (boxSeenBefore) return false;
+    if (boxSeenBefore && claim) return false;
     if (!claim) return null;
     this.shipperClaim = claim;
     return claim;
