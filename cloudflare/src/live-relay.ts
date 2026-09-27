@@ -664,7 +664,9 @@ export class LiveRelay {
         }
       }
     } catch {
-      // storage best-effort (some harnesses lack it)
+      // A transient grace-state read must not disarm the only retry path for
+      // a reaped half-open VM whose close callback may never arrive.
+      gracePersistenceRetry = true;
     }
     if (live > 0 || gracePending || gracePersistenceRetry) {
       this.ensureSweepAlarm();
@@ -969,9 +971,14 @@ export class LiveRelay {
     // with this box id. Viewers learn it immediately.
     if (msg.t === "goodbye" && attachment.role === "vm") {
       // Only a VM authenticated with the private capability may permanently
-      // end the box. Legacy shippers fall back to the ordinary close/grace
-      // path, preserving compatibility without trusting a public box id.
-      if (attachment.shipperClaim && msg.claim === attachment.shipperClaim) {
+      // end the box. During a rolling deploy, an older Worker may have
+      // accepted a modern shipper hello without persisting the then-unknown
+      // claim on the socket attachment; in that case the goodbye's claim can
+      // still prove ownership through the public box-id commitment.
+      const authenticated =
+        (attachment.shipperClaim && msg.claim === attachment.shipperClaim) ||
+        (!attachment.shipperClaim && (await this.claimCommitsToCurrentBox(msg.claim)));
+      if (authenticated) {
         await this.endBox();
       }
       return;

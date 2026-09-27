@@ -902,6 +902,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
   interface StorageHarness extends Harness {
     alarmAt: () => number | null;
     store: Map<string, unknown>;
+    failNextGet: (key: string) => void;
     failNextPut: (key: string) => void;
   }
 
@@ -909,6 +910,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     const sockets: MockSocket[] = [];
     const store = existingStore ?? new Map<string, unknown>();
     let alarmAt: number | null = null;
+    let failGetKey: string | null = null;
     let failPutKey: string | null = null;
     const ctx = {
       getWebSockets: () => [...sockets],
@@ -916,7 +918,13 @@ describe("LiveRelay box lifecycle (session ended)", () => {
         sockets.push(ws);
       },
       storage: {
-        get: (k: string) => Promise.resolve(store.get(k)),
+        get: (k: string) => {
+          if (failGetKey === k) {
+            failGetKey = null;
+            return Promise.reject(new Error("transient storage failure"));
+          }
+          return Promise.resolve(store.get(k));
+        },
         put: (k: string, v: unknown) => {
           if (failPutKey === k) {
             failPutKey = null;
@@ -945,6 +953,9 @@ describe("LiveRelay box lifecycle (session ended)", () => {
       sockets,
       alarmAt: () => alarmAt,
       store,
+      failNextGet: (key: string) => {
+        failGetKey = key;
+      },
       failNextPut: (key: string) => {
         failPutKey = key;
       },
@@ -975,6 +986,24 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     const allSent = [...a.ws.sent, ...b.ws.sent].join("\n");
     expect(allSent).not.toContain("Lei");
     expect(allSent).not.toContain("Wendy");
+  });
+
+  it("accepts a committed goodbye from a pre-upgrade modern shipper attachment", async () => {
+    const h = makeStorageRelay();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+    h.store.set("vmSeen", true);
+    const vm = mockSocket();
+    vm.serializeAttachment({ role: "vm", lastSeen: Date.now() });
+    h.sockets.push(vm);
+    const viewer = await helloViewer(h, LEI_CIPHER);
+
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
+    );
+
+    expect(h.store.get("ended")).toBe(true);
+    expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
   });
 
   it("a viewer joining a dead box learns it immediately, with no welcome", async () => {
@@ -1177,6 +1206,22 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await h.relay.alarm();
     expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
     expect(typeof h.store.get("vmGoneAt")).toBe("number");
+  });
+
+  it("keeps the sweep armed when reading persisted grace transiently fails", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    h.failNextGet("vmGoneAt");
+    await h.relay.alarm();
+    expect(h.alarmAt()).not.toBeNull();
+    expect(h.store.get("ended")).toBeUndefined();
   });
 
   it("keeps grace when a stale VM cannot be marked reaped", async () => {
