@@ -1,9 +1,9 @@
 import {
+  boxIdForShipperCapability,
   decryptFrame as decryptRelayFrame,
   encryptFrame,
   exportKeyString,
   generateContentKey,
-  randomBoxId,
   randomShipperCapability,
   type EncryptedFrame,
 } from "./relay-crypto.js";
@@ -99,8 +99,8 @@ export async function createRelayTransport(
   const origin = (options.relayOrigin ?? DEFAULT_RELAY_ORIGIN).replace(/\/$/, "");
   validateRelayOrigin(origin);
 
-  const boxId = randomBoxId();
   const shipperCapability = randomShipperCapability();
+  const boxId = await boxIdForShipperCapability(shipperCapability);
   const { key, raw } = await generateContentKey();
   const keyString = exportKeyString(raw);
   const wsUrl = `${origin.replace(/^http/, "ws")}/live/${boxId}`;

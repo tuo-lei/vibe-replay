@@ -44,6 +44,7 @@ interface Harness {
 }
 
 const VM_CLAIM = "s".repeat(43);
+const VM_CLAIM_BOX_ID = "3kTDWNqyszoLfq5ZkkzHGQ";
 
 function makeRelay(): Harness {
   const sockets: MockSocket[] = [];
@@ -1078,6 +1079,36 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.get("ended")).toBeUndefined();
   });
 
+  it("migrates a modern claim acknowledged by the previous Worker during rolling deploy", async () => {
+    const h = makeStorageRelay();
+    // Simulate the pre-capability Worker: it accepted this modern CLI's
+    // hello and persisted only vmSeen, ignoring the then-unknown claim.
+    h.store.set("vmSeen", true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+
+    const reconnect = helloVm(h, VM_CLAIM);
+    await reconnect.p;
+    expect(reconnect.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBe(VM_CLAIM);
+    expect(
+      reconnect.ws.sent
+        .map((value) => JSON.parse(value))
+        .some((message) => message.t === "hello-ok"),
+    ).toBe(true);
+  });
+
+  it("does not let a share holder claim a truly legacy random box", async () => {
+    const h = makeStorageRelay();
+    h.store.set("vmSeen", true);
+    await h.relay.fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"));
+
+    const attacker = helloVm(h, VM_CLAIM);
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
   it("allows a legacy reconnect after the sweep reaps a half-open VM socket", async () => {
     const h = makeStorageRelay();
     const first = helloVm(h, null);
@@ -1170,7 +1201,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     const h = makeStorageRelay();
     const probe = () =>
       h.relay
-        .fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"))
+        .fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`))
         .then((r) => r.json() as Promise<{ status: string }>);
 
     // Box never had a shipper: "unknown", not "ended" — the probe stays

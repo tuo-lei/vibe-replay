@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  boxIdForShipperCapability,
   decryptFrame,
   encryptFrame,
   exportKeyString,
   generateContentKey,
   importKeyString,
   randomBoxId,
+  randomShipperCapability,
 } from "../src/relay-crypto.js";
 
 describe("relay-crypto", () => {
@@ -71,5 +73,13 @@ describe("relay-crypto", () => {
     const ids = new Set(Array.from({ length: 100 }, randomBoxId));
     expect(ids.size).toBe(100);
     for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+
+  it("derives a stable public box id commitment from the private shipper capability", async () => {
+    const claim = "s".repeat(43);
+    expect(await boxIdForShipperCapability(claim)).toBe("3kTDWNqyszoLfq5ZkkzHGQ");
+    expect(await boxIdForShipperCapability(randomShipperCapability())).toMatch(
+      /^[A-Za-z0-9_-]{22}$/,
+    );
   });
 });

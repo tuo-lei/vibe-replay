@@ -166,9 +166,28 @@ const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
  *  see the plaintext). */
 const MAX_CIPHER_CHARS = 2048;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
+const BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
+const SHIPPER_CLAIM_DOMAIN = "vibe-replay-shipper-claim:v1:";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Derive the 128-bit public commitment used by modern shipper box ids. */
+async function shipperClaimBoxId(claim: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${SHIPPER_CLAIM_DOMAIN}${claim}`),
+    ),
+  );
+  return base64urlEncode(digest.slice(0, 16));
 }
 
 /**
@@ -197,6 +216,8 @@ function newVid(): string {
 
 export class LiveRelay {
   private ctx: DurableObjectState;
+  /** Box id captured from the current fetch; set again on every reconnect. */
+  private boxId: string | null = null;
   /** In-memory mirror for test harnesses without Durable Object storage. */
   private shipperClaim: string | null = null;
   /**
@@ -242,13 +263,22 @@ export class LiveRelay {
           this.shipperClaim = stored;
           return claim === stored ? stored : false;
         }
+        // Modern CLIs derive the public box id from this private claim. That
+        // commitment survives a rolling deployment even when an older Worker
+        // accepted the hello but ignored the unknown claim field. It lets the
+        // upgraded Worker distinguish that legitimate reconnect from a share
+        // recipient attempting to become the first claimant of a truly
+        // legacy random box.
+        const claimMatchesBox =
+          claim !== null && this.boxId !== null && (await shipperClaimBoxId(claim)) === this.boxId;
+        if (claim !== null && this.boxId !== null && !claimMatchesBox) return false;
         // A legacy box that has already had a shipper can reconnect only as
         // legacy. Once the public URL exists, any viewer knows the box id, so
         // a later caller must never be allowed to become the first claimant
         // and gain permanent-goodbye authority. Claimless reconnects remain
         // compatible with pre-capability CLIs, but they never acquire that
         // authority and stay on the ordinary disconnect/grace lifecycle.
-        if (boxSeenBefore && claim) return false;
+        if (boxSeenBefore && claim && !claimMatchesBox) return false;
         if (!claim) return null;
         await storage.put(VM_CLAIM_KEY, claim);
         this.shipperClaim = claim;
@@ -262,7 +292,10 @@ export class LiveRelay {
 
     // Plain unit-test harnesses have no durable storage. Preserve the same
     // semantics for the lifetime of this LiveRelay instance.
-    if (boxSeenBefore && claim) return false;
+    const claimMatchesBox =
+      claim !== null && this.boxId !== null && (await shipperClaimBoxId(claim)) === this.boxId;
+    if (claim !== null && this.boxId !== null && !claimMatchesBox) return false;
+    if (boxSeenBefore && claim && !claimMatchesBox) return false;
     if (!claim) return null;
     this.shipperClaim = claim;
     return claim;
@@ -300,11 +333,14 @@ export class LiveRelay {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const maybeBoxId = parts.at(-1) === "status" ? parts.at(-2) : parts.at(-1);
+    if (maybeBoxId && BOX_ID_RE.test(maybeBoxId)) this.boxId = maybeBoxId;
     if (request.headers.get("Upgrade") !== "websocket") {
       // Box liveness probe for the viewer shell: lets the viewer show the
       // "session ended" page before the name gate instead of hanging on
       // "Connecting…". Only the lifecycle flag is exposed — never content.
-      const url = new URL(request.url);
       if (url.pathname.endsWith("/status")) {
         let ended = false;
         try {

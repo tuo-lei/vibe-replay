@@ -44,6 +44,22 @@ export function randomShipperCapability(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(CAPABILITY_BYTES)));
 }
 
+/**
+ * Derive the public 128-bit box id as a one-way commitment to the private
+ * shipper capability. An older relay can treat this as an ordinary random box
+ * id, while an upgraded relay can verify a reconnecting modern shipper even if
+ * the older relay never persisted its claim during a rolling deployment.
+ */
+export async function boxIdForShipperCapability(claim: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`vibe-replay-shipper-claim:v1:${claim}`),
+    ),
+  );
+  return base64urlEncode(digest.slice(0, BOX_ID_BYTES));
+}
+
 export interface ContentKey {
   key: CryptoKey;
   raw: Uint8Array<ArrayBuffer>;
