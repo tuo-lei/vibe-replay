@@ -626,12 +626,35 @@ export class LiveRelay {
               this.closeQuietly(ws, 1000, "box ended");
               return;
             }
+            const activeBeforeAuth = this.vmSocket();
+            if (activeBeforeAuth && activeBeforeAuth !== ws) {
+              try {
+                const existingAttachment =
+                  activeBeforeAuth.deserializeAttachment() as Attachment | null;
+                // A live pre-capability shipper has no identity proof that a
+                // second claimless socket can reproduce. Do not let a public
+                // share recipient displace it. If the legacy socket actually
+                // drops, vmSocket() disappears and the legitimate claimless
+                // reconnect is accepted below during the normal grace window.
+                if (existingAttachment?.role === "vm" && !existingAttachment.shipperClaim) {
+                  this.closeQuietly(ws, 1008, "legacy shipper already connected");
+                  return;
+                }
+              } catch {
+                this.closeQuietly(ws, 1008, "invalid shipper state");
+                return;
+              }
+            }
             const shipperClaim = await this.authorizeShipperClaim(msg.claim, await this.vmSeen());
             if (shipperClaim === false) {
               this.closeQuietly(ws, 1008, "invalid shipper claim");
               return;
             }
             // One shipper per box: a new shipper takes over from the old one.
+            // Re-read after authorization: concurrent first hellos can race
+            // across awaits, and the later one must still displace whichever
+            // authenticated socket won the race rather than using a stale
+            // pre-auth snapshot.
             const existing = this.vmSocket();
             if (existing && existing !== ws) {
               // Mark the old socket displaced *before* closing it: the

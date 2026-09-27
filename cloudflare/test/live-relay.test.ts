@@ -1036,21 +1036,39 @@ describe("LiveRelay box lifecycle (session ended)", () => {
 
     const attacker = helloVm(h, "a".repeat(43));
     await attacker.p;
-    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(attacker.ws.closed).toEqual([
+      { code: 1008, reason: "legacy shipper already connected" },
+    ]);
     expect(legacy.ws.closed).toEqual([]);
     expect(h.store.get("vmClaim")).toBeUndefined();
     expect(h.store.get("ended")).toBeUndefined();
   });
 
-  it("keeps an already-seen legacy box legacy across reconnects", async () => {
+  it("rejects a claimless takeover while a legacy shipper is still active", async () => {
     const h = makeStorageRelay();
     const first = helloVm(h, null);
     await first.p;
 
     const second = helloVm(h, null);
     await second.p;
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "legacy shipper already connected" }]);
+    expect(first.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
+  it("keeps an already-seen legacy box legacy across a real reconnect", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    h.sockets.splice(h.sockets.indexOf(first.ws), 1);
+    await h.relay.webSocketClose(first.ws as unknown as WebSocket);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    const second = helloVm(h, null);
+    await second.p;
     expect(second.ws.closed).toEqual([]);
-    expect(first.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
     expect(h.store.get("vmClaim")).toBeUndefined();
 
     await h.relay.webSocketMessage(
