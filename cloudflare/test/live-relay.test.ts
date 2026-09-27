@@ -1006,6 +1006,30 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
   });
 
+  it("recovers the committed box id after hibernation for a pre-upgrade goodbye", async () => {
+    const beforeSleep = makeStorageRelay();
+    await beforeSleep.relay.fetch(
+      new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`),
+    );
+    beforeSleep.store.set("vmSeen", true);
+
+    // Hibernation recreates the DO instance while the WebSocket attachment
+    // survives. No new fetch runs before the socket's next message.
+    const vm = mockSocket();
+    vm.serializeAttachment({ role: "vm", lastSeen: Date.now() });
+    const afterWake = makeStorageRelay(beforeSleep.store);
+    afterWake.sockets.push(vm);
+    const viewer = await helloViewer(afterWake, LEI_CIPHER);
+
+    await afterWake.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
+    );
+
+    expect(afterWake.store.get("ended")).toBe(true);
+    expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
+  });
+
   it("a viewer joining a dead box learns it immediately, with no welcome", async () => {
     const h = makeStorageRelay();
     h.store.set("ended", true);

@@ -143,6 +143,8 @@ const VM_GONE_AT_KEY = "vmGoneAt";
 const VM_SEEN_KEY = "vmSeen";
 /** Private shipper capability. Relay-visible, but never present in a share URL. */
 const VM_CLAIM_KEY = "vmClaim";
+/** Durable copy of the public box id for hibernation wake message handlers. */
+const BOX_ID_KEY = "boxId";
 /**
  * How long a viewer hello waits for a shipper hello that may still be in
  * flight (or moments away — e.g. the shipper re-helloing after a deploy
@@ -234,18 +236,33 @@ export class LiveRelay {
     this.ctx = ctx;
   }
 
+  /** Recover the public box id after a hibernation wake without a fresh fetch(). */
+  private async currentBoxId(): Promise<string | null> {
+    if (this.boxId) return this.boxId;
+    try {
+      const stored = await this.ctx.storage.get<string>(BOX_ID_KEY);
+      if (typeof stored === "string" && BOX_ID_RE.test(stored)) {
+        this.boxId = stored;
+        return stored;
+      }
+    } catch {
+      // Fail closed: without the box id we cannot verify a claim commitment.
+    }
+    return null;
+  }
+
   /** True only when a syntactically valid private claim commits to this public box id. */
   private async claimCommitsToCurrentBox(value: unknown): Promise<boolean> {
     if (
       typeof value !== "string" ||
       value.length < 32 ||
       value.length > 128 ||
-      !B64URL_RE.test(value) ||
-      this.boxId === null
+      !B64URL_RE.test(value)
     ) {
       return false;
     }
-    return (await shipperClaimBoxId(value)) === this.boxId;
+    const boxId = await this.currentBoxId();
+    return boxId !== null && (await shipperClaimBoxId(value)) === boxId;
   }
 
   /**
@@ -356,7 +373,14 @@ export class LiveRelay {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
     const maybeBoxId = parts.at(-1) === "status" ? parts.at(-2) : parts.at(-1);
-    if (maybeBoxId && BOX_ID_RE.test(maybeBoxId)) this.boxId = maybeBoxId;
+    if (maybeBoxId && BOX_ID_RE.test(maybeBoxId)) {
+      this.boxId = maybeBoxId;
+      try {
+        await this.ctx.storage.put(BOX_ID_KEY, maybeBoxId);
+      } catch {
+        // The current instance can still validate commitments in memory.
+      }
+    }
     if (request.headers.get("Upgrade") !== "websocket") {
       // Box liveness probe for the viewer shell: lets the viewer show the
       // "session ended" page before the name gate instead of hanging on
