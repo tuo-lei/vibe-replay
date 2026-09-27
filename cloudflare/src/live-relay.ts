@@ -213,7 +213,10 @@ export class LiveRelay {
    * capability has ever been established, and their `goodbye` cannot end the
    * box immediately (the normal disconnect grace still cleans it up).
    */
-  private async authorizeShipperClaim(value: unknown): Promise<string | null | false> {
+  private async authorizeShipperClaim(
+    value: unknown,
+    boxSeenBefore: boolean,
+  ): Promise<string | null | false> {
     const claim =
       typeof value === "string" &&
       value.length >= 32 &&
@@ -232,6 +235,13 @@ export class LiveRelay {
           this.shipperClaim = stored;
           return claim === stored ? stored : false;
         }
+        // A legacy box that has already had a shipper cannot be upgraded by
+        // an unauthenticated reconnect: once the public URL exists, any
+        // viewer knows the box id and could otherwise become the first
+        // claimant. Modern shippers already have a stored claim and take the
+        // branch above; first-time legacy shippers are still accepted before
+        // vmSeen is persisted.
+        if (boxSeenBefore) return false;
         if (!claim) return null;
         await storage.put(VM_CLAIM_KEY, claim);
         this.shipperClaim = claim;
@@ -245,6 +255,7 @@ export class LiveRelay {
 
     // Plain unit-test harnesses have no durable storage. Preserve the same
     // semantics for the lifetime of this LiveRelay instance.
+    if (boxSeenBefore) return false;
     if (!claim) return null;
     this.shipperClaim = claim;
     return claim;
@@ -615,7 +626,7 @@ export class LiveRelay {
               this.closeQuietly(ws, 1000, "box ended");
               return;
             }
-            const shipperClaim = await this.authorizeShipperClaim(msg.claim);
+            const shipperClaim = await this.authorizeShipperClaim(msg.claim, await this.vmSeen());
             if (shipperClaim === false) {
               this.closeQuietly(ws, 1008, "invalid shipper claim");
               return;

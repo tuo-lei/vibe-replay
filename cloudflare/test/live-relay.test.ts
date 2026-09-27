@@ -56,7 +56,7 @@ function makeRelay(): Harness {
   return { relay: new LiveRelay(ctx), sockets };
 }
 
-const helloVm = (h: Harness, claim: string | undefined = VM_CLAIM) => {
+const helloVm = (h: Harness, claim: string | null | undefined = VM_CLAIM) => {
   const ws = mockSocket();
   h.sockets.push(ws);
   return {
@@ -1024,6 +1024,33 @@ describe("LiveRelay box lifecycle (session ended)", () => {
       JSON.stringify({ t: "goodbye", role: "vm", claim: "a".repeat(43) }),
     );
     expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("does not let a public client claim an already-seen legacy box", async () => {
+    const h = makeStorageRelay();
+    const legacy = helloVm(h, null);
+    await legacy.p;
+    expect(legacy.ws.closed).toEqual([]);
+    expect(h.store.get("vmSeen")).toBe(true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(legacy.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("does not let a second legacy VM replace an already-seen legacy shipper", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    const second = helloVm(h, null);
+    await second.p;
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(first.ws.closed).toEqual([]);
   });
 
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {
