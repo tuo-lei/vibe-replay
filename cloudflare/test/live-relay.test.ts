@@ -902,12 +902,14 @@ describe("LiveRelay box lifecycle (session ended)", () => {
   interface StorageHarness extends Harness {
     alarmAt: () => number | null;
     store: Map<string, unknown>;
+    failNextPut: (key: string) => void;
   }
 
   function makeStorageRelay(existingStore?: Map<string, unknown>): StorageHarness {
     const sockets: MockSocket[] = [];
     const store = existingStore ?? new Map<string, unknown>();
     let alarmAt: number | null = null;
+    let failPutKey: string | null = null;
     const ctx = {
       getWebSockets: () => [...sockets],
       acceptWebSocket: (ws: MockSocket) => {
@@ -916,6 +918,10 @@ describe("LiveRelay box lifecycle (session ended)", () => {
       storage: {
         get: (k: string) => Promise.resolve(store.get(k)),
         put: (k: string, v: unknown) => {
+          if (failPutKey === k) {
+            failPutKey = null;
+            return Promise.reject(new Error("transient storage failure"));
+          }
           store.set(k, v);
           return Promise.resolve();
         },
@@ -934,7 +940,15 @@ describe("LiveRelay box lifecycle (session ended)", () => {
         },
       },
     } as unknown as DurableObjectState;
-    return { relay: new LiveRelay(ctx), sockets, alarmAt: () => alarmAt, store };
+    return {
+      relay: new LiveRelay(ctx),
+      sockets,
+      alarmAt: () => alarmAt,
+      store,
+      failNextPut: (key: string) => {
+        failPutKey = key;
+      },
+    };
   }
 
   const sessionEndedFrames = (ws: MockSocket) =>
@@ -1129,6 +1143,23 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(second.ws.closed).toEqual([]);
     expect(h.store.get("vmGoneAt")).toBeUndefined();
     expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
+  it("retries grace persistence before marking a stale VM reaped", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    h.failNextPut("vmGoneAt");
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBeUndefined();
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
   });
 
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {

@@ -26,6 +26,7 @@ const INVALID_TARGET_ID_ERROR = "invalid targetId";
 const QUICK_SHARE_REQUEST_MAX_BYTES = QUICK_SHARE_MAX_BYTES + 64 * 1024;
 
 class QuickShareRequestTooLargeError extends Error {}
+class QuickShareInvalidRequestError extends Error {}
 
 async function readQuickShareRequestBody(
   request: Request,
@@ -58,9 +59,13 @@ async function readQuickShareRequestBody(
 
   if (!text.trim()) return null;
   try {
-    return JSON.parse(text) as { replay?: ReplaySession };
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new QuickShareInvalidRequestError("invalid Quick Share request");
+    }
+    return parsed as { replay?: ReplaySession };
   } catch {
-    return null;
+    throw new QuickShareInvalidRequestError("invalid Quick Share request");
   }
 }
 
@@ -84,6 +89,7 @@ export function registerSessionOutputRoutes(
     string,
     { epoch: number; promise: Promise<QuickReplayShare> }
   >();
+  const quickShareInFlight = new Set<Promise<QuickReplayShare>>();
   const quickShareEpoch = new Map<string, number>();
   let stopping = false;
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
@@ -134,6 +140,9 @@ export function registerSessionOutputRoutes(
       if (err instanceof QuickShareRequestTooLargeError) {
         return c.json({ error: err.message, maxBytes: QUICK_SHARE_REQUEST_MAX_BYTES }, 413);
       }
+      if (err instanceof QuickShareInvalidRequestError) {
+        return c.json({ error: err.message }, 400);
+      }
       throw err;
     }
     // Reading a streaming request body can yield long enough for DELETE or
@@ -179,7 +188,15 @@ export function registerSessionOutputRoutes(
             ) {
               throw new Error("quick share replay does not match requested session");
             }
-            targetSession = sessionForExternalOutput(supplied);
+            // Only annotations are allowed to come from the browser snapshot.
+            // Scene content remains server-canonical so a crafted loopback
+            // request cannot bypass persisted redactions/edits.
+            const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
+            const effectiveCanonical = sessionWithEffectiveContent(canonical, overlaysData);
+            targetSession = sessionForExternalOutput({
+              ...effectiveCanonical,
+              annotations: supplied.annotations ?? effectiveCanonical.annotations,
+            });
           } else {
             targetSession = await loadShareableSession(result.slug, targetId);
           }
@@ -201,9 +218,11 @@ export function registerSessionOutputRoutes(
         })();
         const entry = { epoch, promise };
         quickShareCreates.set(key, entry);
+        quickShareInFlight.add(promise);
         pending = entry;
         void promise
           .finally(() => {
+            quickShareInFlight.delete(promise);
             if (quickShareCreates.get(key) === entry) quickShareCreates.delete(key);
           })
           .catch(() => {});
@@ -562,7 +581,7 @@ export function registerSessionOutputRoutes(
   return {
     stopQuickShares: async () => {
       stopping = true;
-      await Promise.allSettled([...quickShareCreates.values()].map((entry) => entry.promise));
+      await Promise.allSettled(quickShareInFlight);
       const active = [...new Set(quickShares.values())];
       quickShares.clear();
       await Promise.allSettled(active.map((share) => share.stop()));

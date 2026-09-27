@@ -7,6 +7,11 @@ const quickShareState = vi.hoisted(() => ({
   resolve: null as null | ((value: unknown) => void),
 }));
 
+const overlayState = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ version: 1, overlays: [] })),
+  apply: vi.fn((session: ReplaySession) => session),
+}));
+
 vi.mock("../src/replay-share.js", () => ({
   QUICK_SHARE_MAX_BYTES: 10 * 1024 * 1024,
   QuickShareTooLargeError: class QuickShareTooLargeError extends Error {},
@@ -14,9 +19,9 @@ vi.mock("../src/replay-share.js", () => ({
 }));
 
 vi.mock("../src/overlays.js", () => ({
-  loadOverlays: vi.fn(async () => ({})),
+  loadOverlays: overlayState.load,
   sessionForExternalOutput: (session: ReplaySession) => session,
-  sessionWithEffectiveContent: (session: ReplaySession) => session,
+  sessionWithEffectiveContent: overlayState.apply,
 }));
 
 const { registerSessionOutputRoutes } = await import("../src/server-routes/session-output.js");
@@ -68,6 +73,10 @@ function delayedQuickShareRequest(path: string, payload: unknown) {
 beforeEach(() => {
   quickShareState.create.mockReset();
   quickShareState.resolve = null;
+  overlayState.load.mockReset();
+  overlayState.load.mockResolvedValue({ version: 1, overlays: [] });
+  overlayState.apply.mockReset();
+  overlayState.apply.mockImplementation((session: ReplaySession) => session);
   quickShareState.create.mockImplementation(
     () =>
       new Promise((resolve) => {
@@ -150,6 +159,75 @@ describe("Quick Share routes", () => {
       expect.objectContaining({ annotations: [{ id: "current" }] }),
       expect.anything(),
     );
+  });
+
+  it("uses canonical overlaid scenes while taking current annotations from the snapshot", async () => {
+    const app = new Hono();
+    const canonical = replay();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => canonical),
+    });
+    overlayState.apply.mockImplementation(
+      (session: ReplaySession) =>
+        ({
+          ...session,
+          scenes: [
+            {
+              type: "user-prompt",
+              content: `redacted:${session.scenes[0]?.content ?? ""}`,
+            },
+          ],
+        }) as ReplaySession,
+    );
+    const supplied = {
+      ...replay(),
+      scenes: [{ type: "user-prompt", content: "client-unredacted-secret" }],
+      annotations: [{ id: "current" }],
+    } as ReplaySession;
+    quickShareState.create.mockResolvedValue({
+      url: "https://vibe-replay.com/share/box#key",
+      boxId: "box",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop: vi.fn(async () => {}),
+    });
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replay: supplied }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(overlayState.load).toHaveBeenCalledWith("/tmp/vibe-replay-test", "session-1", undefined);
+    expect(quickShareState.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scenes: [{ type: "user-prompt", content: "redacted:hello" }],
+        annotations: [{ id: "current" }],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects malformed nonblank JSON instead of falling back to the stored replay", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"replay":',
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid Quick Share request" });
+    expect(quickShareState.create).not.toHaveBeenCalled();
   });
 
   it("accepts an SSH snapshot whose storage slug differs from its source slug", async () => {
@@ -443,5 +521,66 @@ describe("Quick Share routes", () => {
     expect((await createResponse).status).toBe(500);
     await cleanup;
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for superseded in-flight creations during server cleanup", async () => {
+    const resolves: Array<(value: unknown) => void> = [];
+    quickShareState.create.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolves.push(resolve);
+        }),
+    );
+    const firstStop = vi.fn(async () => {});
+    const secondStop = vi.fn(async () => {});
+    const app = new Hono();
+    const routes = registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const firstPost = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(1));
+    const deleting = app.request("/api/share/quick?slug=session-1", { method: "DELETE" });
+    await Promise.resolve();
+    const secondPost = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(2));
+
+    let cleanupDone = false;
+    const cleanup = routes.stopQuickShares().then(() => {
+      cleanupDone = true;
+    });
+    await Promise.resolve();
+    expect(cleanupDone).toBe(false);
+
+    resolves[1]!({
+      url: "https://vibe-replay.com/share/new#key",
+      boxId: "new",
+      sizeBytes: 456,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:01.000Z",
+      viewers: () => [],
+      stop: secondStop,
+    });
+    await Promise.resolve();
+    expect(cleanupDone).toBe(false);
+
+    resolves[0]!({
+      url: "https://vibe-replay.com/share/old#key",
+      boxId: "old",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop: firstStop,
+    });
+
+    expect((await firstPost).status).toBe(500);
+    expect((await secondPost).status).toBe(500);
+    expect((await deleting).status).toBe(200);
+    await cleanup;
+    expect(firstStop).toHaveBeenCalledTimes(1);
+    expect(secondStop).toHaveBeenCalledTimes(1);
+    expect(cleanupDone).toBe(true);
   });
 });

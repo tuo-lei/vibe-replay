@@ -540,23 +540,36 @@ export class LiveRelay {
         if (att.role === "vm") {
           // close() on a half-open WebSocket may never produce
           // webSocketClose, while getWebSockets() can keep returning it.
-          // Mark it dead before closing so vmSocket() immediately stops
-          // treating it as the active shipper and a legitimate reconnect can
-          // take over during the normal end grace.
-          try {
-            ws.serializeAttachment({ ...att, reaped: true } satisfies Attachment);
-          } catch {
-            // attachment unwritable — close below still gets a chance
-          }
+          // Persist the end-grace state before hiding the VM from vmSocket().
+          // If storage is transiently unavailable, leave it unreaped so a
+          // later alarm or close callback can retry instead of stranding the
+          // box forever in "unknown".
+          let graceReady = false;
           try {
             const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
             const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
-            if (ended !== true && typeof vmGoneAt !== "number") {
+            if (ended === true || typeof vmGoneAt === "number") {
+              graceReady = true;
+            } else {
               await this.ctx.storage.put(VM_GONE_AT_KEY, now);
-              await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+              graceReady = true;
+              try {
+                await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+              } catch {
+                // The durable grace timestamp is the important part. The
+                // normal alarm tail below retries scheduling while grace is
+                // pending.
+              }
             }
           } catch {
-            // storage best-effort (some harnesses lack it)
+            // Retry on the next sweep/close callback.
+          }
+          if (graceReady) {
+            try {
+              ws.serializeAttachment({ ...att, reaped: true } satisfies Attachment);
+            } catch {
+              // attachment unwritable — close below still gets a chance
+            }
           }
         }
         if (att.role === "viewer" && typeof att.vid === "string" && !att.leaveNotified) {
