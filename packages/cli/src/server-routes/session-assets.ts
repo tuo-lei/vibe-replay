@@ -4,6 +4,9 @@ import { getErrorMessage, requireSlug, safeTargetId } from "../server-core.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "../server-persistence.js";
 import type { Annotation, ReplaySession, SessionOverlays } from "../types.js";
 
+const INVALID_TARGET_ID_ERROR = "invalid targetId";
+const SESSION_NOT_FOUND_ERROR = "session not found";
+
 export function registerSessionAssetRoutes(
   app: Hono,
   deps: {
@@ -18,11 +21,11 @@ export function registerSessionAssetRoutes(
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(result.slug, targetId);
     } catch {
-      return c.json({ error: "session not found" }, 404);
+      return c.json({ error: SESSION_NOT_FOUND_ERROR }, 404);
     }
     const anns = await loadAnnotations(baseDir, result.slug, targetId);
     return c.json(anns);
@@ -32,11 +35,11 @@ export function registerSessionAssetRoutes(
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(result.slug, targetId);
     } catch {
-      return c.json({ error: "session not found" }, 404);
+      return c.json({ error: SESSION_NOT_FOUND_ERROR }, 404);
     }
     let body: Annotation[];
     try {
@@ -57,11 +60,11 @@ export function registerSessionAssetRoutes(
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(result.slug, targetId);
     } catch {
-      return c.json({ error: "session not found" }, 404);
+      return c.json({ error: SESSION_NOT_FOUND_ERROR }, 404);
     }
     const overlays = await loadOverlays(baseDir, result.slug, targetId);
     return c.json(overlays);
@@ -71,11 +74,11 @@ export function registerSessionAssetRoutes(
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(result.slug, targetId);
     } catch {
-      return c.json({ error: "session not found" }, 404);
+      return c.json({ error: SESSION_NOT_FOUND_ERROR }, 404);
     }
     let body: SessionOverlays;
     try {
