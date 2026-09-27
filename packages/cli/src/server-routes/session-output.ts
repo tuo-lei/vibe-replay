@@ -136,6 +136,14 @@ export function registerSessionOutputRoutes(
       }
       throw err;
     }
+    // Reading a streaming request body can yield long enough for DELETE or
+    // server cleanup to invalidate this POST. Recheck before consulting any
+    // active/pending share state so an old request cannot return a newer
+    // generation's share or start work after shutdown.
+    if (stopping) return c.json({ error: "server shutting down" }, 503);
+    if ((quickShareEpoch.get(key) ?? 0) !== epoch) {
+      return c.json({ error: "quick share stopped" }, 409);
+    }
     const existing = quickShares.get(key);
     if (existing) {
       return c.json({
@@ -149,11 +157,6 @@ export function registerSessionOutputRoutes(
     }
 
     try {
-      // DELETE advances the generation. A POST that started reading its body
-      // before that DELETE must never create or join a share afterwards.
-      if ((quickShareEpoch.get(key) ?? 0) !== epoch) {
-        throw new Error("quick share stopped");
-      }
       let pending = quickShareCreates.get(key);
       if (!pending || pending.epoch !== epoch) {
         const promise = (async () => {

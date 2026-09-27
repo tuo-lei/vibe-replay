@@ -36,6 +36,35 @@ function replay(): ReplaySession {
   } as ReplaySession;
 }
 
+function delayedQuickShareRequest(path: string, payload: unknown) {
+  let release!: () => void;
+  let markRead!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const readStarted = new Promise<void>((resolve) => {
+    markRead = resolve;
+  });
+  let sent = false;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (sent) return;
+      sent = true;
+      markRead();
+      await gate;
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+      controller.close();
+    },
+  });
+  const request = new Request(`http://localhost${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+  return { request, readStarted, release };
+}
+
 beforeEach(() => {
   quickShareState.create.mockReset();
   quickShareState.resolve = null;
@@ -294,6 +323,62 @@ describe("Quick Share routes", () => {
       url: "https://vibe-replay.com/share/new#key",
       sizeBytes: 456,
     });
+  });
+
+  it("does not let a pre-delete body read return a newer share", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+    const delayed = delayedQuickShareRequest("/api/share/quick?slug=session-1", {
+      replay: replay(),
+    });
+    const stalePost = app.request(delayed.request);
+    await delayed.readStarted;
+
+    expect(
+      (await app.request("/api/share/quick?slug=session-1", { method: "DELETE" })).status,
+    ).toBe(200);
+    quickShareState.create.mockResolvedValue({
+      url: "https://vibe-replay.com/share/new#key",
+      boxId: "new",
+      sizeBytes: 456,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:01.000Z",
+      viewers: () => [],
+      stop: vi.fn(async () => {}),
+    });
+    expect((await app.request("/api/share/quick?slug=session-1", { method: "POST" })).status).toBe(
+      200,
+    );
+
+    delayed.release();
+    expect((await stalePost).status).toBe(409);
+    expect(await (await app.request("/api/share/quick?slug=session-1")).json()).toMatchObject({
+      active: true,
+      url: "https://vibe-replay.com/share/new#key",
+    });
+    expect(quickShareState.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start Quick Share after shutdown finishes during a body read", async () => {
+    const app = new Hono();
+    const routes = registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+    const delayed = delayedQuickShareRequest("/api/share/quick?slug=session-1", {
+      replay: replay(),
+    });
+    const stalePost = app.request(delayed.request);
+    await delayed.readStarted;
+
+    await routes.stopQuickShares();
+    delayed.release();
+
+    expect((await stalePost).status).toBe(503);
+    expect(quickShareState.create).not.toHaveBeenCalled();
   });
 
   it("stops active shares during server cleanup", async () => {
