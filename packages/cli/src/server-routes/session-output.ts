@@ -28,9 +28,7 @@ const QUICK_SHARE_REQUEST_MAX_BYTES = QUICK_SHARE_MAX_BYTES + 64 * 1024;
 class QuickShareRequestTooLargeError extends Error {}
 class QuickShareInvalidRequestError extends Error {}
 
-async function readQuickShareRequestBody(
-  request: Request,
-): Promise<{ replay?: ReplaySession } | null> {
+async function readQuickShareRequestBody(request: Request): Promise<{ replay?: unknown } | null> {
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > QUICK_SHARE_REQUEST_MAX_BYTES) {
     throw new QuickShareRequestTooLargeError("Quick Share request is too large");
@@ -63,7 +61,7 @@ async function readQuickShareRequestBody(
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new QuickShareInvalidRequestError("invalid Quick Share request");
     }
-    return parsed as { replay?: ReplaySession };
+    return parsed as { replay?: unknown };
   } catch {
     throw new QuickShareInvalidRequestError("invalid Quick Share request");
   }
@@ -133,7 +131,7 @@ export function registerSessionOutputRoutes(
     if (stopping) return c.json({ error: "server shutting down" }, 503);
     const key = quickShareKey(result.slug, targetId);
     const epoch = quickShareEpoch.get(key) ?? 0;
-    let body: { replay?: ReplaySession } | null;
+    let body: { replay?: unknown } | null;
     try {
       body = await readQuickShareRequestBody(c.req.raw);
     } catch (err) {
@@ -171,7 +169,24 @@ export function registerSessionOutputRoutes(
         const promise = (async () => {
           const supplied = body?.replay;
           let targetSession: ReplaySession;
-          if (supplied) {
+          if (supplied !== undefined) {
+            if (
+              !supplied ||
+              typeof supplied !== "object" ||
+              !("meta" in supplied) ||
+              !supplied.meta ||
+              typeof supplied.meta !== "object" ||
+              !("sessionId" in supplied.meta) ||
+              typeof supplied.meta.sessionId !== "string" ||
+              !("provider" in supplied.meta) ||
+              typeof supplied.meta.provider !== "string" ||
+              ("annotations" in supplied &&
+                supplied.annotations !== undefined &&
+                !Array.isArray(supplied.annotations))
+            ) {
+              throw new QuickShareInvalidRequestError("invalid Quick Share replay snapshot");
+            }
+            const snapshot = supplied as ReplaySession;
             // The URL/storage slug may be location-scoped (notably SSH
             // replays), while meta.slug intentionally remains the provider's
             // original source slug. Validate the client snapshot against the
@@ -180,13 +195,15 @@ export function registerSessionOutputRoutes(
             const canonicalTargetId =
               canonical.meta.location?.kind === "ssh" ? canonical.meta.location.id : undefined;
             const suppliedTargetId =
-              supplied.meta.location?.kind === "ssh" ? supplied.meta.location.id : undefined;
+              snapshot.meta.location?.kind === "ssh" ? snapshot.meta.location.id : undefined;
             if (
-              supplied.meta.sessionId !== canonical.meta.sessionId ||
-              supplied.meta.provider !== canonical.meta.provider ||
+              snapshot.meta.sessionId !== canonical.meta.sessionId ||
+              snapshot.meta.provider !== canonical.meta.provider ||
               suppliedTargetId !== canonicalTargetId
             ) {
-              throw new Error("quick share replay does not match requested session");
+              throw new QuickShareInvalidRequestError(
+                "quick share replay does not match requested session",
+              );
             }
             // Only annotations are allowed to come from the browser snapshot.
             // Scene content remains server-canonical so a crafted loopback
@@ -195,7 +212,7 @@ export function registerSessionOutputRoutes(
             const effectiveCanonical = sessionWithEffectiveContent(canonical, overlaysData);
             targetSession = sessionForExternalOutput({
               ...effectiveCanonical,
-              annotations: supplied.annotations ?? effectiveCanonical.annotations,
+              annotations: snapshot.annotations ?? effectiveCanonical.annotations,
             });
           } else {
             targetSession = await loadShareableSession(result.slug, targetId);
@@ -242,6 +259,9 @@ export function registerSessionOutputRoutes(
           { error: err.message, sizeBytes: err.sizeBytes, maxBytes: err.maxBytes },
           413,
         );
+      }
+      if (err instanceof QuickShareInvalidRequestError) {
+        return c.json({ error: err.message }, 400);
       }
       const message = getErrorMessage(err);
       if (message.startsWith("Session not found:")) {

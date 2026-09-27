@@ -288,10 +288,28 @@ describe("Quick Share routes", () => {
       body: JSON.stringify({ replay: wrong }),
     });
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: "quick share replay does not match requested session",
     });
+    expect(quickShareState.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a supplied replay snapshot without required identity metadata", async () => {
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const response = await app.request("/api/share/quick?slug=session-1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replay: {} }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid Quick Share replay snapshot" });
     expect(quickShareState.create).not.toHaveBeenCalled();
   });
 
