@@ -1179,6 +1179,35 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(typeof h.store.get("vmGoneAt")).toBe("number");
   });
 
+  it("keeps grace when a stale VM cannot be marked reaped", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+
+    const originalSerialize = first.ws.serializeAttachment;
+    let failOnce = true;
+    first.ws.serializeAttachment = function (value: unknown) {
+      if (failOnce && (value as { reaped?: boolean }).reaped) {
+        failOnce = false;
+        throw new Error("attachment write failed");
+      }
+      return originalSerialize.call(this, value);
+    };
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBeUndefined();
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+    expect(h.alarmAt()).not.toBeNull();
+
+    // The next sweep can persist the marker and continue the normal grace
+    // instead of having erased it as a false "reconnect".
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+  });
+
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {
     const h = makeStorageRelay();
     const { ws: vm, p } = helloVm(h);

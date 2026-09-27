@@ -538,6 +538,7 @@ export class LiveRelay {
     let live = 0;
     let reaped = 0;
     let gracePersistenceRetry = false;
+    let staleVmWithoutReapedMarker: WebSocket | null = null;
     for (const ws of this.ctx.getWebSockets()) {
       let att: Attachment | null = null;
       try {
@@ -591,7 +592,12 @@ export class LiveRelay {
             try {
               ws.serializeAttachment({ ...att, reaped: true } satisfies Attachment);
             } catch {
-              // attachment unwritable — close below still gets a chance
+              // The durable grace timestamp exists, but vmSocket() would
+              // still see this half-open stale VM because its attachment
+              // could not be marked reaped. Remember exactly this socket so
+              // the grace tail does not mistake it for a real reconnect.
+              staleVmWithoutReapedMarker = ws;
+              gracePersistenceRetry = true;
             }
           }
         }
@@ -646,7 +652,8 @@ export class LiveRelay {
     try {
       const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
       if (typeof vmGoneAt === "number") {
-        if (this.vmSocket()) {
+        const attachedVm = this.vmSocket();
+        if (attachedVm && attachedVm !== staleVmWithoutReapedMarker) {
           // Shipper reconnected inside the grace — the box lives on.
           await this.ctx.storage.delete(VM_GONE_AT_KEY);
         } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
