@@ -906,13 +906,25 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     failNextPut: (key: string) => void;
   }
 
-  function makeStorageRelay(existingStore?: Map<string, unknown>): StorageHarness {
+  function makeStorageRelay(
+    existingStore?: Map<string, unknown>,
+    durableObjectName?: string,
+  ): StorageHarness {
     const sockets: MockSocket[] = [];
     const store = existingStore ?? new Map<string, unknown>();
     let alarmAt: number | null = null;
     let failGetKey: string | null = null;
     let failPutKey: string | null = null;
     const ctx = {
+      ...(durableObjectName
+        ? {
+            id: {
+              name: durableObjectName,
+              toString: () => durableObjectName,
+              equals: () => false,
+            },
+          }
+        : {}),
       getWebSockets: () => [...sockets],
       acceptWebSocket: (ws: MockSocket) => {
         sockets.push(ws);
@@ -1007,17 +1019,13 @@ describe("LiveRelay box lifecycle (session ended)", () => {
   });
 
   it("recovers the committed box id after hibernation for a pre-upgrade goodbye", async () => {
-    const beforeSleep = makeStorageRelay();
-    await beforeSleep.relay.fetch(
-      new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`),
-    );
-    beforeSleep.store.set("vmSeen", true);
-
-    // Hibernation recreates the DO instance while the WebSocket attachment
-    // survives. No new fetch runs before the socket's next message.
+    // Simulate state created by the pre-BOX_ID_KEY Worker: vmSeen exists,
+    // but neither the new storage key nor a current-instance fetch has
+    // populated boxId.
+    const legacyStore = new Map<string, unknown>([["vmSeen", true]]);
+    const afterWake = makeStorageRelay(legacyStore, `live:${VM_CLAIM_BOX_ID}`);
     const vm = mockSocket();
     vm.serializeAttachment({ role: "vm", lastSeen: Date.now() });
-    const afterWake = makeStorageRelay(beforeSleep.store);
     afterWake.sockets.push(vm);
     const viewer = await helloViewer(afterWake, LEI_CIPHER);
 
@@ -1027,6 +1035,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     );
 
     expect(afterWake.store.get("ended")).toBe(true);
+    expect(afterWake.store.get("boxId")).toBe(VM_CLAIM_BOX_ID);
     expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
   });
 

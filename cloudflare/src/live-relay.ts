@@ -248,6 +248,22 @@ export class LiveRelay {
     } catch {
       // Fail closed: without the box id we cannot verify a claim commitment.
     }
+    // The namespace creates this DO with idFromName(`live:<boxId>`). Unlike
+    // instance fields, the Durable Object's own name survives hibernation and
+    // also exists for sockets accepted by the pre-BOX_ID_KEY Worker version.
+    const durableName = this.ctx.id?.name;
+    if (typeof durableName === "string" && durableName.startsWith("live:")) {
+      const namedBoxId = durableName.slice("live:".length);
+      if (BOX_ID_RE.test(namedBoxId)) {
+        this.boxId = namedBoxId;
+        try {
+          await this.ctx.storage.put(BOX_ID_KEY, namedBoxId);
+        } catch {
+          // The in-memory identity is still sufficient for this wake.
+        }
+        return namedBoxId;
+      }
+    }
     return null;
   }
 
