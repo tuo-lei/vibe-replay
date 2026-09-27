@@ -517,6 +517,7 @@ export class LiveRelay {
     const now = Date.now();
     let live = 0;
     let reaped = 0;
+    let gracePersistenceRetry = false;
     for (const ws of this.ctx.getWebSockets()) {
       let att: Attachment | null = null;
       try {
@@ -562,7 +563,9 @@ export class LiveRelay {
               }
             }
           } catch {
-            // Retry on the next sweep/close callback.
+            // Keep the sweep armed so a half-open socket whose close callback
+            // never arrives gets another chance to persist VM_GONE_AT_KEY.
+            gracePersistenceRetry = true;
           }
           if (graceReady) {
             try {
@@ -636,7 +639,7 @@ export class LiveRelay {
     } catch {
       // storage best-effort (some harnesses lack it)
     }
-    if (live > 0 || gracePending) {
+    if (live > 0 || gracePending || gracePersistenceRetry) {
       this.ensureSweepAlarm();
     } else {
       try {

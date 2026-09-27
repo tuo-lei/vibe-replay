@@ -1156,6 +1156,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
     expect((first.ws.attachment as { reaped?: boolean }).reaped).toBeUndefined();
     expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.alarmAt()).not.toBeNull();
 
     await h.relay.alarm();
     expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
