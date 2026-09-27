@@ -1071,7 +1071,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.get("vmClaim")).toBeUndefined();
   });
 
-  it("keeps an already-seen legacy box legacy across a real reconnect", async () => {
+  it("rejects an unauthenticated legacy reconnect after a real disconnect", async () => {
     const h = makeStorageRelay();
     const first = helloVm(h, null);
     await first.p;
@@ -1082,14 +1082,9 @@ describe("LiveRelay box lifecycle (session ended)", () => {
 
     const second = helloVm(h, null);
     await second.p;
-    expect(second.ws.closed).toEqual([]);
-    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
     expect(h.store.get("vmClaim")).toBeUndefined();
-
-    await h.relay.webSocketMessage(
-      second.ws as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
-    );
     expect(h.store.get("ended")).toBeUndefined();
   });
 
@@ -1144,7 +1139,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.get("vmClaim")).toBeUndefined();
   });
 
-  it("allows a legacy reconnect after the sweep reaps a half-open VM socket", async () => {
+  it("rejects an unauthenticated legacy reconnect after a half-open VM is reaped", async () => {
     const h = makeStorageRelay();
     const first = helloVm(h, null);
     await first.p;
@@ -1161,8 +1156,8 @@ describe("LiveRelay box lifecycle (session ended)", () => {
 
     const second = helloVm(h, null);
     await second.p;
-    expect(second.ws.closed).toEqual([]);
-    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
     expect(h.store.get("vmClaim")).toBeUndefined();
   });
 

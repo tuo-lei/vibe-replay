@@ -273,6 +273,7 @@ export class LiveRelay {
     if (storage?.get && storage?.put) {
       try {
         const stored = await storage.get<string>(VM_CLAIM_KEY);
+        const durableSeen = (await storage.get<boolean>(VM_SEEN_KEY)) === true;
         if (typeof stored === "string" && stored.length > 0) {
           this.shipperClaim = stored;
           return claim === stored ? stored : false;
@@ -292,8 +293,13 @@ export class LiveRelay {
         // and gain permanent-goodbye authority. Claimless reconnects remain
         // compatible with pre-capability CLIs, but they never acquire that
         // authority and stay on the ordinary disconnect/grace lifecycle.
-        if (boxSeenBefore && claim && !claimMatchesBox) return false;
-        if (!claim) return null;
+        if ((durableSeen || boxSeenBefore) && claim && !claimMatchesBox) return false;
+        // Once a legacy box has acknowledged its first shipper, a later
+        // claimless socket has no credential that distinguishes it from a
+        // share recipient. Keep the first connection compatible, but fail
+        // closed on unauthenticated reconnects. Modern CLIs can reconnect via
+        // the box-id commitment above.
+        if (!claim) return durableSeen || boxSeenBefore ? false : null;
         await storage.put(VM_CLAIM_KEY, claim);
         this.shipperClaim = claim;
         return claim;
@@ -310,7 +316,7 @@ export class LiveRelay {
       claim !== null && this.boxId !== null && (await shipperClaimBoxId(claim)) === this.boxId;
     if (claim !== null && this.boxId !== null && !claimMatchesBox) return false;
     if (boxSeenBefore && claim && !claimMatchesBox) return false;
-    if (!claim) return null;
+    if (!claim) return boxSeenBefore ? false : null;
     this.shipperClaim = claim;
     return claim;
   }
