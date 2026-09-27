@@ -239,6 +239,63 @@ describe("Quick Share routes", () => {
     });
   });
 
+  it("does not reuse a pre-delete creation for a post-delete POST", async () => {
+    const resolves: Array<(value: unknown) => void> = [];
+    quickShareState.create.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolves.push(resolve);
+        }),
+    );
+    const firstStop = vi.fn(async () => {});
+    const secondStop = vi.fn(async () => {});
+    const app = new Hono();
+    registerSessionOutputRoutes(app, {
+      baseDir: "/tmp/vibe-replay-test",
+      loadSession: vi.fn(async () => replay()),
+    });
+
+    const firstPost = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(1));
+
+    // DELETE advances the generation but waits for the old creation to
+    // settle. A new POST arriving meanwhile must start its own generation.
+    const deleting = app.request("/api/share/quick?slug=session-1", { method: "DELETE" });
+    await Promise.resolve();
+    const secondPost = app.request("/api/share/quick?slug=session-1", { method: "POST" });
+    await vi.waitFor(() => expect(quickShareState.create).toHaveBeenCalledTimes(2));
+
+    resolves[0]!({
+      url: "https://vibe-replay.com/share/old#key",
+      boxId: "old",
+      sizeBytes: 123,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:00.000Z",
+      viewers: () => [],
+      stop: firstStop,
+    });
+    resolves[1]!({
+      url: "https://vibe-replay.com/share/new#key",
+      boxId: "new",
+      sizeBytes: 456,
+      maxBytes: 10 * 1024 * 1024,
+      startedAt: "2026-09-21T00:00:01.000Z",
+      viewers: () => [],
+      stop: secondStop,
+    });
+
+    expect((await firstPost).status).toBe(500);
+    expect((await deleting).status).toBe(200);
+    expect((await secondPost).status).toBe(200);
+    expect(firstStop).toHaveBeenCalledTimes(1);
+    expect(secondStop).not.toHaveBeenCalled();
+    expect(await (await app.request("/api/share/quick?slug=session-1")).json()).toMatchObject({
+      active: true,
+      url: "https://vibe-replay.com/share/new#key",
+      sizeBytes: 456,
+    });
+  });
+
   it("stops active shares during server cleanup", async () => {
     const stop = vi.fn(async () => {});
     quickShareState.create.mockResolvedValue({

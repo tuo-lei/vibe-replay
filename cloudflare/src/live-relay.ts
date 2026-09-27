@@ -90,6 +90,13 @@ interface Attachment {
    */
   displaced?: boolean;
   /**
+   * Shipper only: set when the liveness sweep has declared this socket dead
+   * and asked the runtime to close it. The runtime may keep returning a
+   * half-open socket from getWebSockets() even when webSocketClose never
+   * arrives, so routing and reconnect checks must ignore reaped shippers.
+   */
+  reaped?: boolean;
+  /**
    * Viewer only: set when the sweep alarm actually delivered this viewer's
    * leave notice to an attached shipper while reaping the socket.
    * webSocketClose — and later alarms, while the half-open socket lingers —
@@ -380,7 +387,7 @@ export class LiveRelay {
         // viewer frames must reach the replacement, never the dying
         // socket (the runtime may still list it while the close
         // completes).
-        if (att?.role === "vm" && !att.displaced) return ws;
+        if (att?.role === "vm" && !att.displaced && !att.reaped) return ws;
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -402,7 +409,7 @@ export class LiveRelay {
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
-        if (att?.role !== "vm" || att.displaced) continue;
+        if (att?.role !== "vm" || att.displaced || att.reaped) continue;
         if (typeof att.lastSeen === "number" && now - att.lastSeen > VM_SWEEP_AFTER_MS) continue;
         return ws;
       } catch {
@@ -482,6 +489,7 @@ export class LiveRelay {
         continue;
       }
       if (!att || (att.role !== "vm" && att.role !== "viewer")) continue;
+      if (att.role === "vm" && att.reaped) continue;
       const timeout = att.role === "vm" ? VM_SWEEP_AFTER_MS : PRESENCE_SWEEP_AFTER_MS;
       if (typeof att.lastSeen !== "number") {
         // Legacy attachment from before the liveness sweep deployed: stamp it
@@ -493,6 +501,28 @@ export class LiveRelay {
         continue;
       }
       if (now - att.lastSeen > timeout) {
+        if (att.role === "vm") {
+          // close() on a half-open WebSocket may never produce
+          // webSocketClose, while getWebSockets() can keep returning it.
+          // Mark it dead before closing so vmSocket() immediately stops
+          // treating it as the active shipper and a legitimate reconnect can
+          // take over during the normal end grace.
+          try {
+            ws.serializeAttachment({ ...att, reaped: true } satisfies Attachment);
+          } catch {
+            // attachment unwritable — close below still gets a chance
+          }
+          try {
+            const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
+            const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
+            if (ended !== true && typeof vmGoneAt !== "number") {
+              await this.ctx.storage.put(VM_GONE_AT_KEY, now);
+              await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+            }
+          } catch {
+            // storage best-effort (some harnesses lack it)
+          }
+        }
         if (att.role === "viewer" && typeof att.vid === "string" && !att.leaveNotified) {
           // A half-open socket's close may never deliver webSocketClose
           // promptly, and the leave notice lives only in that callback —
@@ -604,7 +634,7 @@ export class LiveRelay {
     // Ignore everything from it — a stale `goodbye` must not endBox() a box
     // the replacement shipper now owns, and its heartbeats/frames belong to
     // the old epoch.
-    if (attachment?.role === "vm" && attachment.displaced) {
+    if (attachment?.role === "vm" && (attachment.displaced || attachment.reaped)) {
       return;
     }
 
@@ -922,7 +952,7 @@ export class LiveRelay {
         );
       }
     }
-    if (att?.role === "vm" && !att.displaced) {
+    if (att?.role === "vm" && !att.displaced && !att.reaped) {
       // The shipper is gone. Its retry loop reconnects with the same box id
       // (backoff caps at 30 s) — start the end grace; the sweep declares the
       // box dead only if no shipper reattaches in time. Skip when the box

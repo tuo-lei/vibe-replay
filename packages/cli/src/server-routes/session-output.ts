@@ -80,7 +80,10 @@ export function registerSessionOutputRoutes(
 ): SessionOutputRouteHandle {
   const { baseDir, loadSession } = deps;
   const quickShares = new Map<string, QuickReplayShare>();
-  const quickShareCreates = new Map<string, Promise<QuickReplayShare>>();
+  const quickShareCreates = new Map<
+    string,
+    { epoch: number; promise: Promise<QuickReplayShare> }
+  >();
   const quickShareEpoch = new Map<string, number>();
   let stopping = false;
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
@@ -146,9 +149,14 @@ export function registerSessionOutputRoutes(
     }
 
     try {
+      // DELETE advances the generation. A POST that started reading its body
+      // before that DELETE must never create or join a share afterwards.
+      if ((quickShareEpoch.get(key) ?? 0) !== epoch) {
+        throw new Error("quick share stopped");
+      }
       let pending = quickShareCreates.get(key);
-      if (!pending) {
-        pending = (async () => {
+      if (!pending || pending.epoch !== epoch) {
+        const promise = (async () => {
           const supplied = body?.replay;
           let targetSession: ReplaySession;
           if (supplied) {
@@ -188,14 +196,16 @@ export function registerSessionOutputRoutes(
           quickShares.set(key, created);
           return created;
         })();
-        quickShareCreates.set(key, pending);
-        void pending
+        const entry = { epoch, promise };
+        quickShareCreates.set(key, entry);
+        pending = entry;
+        void promise
           .finally(() => {
-            if (quickShareCreates.get(key) === pending) quickShareCreates.delete(key);
+            if (quickShareCreates.get(key) === entry) quickShareCreates.delete(key);
           })
           .catch(() => {});
       }
-      const created = await pending;
+      const created = await pending.promise;
       return c.json({
         active: true,
         url: created.url,
@@ -230,10 +240,7 @@ export function registerSessionOutputRoutes(
     const share = quickShares.get(key);
     quickShares.delete(key);
     if (share) await share.stop();
-    if (pending) await pending.catch(() => {});
-    const createdAfterWait = quickShares.get(key);
-    quickShares.delete(key);
-    if (createdAfterWait && createdAfterWait !== share) await createdAfterWait.stop();
+    if (pending) await pending.promise.catch(() => {});
     return c.json({ ok: true });
   });
 
@@ -552,7 +559,7 @@ export function registerSessionOutputRoutes(
   return {
     stopQuickShares: async () => {
       stopping = true;
-      await Promise.allSettled(quickShareCreates.values());
+      await Promise.allSettled([...quickShareCreates.values()].map((entry) => entry.promise));
       const active = [...new Set(quickShares.values())];
       quickShares.clear();
       await Promise.allSettled(active.map((share) => share.stop()));

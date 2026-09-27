@@ -1078,6 +1078,28 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.get("ended")).toBeUndefined();
   });
 
+  it("allows a legacy reconnect after the sweep reaps a half-open VM socket", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    // The sweep closes the stale socket, but simulate the production failure
+    // mode where the runtime keeps returning it and never delivers
+    // webSocketClose.
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(h.sockets).toContain(first.ws);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    const second = helloVm(h, null);
+    await second.p;
+    expect(second.ws.closed).toEqual([]);
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {
     const h = makeStorageRelay();
     const { ws: vm, p } = helloVm(h);
