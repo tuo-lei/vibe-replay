@@ -230,6 +230,87 @@ describe("LiveClient chunked responses", () => {
     }
     await expect(pending).resolves.toEqual(full.data);
   });
+
+  it("extends the command deadline while chunked data is still arriving", async () => {
+    vi.useFakeTimers();
+    try {
+      const { LiveClient } = await import("./protocol");
+      const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+        "encrypt",
+        "decrypt",
+      ]);
+      const fakeWs = { send: () => {}, close: () => {}, readyState: 1 };
+      // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+      const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+      const full = { ok: true, data: { replay: { schemaVersion: 1, meta: {}, scenes: [] } } };
+      const json = JSON.stringify(full);
+      const mid = Math.floor(json.length / 2);
+      const pending = client.getReplay();
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      await client.handleMessage({
+        data: JSON.stringify(
+          await encryptFrameFor(key, "test-box", {
+            seq: 1,
+            chunk: 0,
+            chunks: 2,
+            data: json.slice(0, mid),
+          }),
+        ),
+      });
+      // Past the original 30 s command deadline, but less than 30 s since
+      // the last chunk: an active transfer must remain alive.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await client.handleMessage({
+        data: JSON.stringify(
+          await encryptFrameFor(key, "test-box", {
+            seq: 1,
+            chunk: 1,
+            chunks: 2,
+            data: json.slice(mid),
+          }),
+        ),
+      });
+
+      await expect(pending).resolves.toEqual(full.data.replay);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not extend the command deadline for duplicate chunks", async () => {
+    vi.useFakeTimers();
+    try {
+      const { LiveClient } = await import("./protocol");
+      const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+        "encrypt",
+        "decrypt",
+      ]);
+      const fakeWs = { send: () => {}, close: () => {}, readyState: 1 };
+      // biome-ignore lint/suspicious/noExplicitAny: private constructor in tests
+      const client: any = new (LiveClient as any)(fakeWs, key, "test-box");
+      const pending = client.getReplay();
+      const rejection = expect(pending).rejects.toThrow("timeout");
+      const firstChunk = await encryptFrameFor(key, "test-box", {
+        seq: 1,
+        chunk: 0,
+        chunks: 2,
+        data: '{"ok":true,',
+      });
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      await client.handleMessage({ data: JSON.stringify(firstChunk) });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await client.handleMessage({ data: JSON.stringify(firstChunk) });
+      // The accepted chunk set a new 30 s deadline at t=25 s. Replaying that
+      // same chunk at t=45 s must not move the deadline past t=55 s.
+      await vi.advanceTimersByTimeAsync(10_001);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /** Encrypt a roster display name the way the hello handshake does. */

@@ -13,6 +13,7 @@ import { loadSavedCloudInfo, publishCloudWithOverlays } from "../publishers/clou
 import { checkPublishStatus, loadSavedGistInfo, publishGist } from "../publishers/gist.js";
 import {
   createQuickReplayShare,
+  QUICK_SHARE_MAX_BYTES,
   QuickShareTooLargeError,
   type QuickReplayShare,
 } from "../replay-share.js";
@@ -22,6 +23,49 @@ import { scanForSecrets } from "../scan.js";
 import type { ReplaySession } from "../types.js";
 
 const INVALID_TARGET_ID_ERROR = "invalid targetId";
+const QUICK_SHARE_REQUEST_MAX_BYTES = QUICK_SHARE_MAX_BYTES + 64 * 1024;
+
+class QuickShareRequestTooLargeError extends Error {}
+class QuickShareInvalidRequestError extends Error {}
+
+async function readQuickShareRequestBody(request: Request): Promise<{ replay?: unknown } | null> {
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > QUICK_SHARE_REQUEST_MAX_BYTES) {
+    throw new QuickShareRequestTooLargeError("Quick Share request is too large");
+  }
+  if (!request.body) return null;
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > QUICK_SHARE_REQUEST_MAX_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new QuickShareRequestTooLargeError("Quick Share request is too large");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!text.trim()) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new QuickShareInvalidRequestError("invalid Quick Share request");
+    }
+    return parsed as { replay?: unknown };
+  } catch {
+    throw new QuickShareInvalidRequestError("invalid Quick Share request");
+  }
+}
 
 interface SessionOutputRouteDeps {
   baseDir: string;
@@ -39,7 +83,12 @@ export function registerSessionOutputRoutes(
 ): SessionOutputRouteHandle {
   const { baseDir, loadSession } = deps;
   const quickShares = new Map<string, QuickReplayShare>();
-  const quickShareCreates = new Map<string, Promise<QuickReplayShare>>();
+  const quickShareCreates = new Map<
+    string,
+    { epoch: number; promise: Promise<QuickReplayShare> }
+  >();
+  const quickShareInFlight = new Set<Promise<QuickReplayShare>>();
+  const quickShareEpoch = new Map<string, number>();
   let stopping = false;
   const quickShareKey = (slug: string, targetId?: string) => `${targetId ?? "local"}\0${slug}`;
 
@@ -81,6 +130,27 @@ export function registerSessionOutputRoutes(
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     if (stopping) return c.json({ error: "server shutting down" }, 503);
     const key = quickShareKey(result.slug, targetId);
+    const epoch = quickShareEpoch.get(key) ?? 0;
+    let body: { replay?: unknown } | null;
+    try {
+      body = await readQuickShareRequestBody(c.req.raw);
+    } catch (err) {
+      if (err instanceof QuickShareRequestTooLargeError) {
+        return c.json({ error: err.message, maxBytes: QUICK_SHARE_REQUEST_MAX_BYTES }, 413);
+      }
+      if (err instanceof QuickShareInvalidRequestError) {
+        return c.json({ error: err.message }, 400);
+      }
+      throw err;
+    }
+    // Reading a streaming request body can yield long enough for DELETE or
+    // server cleanup to invalidate this POST. Recheck before consulting any
+    // active/pending share state so an old request cannot return a newer
+    // generation's share or start work after shutdown.
+    if (stopping) return c.json({ error: "server shutting down" }, 503);
+    if ((quickShareEpoch.get(key) ?? 0) !== epoch) {
+      return c.json({ error: "quick share stopped" }, 409);
+    }
     const existing = quickShares.get(key);
     if (existing) {
       return c.json({
@@ -95,9 +165,58 @@ export function registerSessionOutputRoutes(
 
     try {
       let pending = quickShareCreates.get(key);
-      if (!pending) {
-        pending = (async () => {
-          const targetSession = await loadShareableSession(result.slug, targetId);
+      if (!pending || pending.epoch !== epoch) {
+        const promise = (async () => {
+          const supplied = body?.replay;
+          let targetSession: ReplaySession;
+          if (supplied !== undefined) {
+            if (
+              !supplied ||
+              typeof supplied !== "object" ||
+              !("meta" in supplied) ||
+              !supplied.meta ||
+              typeof supplied.meta !== "object" ||
+              !("sessionId" in supplied.meta) ||
+              typeof supplied.meta.sessionId !== "string" ||
+              !("provider" in supplied.meta) ||
+              typeof supplied.meta.provider !== "string" ||
+              ("annotations" in supplied &&
+                supplied.annotations !== undefined &&
+                !Array.isArray(supplied.annotations))
+            ) {
+              throw new QuickShareInvalidRequestError("invalid Quick Share replay snapshot");
+            }
+            const snapshot = supplied as ReplaySession;
+            // The URL/storage slug may be location-scoped (notably SSH
+            // replays), while meta.slug intentionally remains the provider's
+            // original source slug. Validate the client snapshot against the
+            // canonical replay identity instead of comparing those slugs.
+            const canonical = await loadSession(result.slug, targetId);
+            const canonicalTargetId =
+              canonical.meta.location?.kind === "ssh" ? canonical.meta.location.id : undefined;
+            const suppliedTargetId =
+              snapshot.meta.location?.kind === "ssh" ? snapshot.meta.location.id : undefined;
+            if (
+              snapshot.meta.sessionId !== canonical.meta.sessionId ||
+              snapshot.meta.provider !== canonical.meta.provider ||
+              suppliedTargetId !== canonicalTargetId
+            ) {
+              throw new QuickShareInvalidRequestError(
+                "quick share replay does not match requested session",
+              );
+            }
+            // Only annotations are allowed to come from the browser snapshot.
+            // Scene content remains server-canonical so a crafted loopback
+            // request cannot bypass persisted redactions/edits.
+            const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
+            const effectiveCanonical = sessionWithEffectiveContent(canonical, overlaysData);
+            targetSession = sessionForExternalOutput({
+              ...effectiveCanonical,
+              annotations: snapshot.annotations ?? effectiveCanonical.annotations,
+            });
+          } else {
+            targetSession = await loadShareableSession(result.slug, targetId);
+          }
           const activeShare = { boxId: undefined as string | undefined };
           const created = await createQuickReplayShare(targetSession, {
             onEnded: () => {
@@ -107,21 +226,25 @@ export function registerSessionOutputRoutes(
             },
           });
           activeShare.boxId = created.boxId;
-          if (stopping) {
+          if (stopping || (quickShareEpoch.get(key) ?? 0) !== epoch) {
             await created.stop();
-            throw new Error("server shutting down");
+            throw new Error(stopping ? "server shutting down" : "quick share stopped");
           }
           quickShares.set(key, created);
           return created;
         })();
-        quickShareCreates.set(key, pending);
-        void pending
+        const entry = { epoch, promise };
+        quickShareCreates.set(key, entry);
+        quickShareInFlight.add(promise);
+        pending = entry;
+        void promise
           .finally(() => {
-            if (quickShareCreates.get(key) === pending) quickShareCreates.delete(key);
+            quickShareInFlight.delete(promise);
+            if (quickShareCreates.get(key) === entry) quickShareCreates.delete(key);
           })
           .catch(() => {});
       }
-      const created = await pending;
+      const created = await pending.promise;
       return c.json({
         active: true,
         url: created.url,
@@ -137,6 +260,9 @@ export function registerSessionOutputRoutes(
           413,
         );
       }
+      if (err instanceof QuickShareInvalidRequestError) {
+        return c.json({ error: err.message }, 400);
+      }
       const message = getErrorMessage(err);
       if (message.startsWith("Session not found:")) {
         return c.json({ error: "session not found" }, 404);
@@ -151,9 +277,12 @@ export function registerSessionOutputRoutes(
     const targetId = safeTargetId(c.req.query("targetId"));
     if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     const key = quickShareKey(result.slug, targetId);
+    quickShareEpoch.set(key, (quickShareEpoch.get(key) ?? 0) + 1);
+    const pending = quickShareCreates.get(key);
     const share = quickShares.get(key);
     quickShares.delete(key);
     if (share) await share.stop();
+    if (pending) await pending.promise.catch(() => {});
     return c.json({ ok: true });
   });
 
@@ -472,7 +601,7 @@ export function registerSessionOutputRoutes(
   return {
     stopQuickShares: async () => {
       stopping = true;
-      await Promise.allSettled(quickShareCreates.values());
+      await Promise.allSettled(quickShareInFlight);
       const active = [...new Set(quickShares.values())];
       quickShares.clear();
       await Promise.allSettled(active.map((share) => share.stop()));

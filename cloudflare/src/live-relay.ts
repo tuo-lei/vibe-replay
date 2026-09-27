@@ -62,6 +62,8 @@ export interface NameCipher {
 
 interface Attachment {
   role: Role;
+  /** Shipper only: private capability established by the first modern VM hello. */
+  shipperClaim?: string;
   /** Viewer only: relay-assigned routing id, handed out in `welcome`. */
   vid?: string;
   /**
@@ -87,6 +89,13 @@ interface Attachment {
    * close must not start the box-end grace.
    */
   displaced?: boolean;
+  /**
+   * Shipper only: set when the liveness sweep has declared this socket dead
+   * and asked the runtime to close it. The runtime may keep returning a
+   * half-open socket from getWebSockets() even when webSocketClose never
+   * arrives, so routing and reconnect checks must ignore reaped shippers.
+   */
+  reaped?: boolean;
   /**
    * Viewer only: set when the sweep alarm actually delivered this viewer's
    * leave notice to an attached shipper while reaping the socket.
@@ -132,6 +141,10 @@ const VM_GONE_AT_KEY = "vmGoneAt";
  * and the shipper hasn't re-hello'd yet".
  */
 const VM_SEEN_KEY = "vmSeen";
+/** Private shipper capability. Relay-visible, but never present in a share URL. */
+const VM_CLAIM_KEY = "vmClaim";
+/** Durable copy of the public box id for hibernation wake message handlers. */
+const BOX_ID_KEY = "boxId";
 /**
  * How long a viewer hello waits for a shipper hello that may still be in
  * flight (or moments away — e.g. the shipper re-helloing after a deploy
@@ -155,9 +168,28 @@ const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
  *  see the plaintext). */
 const MAX_CIPHER_CHARS = 2048;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
+const BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
+const SHIPPER_CLAIM_DOMAIN = "vibe-replay-shipper-claim:v1:";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Derive the 128-bit public commitment used by modern shipper box ids. */
+async function shipperClaimBoxId(claim: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${SHIPPER_CLAIM_DOMAIN}${claim}`),
+    ),
+  );
+  return base64urlEncode(digest.slice(0, 16));
 }
 
 /**
@@ -186,6 +218,10 @@ function newVid(): string {
 
 export class LiveRelay {
   private ctx: DurableObjectState;
+  /** Box id captured from the current fetch; set again on every reconnect. */
+  private boxId: string | null = null;
+  /** In-memory mirror for test harnesses without Durable Object storage. */
+  private shipperClaim: string | null = null;
   /**
    * Resolvers for viewer hellos waiting on a possibly-imminent shipper
    * hello. Drained (notified) every time a shipper hello finishes — the
@@ -198,6 +234,124 @@ export class LiveRelay {
 
   constructor(ctx: DurableObjectState) {
     this.ctx = ctx;
+  }
+
+  /** Recover the public box id after a hibernation wake without a fresh fetch(). */
+  private async currentBoxId(): Promise<string | null> {
+    if (this.boxId) return this.boxId;
+    try {
+      const stored = await this.ctx.storage.get<string>(BOX_ID_KEY);
+      if (typeof stored === "string" && BOX_ID_RE.test(stored)) {
+        this.boxId = stored;
+        return stored;
+      }
+    } catch {
+      // Fail closed: without the box id we cannot verify a claim commitment.
+    }
+    // The namespace creates this DO with idFromName(`live:<boxId>`). Unlike
+    // instance fields, the Durable Object's own name survives hibernation and
+    // also exists for sockets accepted by the pre-BOX_ID_KEY Worker version.
+    const durableName = this.ctx.id?.name;
+    if (typeof durableName === "string" && durableName.startsWith("live:")) {
+      const namedBoxId = durableName.slice("live:".length);
+      if (BOX_ID_RE.test(namedBoxId)) {
+        this.boxId = namedBoxId;
+        try {
+          await this.ctx.storage.put(BOX_ID_KEY, namedBoxId);
+        } catch {
+          // The in-memory identity is still sufficient for this wake.
+        }
+        return namedBoxId;
+      }
+    }
+    return null;
+  }
+
+  /** True only when a syntactically valid private claim commits to this public box id. */
+  private async claimCommitsToCurrentBox(value: unknown): Promise<boolean> {
+    if (
+      typeof value !== "string" ||
+      value.length < 32 ||
+      value.length > 128 ||
+      !B64URL_RE.test(value)
+    ) {
+      return false;
+    }
+    const boxId = await this.currentBoxId();
+    return boxId !== null && (await shipperClaimBoxId(value)) === boxId;
+  }
+
+  /**
+   * Authorize a VM hello. A modern shipper establishes a random capability
+   * before the share URL is exposed; subsequent VM takeovers must present the
+   * same value. Legacy shippers without a claim are accepted only while no
+   * capability has ever been established, and their `goodbye` cannot end the
+   * box immediately (the normal disconnect grace still cleans it up).
+   */
+  private async authorizeShipperClaim(
+    value: unknown,
+    boxSeenBefore: boolean,
+  ): Promise<string | null | false> {
+    const claim =
+      typeof value === "string" &&
+      value.length >= 32 &&
+      value.length <= 128 &&
+      B64URL_RE.test(value)
+        ? value
+        : null;
+
+    if (this.shipperClaim) return claim === this.shipperClaim ? this.shipperClaim : false;
+
+    const storage = this.ctx.storage;
+    if (storage?.get && storage?.put) {
+      try {
+        const stored = await storage.get<string>(VM_CLAIM_KEY);
+        const durableSeen = (await storage.get<boolean>(VM_SEEN_KEY)) === true;
+        if (typeof stored === "string" && stored.length > 0) {
+          this.shipperClaim = stored;
+          return claim === stored ? stored : false;
+        }
+        // Modern CLIs derive the public box id from this private claim. That
+        // commitment survives a rolling deployment even when an older Worker
+        // accepted the hello but ignored the unknown claim field. It lets the
+        // upgraded Worker distinguish that legitimate reconnect from a share
+        // recipient attempting to become the first claimant of a truly
+        // legacy random box.
+        const claimMatchesBox =
+          claim !== null && this.boxId !== null && (await shipperClaimBoxId(claim)) === this.boxId;
+        if (claim !== null && this.boxId !== null && !claimMatchesBox) return false;
+        // A legacy box that has already had a shipper can reconnect only as
+        // legacy. Once the public URL exists, any viewer knows the box id, so
+        // a later caller must never be allowed to become the first claimant
+        // and gain permanent-goodbye authority. Claimless reconnects remain
+        // compatible with pre-capability CLIs, but they never acquire that
+        // authority and stay on the ordinary disconnect/grace lifecycle.
+        if ((durableSeen || boxSeenBefore) && claim && !claimMatchesBox) return false;
+        // Once a legacy box has acknowledged its first shipper, a later
+        // claimless socket has no credential that distinguishes it from a
+        // share recipient. Keep the first connection compatible, but fail
+        // closed on unauthenticated reconnects. Modern CLIs can reconnect via
+        // the box-id commitment above.
+        if (!claim) return durableSeen || boxSeenBefore ? false : null;
+        await storage.put(VM_CLAIM_KEY, claim);
+        this.shipperClaim = claim;
+        return claim;
+      } catch {
+        // Storage-backed boxes fail closed: losing claim state must never
+        // allow an arbitrary viewer to seize the VM role.
+        return false;
+      }
+    }
+
+    // Plain unit-test harnesses have no durable storage. Preserve the same
+    // semantics for the lifetime of this LiveRelay instance.
+    const claimMatchesBox =
+      claim !== null && this.boxId !== null && (await shipperClaimBoxId(claim)) === this.boxId;
+    if (claim !== null && this.boxId !== null && !claimMatchesBox) return false;
+    if (boxSeenBefore && claim && !claimMatchesBox) return false;
+    if (!claim) return boxSeenBefore ? false : null;
+    this.shipperClaim = claim;
+    return claim;
   }
 
   /** Durable "a shipper once claimed this box" flag; false on any storage trouble. */
@@ -232,11 +386,21 @@ export class LiveRelay {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const maybeBoxId = parts.at(-1) === "status" ? parts.at(-2) : parts.at(-1);
+    if (maybeBoxId && BOX_ID_RE.test(maybeBoxId)) {
+      this.boxId = maybeBoxId;
+      try {
+        await this.ctx.storage.put(BOX_ID_KEY, maybeBoxId);
+      } catch {
+        // The current instance can still validate commitments in memory.
+      }
+    }
     if (request.headers.get("Upgrade") !== "websocket") {
       // Box liveness probe for the viewer shell: lets the viewer show the
       // "session ended" page before the name gate instead of hanging on
       // "Connecting…". Only the lifecycle flag is exposed — never content.
-      const url = new URL(request.url);
       if (url.pathname.endsWith("/status")) {
         let ended = false;
         try {
@@ -319,7 +483,7 @@ export class LiveRelay {
         // viewer frames must reach the replacement, never the dying
         // socket (the runtime may still list it while the close
         // completes).
-        if (att?.role === "vm" && !att.displaced) return ws;
+        if (att?.role === "vm" && !att.displaced && !att.reaped) return ws;
       } catch {
         // attachment unreadable — treat as unregistered
       }
@@ -341,7 +505,7 @@ export class LiveRelay {
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const att = ws.deserializeAttachment() as Attachment | null;
-        if (att?.role !== "vm" || att.displaced) continue;
+        if (att?.role !== "vm" || att.displaced || att.reaped) continue;
         if (typeof att.lastSeen === "number" && now - att.lastSeen > VM_SWEEP_AFTER_MS) continue;
         return ws;
       } catch {
@@ -413,6 +577,8 @@ export class LiveRelay {
     const now = Date.now();
     let live = 0;
     let reaped = 0;
+    let gracePersistenceRetry = false;
+    let staleVmWithoutReapedMarker: WebSocket | null = null;
     for (const ws of this.ctx.getWebSockets()) {
       let att: Attachment | null = null;
       try {
@@ -421,6 +587,7 @@ export class LiveRelay {
         continue;
       }
       if (!att || (att.role !== "vm" && att.role !== "viewer")) continue;
+      if (att.role === "vm" && att.reaped) continue;
       const timeout = att.role === "vm" ? VM_SWEEP_AFTER_MS : PRESENCE_SWEEP_AFTER_MS;
       if (typeof att.lastSeen !== "number") {
         // Legacy attachment from before the liveness sweep deployed: stamp it
@@ -432,6 +599,48 @@ export class LiveRelay {
         continue;
       }
       if (now - att.lastSeen > timeout) {
+        if (att.role === "vm") {
+          // close() on a half-open WebSocket may never produce
+          // webSocketClose, while getWebSockets() can keep returning it.
+          // Persist the end-grace state before hiding the VM from vmSocket().
+          // If storage is transiently unavailable, leave it unreaped so a
+          // later alarm or close callback can retry instead of stranding the
+          // box forever in "unknown".
+          let graceReady = false;
+          try {
+            const ended = await this.ctx.storage.get<boolean>(ENDED_KEY);
+            const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
+            if (ended === true || typeof vmGoneAt === "number") {
+              graceReady = true;
+            } else {
+              await this.ctx.storage.put(VM_GONE_AT_KEY, now);
+              graceReady = true;
+              try {
+                await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+              } catch {
+                // The durable grace timestamp is the important part. The
+                // normal alarm tail below retries scheduling while grace is
+                // pending.
+              }
+            }
+          } catch {
+            // Keep the sweep armed so a half-open socket whose close callback
+            // never arrives gets another chance to persist VM_GONE_AT_KEY.
+            gracePersistenceRetry = true;
+          }
+          if (graceReady) {
+            try {
+              ws.serializeAttachment({ ...att, reaped: true } satisfies Attachment);
+            } catch {
+              // The durable grace timestamp exists, but vmSocket() would
+              // still see this half-open stale VM because its attachment
+              // could not be marked reaped. Remember exactly this socket so
+              // the grace tail does not mistake it for a real reconnect.
+              staleVmWithoutReapedMarker = ws;
+              gracePersistenceRetry = true;
+            }
+          }
+        }
         if (att.role === "viewer" && typeof att.vid === "string" && !att.leaveNotified) {
           // A half-open socket's close may never deliver webSocketClose
           // promptly, and the leave notice lives only in that callback —
@@ -483,7 +692,8 @@ export class LiveRelay {
     try {
       const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
       if (typeof vmGoneAt === "number") {
-        if (this.vmSocket()) {
+        const attachedVm = this.vmSocket();
+        if (attachedVm && attachedVm !== staleVmWithoutReapedMarker) {
           // Shipper reconnected inside the grace — the box lives on.
           await this.ctx.storage.delete(VM_GONE_AT_KEY);
         } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
@@ -494,9 +704,11 @@ export class LiveRelay {
         }
       }
     } catch {
-      // storage best-effort (some harnesses lack it)
+      // A transient grace-state read must not disarm the only retry path for
+      // a reaped half-open VM whose close callback may never arrive.
+      gracePersistenceRetry = true;
     }
-    if (live > 0 || gracePending) {
+    if (live > 0 || gracePending || gracePersistenceRetry) {
       this.ensureSweepAlarm();
     } else {
       try {
@@ -543,7 +755,7 @@ export class LiveRelay {
     // Ignore everything from it — a stale `goodbye` must not endBox() a box
     // the replacement shipper now owns, and its heartbeats/frames belong to
     // the old epoch.
-    if (attachment?.role === "vm" && attachment.displaced) {
+    if (attachment?.role === "vm" && (attachment.displaced || attachment.reaped)) {
       return;
     }
 
@@ -565,7 +777,43 @@ export class LiveRelay {
               this.closeQuietly(ws, 1000, "box ended");
               return;
             }
+            const activeBeforeAuth = this.vmSocket();
+            if (activeBeforeAuth && activeBeforeAuth !== ws) {
+              try {
+                const existingAttachment =
+                  activeBeforeAuth.deserializeAttachment() as Attachment | null;
+                // A live pre-capability shipper has no identity proof that a
+                // second claimless socket can reproduce. Do not let a public
+                // share recipient displace it. If the legacy socket actually
+                // drops, vmSocket() disappears and the legitimate claimless
+                // reconnect is accepted below during the normal grace window.
+                //
+                // Rolling-deploy exception: a modern CLI may have connected
+                // to the previous Worker, which ignored its then-unknown
+                // claim field and left an unclaimed attachment behind. Its
+                // private claim still commits to the public box id, so it can
+                // authenticate before the stale pre-upgrade socket is swept.
+                if (existingAttachment?.role === "vm" && !existingAttachment.shipperClaim) {
+                  if (!(await this.claimCommitsToCurrentBox(msg.claim))) {
+                    this.closeQuietly(ws, 1008, "legacy shipper already connected");
+                    return;
+                  }
+                }
+              } catch {
+                this.closeQuietly(ws, 1008, "invalid shipper state");
+                return;
+              }
+            }
+            const shipperClaim = await this.authorizeShipperClaim(msg.claim, await this.vmSeen());
+            if (shipperClaim === false) {
+              this.closeQuietly(ws, 1008, "invalid shipper claim");
+              return;
+            }
             // One shipper per box: a new shipper takes over from the old one.
+            // Re-read after authorization: concurrent first hellos can race
+            // across awaits, and the later one must still displace whichever
+            // authenticated socket won the race rather than using a stale
+            // pre-auth snapshot.
             const existing = this.vmSocket();
             if (existing && existing !== ws) {
               // Mark the old socket displaced *before* closing it: the
@@ -586,7 +834,11 @@ export class LiveRelay {
               }
               this.closeQuietly(existing, 1000, "replaced");
             }
-            ws.serializeAttachment({ role: "vm", lastSeen: Date.now() } satisfies Attachment);
+            ws.serializeAttachment({
+              role: "vm",
+              lastSeen: Date.now(),
+              ...(shipperClaim ? { shipperClaim } : {}),
+            } satisfies Attachment);
             // The shipper reconnected inside the end grace — cancel it.
             try {
               await this.ctx.storage.delete(VM_GONE_AT_KEY);
@@ -758,7 +1010,17 @@ export class LiveRelay {
     // goodbye — no grace needed, since a clean shutdown never reconnects
     // with this box id. Viewers learn it immediately.
     if (msg.t === "goodbye" && attachment.role === "vm") {
-      await this.endBox();
+      // Only a VM authenticated with the private capability may permanently
+      // end the box. During a rolling deploy, an older Worker may have
+      // accepted a modern shipper hello without persisting the then-unknown
+      // claim on the socket attachment; in that case the goodbye's claim can
+      // still prove ownership through the public box-id commitment.
+      const authenticated =
+        (attachment.shipperClaim && msg.claim === attachment.shipperClaim) ||
+        (!attachment.shipperClaim && (await this.claimCommitsToCurrentBox(msg.claim)));
+      if (authenticated) {
+        await this.endBox();
+      }
       return;
     }
 
@@ -824,7 +1086,7 @@ export class LiveRelay {
         );
       }
     }
-    if (att?.role === "vm" && !att.displaced) {
+    if (att?.role === "vm" && !att.displaced && !att.reaped) {
       // The shipper is gone. Its retry loop reconnects with the same box id
       // (backoff caps at 30 s) — start the end grace; the sweep declares the
       // box dead only if no shipper reattaches in time. Skip when the box

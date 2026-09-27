@@ -43,6 +43,9 @@ interface Harness {
   sockets: MockSocket[];
 }
 
+const VM_CLAIM = "s".repeat(43);
+const VM_CLAIM_BOX_ID = "3kTDWNqyszoLfq5ZkkzHGQ";
+
 function makeRelay(): Harness {
   const sockets: MockSocket[] = [];
   const ctx = {
@@ -54,14 +57,14 @@ function makeRelay(): Harness {
   return { relay: new LiveRelay(ctx), sockets };
 }
 
-const helloVm = (h: Harness) => {
+const helloVm = (h: Harness, claim: string | null | undefined = VM_CLAIM) => {
   const ws = mockSocket();
   h.sockets.push(ws);
   return {
     ws,
     p: h.relay.webSocketMessage(
       ws as unknown as WebSocket,
-      JSON.stringify({ t: "hello", role: "vm" }),
+      JSON.stringify({ t: "hello", role: "vm", ...(claim ? { claim } : {}) }),
     ),
   };
 };
@@ -264,6 +267,18 @@ describe("LiveRelay multi-viewer", () => {
     expect(second.ws.closed).toEqual([]);
   });
 
+  it("rejects a VM takeover that does not present the established shipper claim", async () => {
+    const h = makeRelay();
+    const first = helloVm(h);
+    await first.p;
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(first.ws.closed).toEqual([]);
+  });
+
   it("closes sockets that speak before hello", async () => {
     const h = makeRelay();
     const ws = mockSocket();
@@ -399,7 +414,7 @@ describe("LiveRelay shipper presence notices", () => {
     // not endBox() a box the replacement shipper now owns.
     await h.relay.webSocketMessage(
       first.ws as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye" }),
+      JSON.stringify({ t: "goodbye", claim: VM_CLAIM }),
     );
 
     // The box is still alive: a viewer can hello and the new shipper gets
@@ -887,20 +902,46 @@ describe("LiveRelay box lifecycle (session ended)", () => {
   interface StorageHarness extends Harness {
     alarmAt: () => number | null;
     store: Map<string, unknown>;
+    failNextGet: (key: string) => void;
+    failNextPut: (key: string) => void;
   }
 
-  function makeStorageRelay(existingStore?: Map<string, unknown>): StorageHarness {
+  function makeStorageRelay(
+    existingStore?: Map<string, unknown>,
+    durableObjectName?: string,
+  ): StorageHarness {
     const sockets: MockSocket[] = [];
     const store = existingStore ?? new Map<string, unknown>();
     let alarmAt: number | null = null;
+    let failGetKey: string | null = null;
+    let failPutKey: string | null = null;
     const ctx = {
+      ...(durableObjectName
+        ? {
+            id: {
+              name: durableObjectName,
+              toString: () => durableObjectName,
+              equals: () => false,
+            },
+          }
+        : {}),
       getWebSockets: () => [...sockets],
       acceptWebSocket: (ws: MockSocket) => {
         sockets.push(ws);
       },
       storage: {
-        get: (k: string) => Promise.resolve(store.get(k)),
+        get: (k: string) => {
+          if (failGetKey === k) {
+            failGetKey = null;
+            return Promise.reject(new Error("transient storage failure"));
+          }
+          return Promise.resolve(store.get(k));
+        },
         put: (k: string, v: unknown) => {
+          if (failPutKey === k) {
+            failPutKey = null;
+            return Promise.reject(new Error("transient storage failure"));
+          }
           store.set(k, v);
           return Promise.resolve();
         },
@@ -919,7 +960,18 @@ describe("LiveRelay box lifecycle (session ended)", () => {
         },
       },
     } as unknown as DurableObjectState;
-    return { relay: new LiveRelay(ctx), sockets, alarmAt: () => alarmAt, store };
+    return {
+      relay: new LiveRelay(ctx),
+      sockets,
+      alarmAt: () => alarmAt,
+      store,
+      failNextGet: (key: string) => {
+        failGetKey = key;
+      },
+      failNextPut: (key: string) => {
+        failPutKey = key;
+      },
+    };
   }
 
   const sessionEndedFrames = (ws: MockSocket) =>
@@ -934,7 +986,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
 
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
 
     expect(h.store.get("ended")).toBe(true);
@@ -946,6 +998,45 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     const allSent = [...a.ws.sent, ...b.ws.sent].join("\n");
     expect(allSent).not.toContain("Lei");
     expect(allSent).not.toContain("Wendy");
+  });
+
+  it("accepts a committed goodbye from a pre-upgrade modern shipper attachment", async () => {
+    const h = makeStorageRelay();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+    h.store.set("vmSeen", true);
+    const vm = mockSocket();
+    vm.serializeAttachment({ role: "vm", lastSeen: Date.now() });
+    h.sockets.push(vm);
+    const viewer = await helloViewer(h, LEI_CIPHER);
+
+    await h.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
+    );
+
+    expect(h.store.get("ended")).toBe(true);
+    expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
+  });
+
+  it("recovers the committed box id after hibernation for a pre-upgrade goodbye", async () => {
+    // Simulate state created by the pre-BOX_ID_KEY Worker: vmSeen exists,
+    // but neither the new storage key nor a current-instance fetch has
+    // populated boxId.
+    const legacyStore = new Map<string, unknown>([["vmSeen", true]]);
+    const afterWake = makeStorageRelay(legacyStore, `live:${VM_CLAIM_BOX_ID}`);
+    const vm = mockSocket();
+    vm.serializeAttachment({ role: "vm", lastSeen: Date.now() });
+    afterWake.sockets.push(vm);
+    const viewer = await helloViewer(afterWake, LEI_CIPHER);
+
+    await afterWake.relay.webSocketMessage(
+      vm as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
+    );
+
+    expect(afterWake.store.get("ended")).toBe(true);
+    expect(afterWake.store.get("boxId")).toBe(VM_CLAIM_BOX_ID);
+    expect(sessionEndedFrames(viewer.ws)).toHaveLength(1);
   });
 
   it("a viewer joining a dead box learns it immediately, with no welcome", async () => {
@@ -994,6 +1085,205 @@ describe("LiveRelay box lifecycle (session ended)", () => {
       JSON.stringify({ t: "goodbye", role: "viewer" }),
     );
     expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("a public-box client cannot impersonate the shipper and end the box", async () => {
+    const h = makeStorageRelay();
+    const { p } = helloVm(h);
+    await p;
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+
+    await h.relay.webSocketMessage(
+      attacker.ws as unknown as WebSocket,
+      JSON.stringify({ t: "goodbye", role: "vm", claim: "a".repeat(43) }),
+    );
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("does not let a public client claim an already-seen legacy box", async () => {
+    const h = makeStorageRelay();
+    const legacy = helloVm(h, null);
+    await legacy.p;
+    expect(legacy.ws.closed).toEqual([]);
+    expect(h.store.get("vmSeen")).toBe(true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+
+    const attacker = helloVm(h, "a".repeat(43));
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([
+      { code: 1008, reason: "legacy shipper already connected" },
+    ]);
+    expect(legacy.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("rejects a claimless takeover while a legacy shipper is still active", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    const second = helloVm(h, null);
+    await second.p;
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "legacy shipper already connected" }]);
+    expect(first.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
+  it("rejects an unauthenticated legacy reconnect after a real disconnect", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    h.sockets.splice(h.sockets.indexOf(first.ws), 1);
+    await h.relay.webSocketClose(first.ws as unknown as WebSocket);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    const second = helloVm(h, null);
+    await second.p;
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+    expect(h.store.get("vmClaim")).toBeUndefined();
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("migrates a modern claim acknowledged by the previous Worker during rolling deploy", async () => {
+    const h = makeStorageRelay();
+    // Simulate the pre-capability Worker: it accepted this modern CLI's
+    // hello and persisted only vmSeen, ignoring the then-unknown claim.
+    h.store.set("vmSeen", true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+
+    const reconnect = helloVm(h, VM_CLAIM);
+    await reconnect.p;
+    expect(reconnect.ws.closed).toEqual([]);
+    expect(h.store.get("vmClaim")).toBe(VM_CLAIM);
+    expect(
+      reconnect.ws.sent
+        .map((value) => JSON.parse(value))
+        .some((message) => message.t === "hello-ok"),
+    ).toBe(true);
+  });
+
+  it("lets a committed modern reconnect replace a half-open pre-upgrade VM", async () => {
+    const h = makeStorageRelay();
+    await h.relay.fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`));
+
+    // Simulate the old Worker accepting the modern CLI's hello but ignoring
+    // its unknown claim field: the socket is live and vmSeen is durable, yet
+    // the attachment and storage contain no shipper claim.
+    const preUpgrade = helloVm(h, null);
+    await preUpgrade.p;
+    expect(preUpgrade.ws.closed).toEqual([]);
+    expect(h.store.get("vmSeen")).toBe(true);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+
+    const reconnect = helloVm(h, VM_CLAIM);
+    await reconnect.p;
+
+    expect(reconnect.ws.closed).toEqual([]);
+    expect(preUpgrade.ws.closed).toEqual([{ code: 1000, reason: "replaced" }]);
+    expect(h.store.get("vmClaim")).toBe(VM_CLAIM);
+  });
+
+  it("does not let a share holder claim a truly legacy random box", async () => {
+    const h = makeStorageRelay();
+    h.store.set("vmSeen", true);
+    await h.relay.fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"));
+
+    const attacker = helloVm(h, VM_CLAIM);
+    await attacker.p;
+    expect(attacker.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
+  it("rejects an unauthenticated legacy reconnect after a half-open VM is reaped", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h, null);
+    await first.p;
+
+    // The sweep closes the stale socket, but simulate the production failure
+    // mode where the runtime keeps returning it and never delivers
+    // webSocketClose.
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(h.sockets).toContain(first.ws);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    const second = helloVm(h, null);
+    await second.p;
+    expect(second.ws.closed).toEqual([{ code: 1008, reason: "invalid shipper claim" }]);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+    expect(h.store.get("vmClaim")).toBeUndefined();
+  });
+
+  it("retries grace persistence before marking a stale VM reaped", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+    h.failNextPut("vmGoneAt");
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBeUndefined();
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.alarmAt()).not.toBeNull();
+
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+  });
+
+  it("keeps the sweep armed when reading persisted grace transiently fails", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+
+    h.failNextGet("vmGoneAt");
+    await h.relay.alarm();
+    expect(h.alarmAt()).not.toBeNull();
+    expect(h.store.get("ended")).toBeUndefined();
+  });
+
+  it("keeps grace when a stale VM cannot be marked reaped", async () => {
+    const h = makeStorageRelay();
+    const first = helloVm(h);
+    await first.p;
+    (first.ws.attachment as { lastSeen: number }).lastSeen -= 200_000;
+
+    const originalSerialize = first.ws.serializeAttachment;
+    let failOnce = true;
+    first.ws.serializeAttachment = function (value: unknown) {
+      if (failOnce && (value as { reaped?: boolean }).reaped) {
+        failOnce = false;
+        throw new Error("attachment write failed");
+      }
+      return originalSerialize.call(this, value);
+    };
+
+    await h.relay.alarm();
+    expect(first.ws.closed).toEqual([{ code: 1001, reason: "idle timeout" }]);
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBeUndefined();
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
+    expect(h.alarmAt()).not.toBeNull();
+
+    // The next sweep can persist the marker and continue the normal grace
+    // instead of having erased it as a false "reconnect".
+    await h.relay.alarm();
+    expect((first.ws.attachment as { reaped?: boolean }).reaped).toBe(true);
+    expect(typeof h.store.get("vmGoneAt")).toBe("number");
   });
 
   it("an unclean shipper death starts the end grace; a quick reconnect saves the box", async () => {
@@ -1066,7 +1356,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     const h = makeStorageRelay();
     const probe = () =>
       h.relay
-        .fetch(new Request("https://relay.test/live/x2KJPqQxznNNftBLSHV5jA/status"))
+        .fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`))
         .then((r) => r.json() as Promise<{ status: string }>);
 
     // Box never had a shipper: "unknown", not "ended" — the probe stays
@@ -1089,7 +1379,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     await p2;
     await h.relay.webSocketMessage(
       vm2 as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
     expect(await probe()).toEqual({ status: "ended" });
   });
@@ -1226,7 +1516,7 @@ describe("LiveRelay box lifecycle — stale viewer sockets", () => {
 
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
 
     // Both learn it — the stale socket is not silently left on a dead box.
@@ -1243,7 +1533,7 @@ describe("LiveRelay box lifecycle — stale viewer sockets", () => {
     const a = await helloViewer(h, LEI_CIPHER);
     await h.relay.webSocketMessage(
       vm as unknown as WebSocket,
-      JSON.stringify({ t: "goodbye", role: "vm" }),
+      JSON.stringify({ t: "goodbye", role: "vm", claim: VM_CLAIM }),
     );
     expect(h.store.get("ended")).toBe(true);
 

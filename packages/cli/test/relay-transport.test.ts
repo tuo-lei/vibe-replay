@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/relay-crypto.js", () => ({
+  boxIdForShipperCapability: async () => "b".repeat(22),
   decryptFrame: async (_key: unknown, _boxId: string, frame: { data: string }) => frame.data,
   encryptFrame: async (_key: unknown, _boxId: string, plaintext: string) => ({
     iv: "mock-iv",
@@ -8,7 +9,7 @@ vi.mock("../src/relay-crypto.js", () => ({
   }),
   exportKeyString: () => "k".repeat(43),
   generateContentKey: async () => ({ key: {}, raw: new Uint8Array(32) }),
-  randomBoxId: () => "b".repeat(22),
+  randomShipperCapability: () => "s".repeat(43),
 }));
 
 class FakeSocket {
@@ -60,7 +61,11 @@ describe("relay transport", () => {
     expect(socket.url).toBe(`ws://localhost:1/live/${"b".repeat(22)}`);
 
     socket.onopen?.();
-    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ t: "hello", role: "vm" });
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({
+      t: "hello",
+      role: "vm",
+      claim: "s".repeat(43),
+    });
 
     let ready = false;
     void transport.ready.then(() => {
@@ -137,7 +142,11 @@ describe("relay transport", () => {
     await transport.ready;
 
     await transport.stop();
-    expect(socket.sent.map((raw) => JSON.parse(raw))).toContainEqual({ t: "goodbye", role: "vm" });
+    expect(socket.sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      t: "goodbye",
+      role: "vm",
+      claim: "s".repeat(43),
+    });
     expect(socket.close).toHaveBeenCalledWith(1000, "shutdown");
   });
 

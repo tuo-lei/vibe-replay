@@ -21,6 +21,17 @@ interface Props {
   onQuickShareInfoChange: (info: QuickShareInfo | null) => void;
 }
 
+export function quickShareReplay(
+  session: ReplaySession,
+  annotations: ReplaySession["annotations"],
+): ReplaySession {
+  return { ...session, annotations };
+}
+
+export function replayJsonSize(replay: ReplaySession): number {
+  return new TextEncoder().encode(JSON.stringify(replay)).byteLength;
+}
+
 interface GistInfo {
   gistId: string;
   gistUrl: string;
@@ -215,16 +226,17 @@ export default function ExportView({
     };
   }, []);
 
-  // Compute replay JSON size
-  const replaySize = useMemo(
-    () => (session ? new TextEncoder().encode(JSON.stringify(session)).byteLength : 0),
-    [session],
+  // Measure each action against the replay payload it actually sends.
+  const sessionReplaySize = useMemo(() => (session ? replayJsonSize(session) : 0), [session]);
+  const quickShareReplaySize = useMemo(
+    () => (session ? replayJsonSize(quickShareReplay(session, annotations)) : 0),
+    [session, annotations],
   );
   const CLOUD_MAX = 10 * 1024 * 1024;
   const GIST_MAX = 10 * 1024 * 1024;
-  const cloudTooBig = replaySize > CLOUD_MAX;
-  const gistTooBig = replaySize > GIST_MAX;
-  const quickShareTooBig = replaySize > QUICK_SHARE_MAX;
+  const cloudTooBig = sessionReplaySize > CLOUD_MAX;
+  const gistTooBig = sessionReplaySize > GIST_MAX;
+  const quickShareTooBig = quickShareReplaySize > QUICK_SHARE_MAX;
   const executableFeedback = useMemo(
     () => (session ? exportExecutableFeedback(session, annotations) : ""),
     [annotations, session],
@@ -489,12 +501,16 @@ export default function ExportView({
     setQuickSharing(true);
     setQuickShareStatus(null);
     try {
-      const resp = await fetch(apiUrl("/api/share/quick"), { method: "POST" });
+      const resp = await fetch(apiUrl("/api/share/quick"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replay: quickShareReplay(session, annotations) }),
+      });
       const data = (await resp.json().catch(() => ({}))) as {
         error?: string;
       };
       const info = parseQuickShareInfo(data, {
-        sizeBytes: replaySize,
+        sizeBytes: quickShareReplaySize,
         maxBytes: QUICK_SHARE_MAX,
       });
       if (!resp.ok || !info) throw new Error(data.error || "Quick Share failed");
@@ -505,7 +521,7 @@ export default function ExportView({
     } finally {
       setQuickSharing(false);
     }
-  }, [session, quickShareTooBig, replaySize, onQuickShareInfoChange]);
+  }, [session, annotations, quickShareTooBig, quickShareReplaySize, onQuickShareInfoChange]);
 
   const handleQuickShareStop = useCallback(async () => {
     setQuickSharing(true);
@@ -720,15 +736,15 @@ export default function ExportView({
             <div id="share" className="mb-12">
               <div className="flex items-center justify-between mb-4">
                 <SectionHeader title="Share" color="text-terminal-purple" />
-                {replaySize > 0 && (
+                {sessionReplaySize > 0 && (
                   <span
                     className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
-                      replaySize > GIST_MAX
+                      sessionReplaySize > GIST_MAX
                         ? "bg-terminal-red-subtle text-terminal-red"
                         : "bg-terminal-surface-2 text-terminal-dimmer"
                     }`}
                   >
-                    {formatBytes(replaySize)} replay
+                    {formatBytes(sessionReplaySize)} replay
                   </span>
                 )}
               </div>
@@ -774,8 +790,8 @@ export default function ExportView({
 
                 {quickShareTooBig && (
                   <p className="mt-3 text-[11px] font-mono text-terminal-orange">
-                    Replay is {formatBytes(replaySize)} — Quick Share limit is 10 MB. Export HTML or
-                    publish a smaller replay instead.
+                    Replay is {formatBytes(quickShareReplaySize)} — Quick Share limit is 10 MB.
+                    Export HTML or publish a smaller replay instead.
                   </p>
                 )}
 
@@ -1113,9 +1129,12 @@ export default function ExportView({
                         {(() => {
                           const usedPct = (storageUsed / storageLimit) * 100;
                           // Don't show "+upload" when already shared (update replaces, no extra space)
-                          const showUpload = !cloudInfo && replaySize > 0;
-                          const uploadPct = showUpload ? (replaySize / storageLimit) * 100 : 0;
-                          const wouldExceed = showUpload && storageUsed + replaySize > storageLimit;
+                          const showUpload = !cloudInfo && sessionReplaySize > 0;
+                          const uploadPct = showUpload
+                            ? (sessionReplaySize / storageLimit) * 100
+                            : 0;
+                          const wouldExceed =
+                            showUpload && storageUsed + sessionReplaySize > storageLimit;
                           return (
                             <>
                               <div className="h-2 rounded-full bg-terminal-surface-hover overflow-hidden">
@@ -1146,7 +1165,7 @@ export default function ExportView({
                                     <span
                                       className={`w-1.5 h-1.5 rounded-sm ${wouldExceed ? "bg-terminal-orange" : "bg-terminal-green"}`}
                                     />
-                                    +{formatBytes(replaySize)} this upload
+                                    +{formatBytes(sessionReplaySize)} this upload
                                   </span>
                                 </div>
                               )}
@@ -1177,7 +1196,7 @@ export default function ExportView({
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
                         </svg>
-                        Replay is {formatBytes(replaySize)} — exceeds 10MB limit
+                        Replay is {formatBytes(sessionReplaySize)} — exceeds 10MB limit
                       </p>
                     )}
                     {cloudInfo && (
@@ -1274,7 +1293,7 @@ export default function ExportView({
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
                           </svg>
-                          Replay is {formatBytes(replaySize)} — exceeds 10MB limit
+                          Replay is {formatBytes(sessionReplaySize)} — exceeds 10MB limit
                         </p>
                       )}
                       {gistInfo && (

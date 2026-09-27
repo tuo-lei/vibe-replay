@@ -19,6 +19,7 @@
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const BOX_ID_BYTES = 16;
+const CAPABILITY_BYTES = 32;
 
 function base64urlEncode(bytes: Uint8Array<ArrayBuffer>): string {
   return Buffer.from(bytes).toString("base64url");
@@ -36,6 +37,27 @@ function aadFor(boxId: string): Uint8Array<ArrayBuffer> {
 /** Unguessable routing id. Also used as the AAD domain separator. */
 export function randomBoxId(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(BOX_ID_BYTES)));
+}
+
+/** Relay-visible shipper capability. Never included in the public share URL. */
+export function randomShipperCapability(): string {
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(CAPABILITY_BYTES)));
+}
+
+/**
+ * Derive the public 128-bit box id as a one-way commitment to the private
+ * shipper capability. An older relay can treat this as an ordinary random box
+ * id, while an upgraded relay can verify a reconnecting modern shipper even if
+ * the older relay never persisted its claim during a rolling deployment.
+ */
+export async function boxIdForShipperCapability(claim: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`vibe-replay-shipper-claim:v1:${claim}`),
+    ),
+  );
+  return base64urlEncode(digest.slice(0, BOX_ID_BYTES));
 }
 
 export interface ContentKey {

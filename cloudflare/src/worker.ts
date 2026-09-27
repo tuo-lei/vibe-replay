@@ -2386,7 +2386,7 @@ app.get("/r/:id", (c) => {
 // Live relay — E2E-encrypted remote session sharing (`vibe-replay relay`)
 // ---------------------------------------------------------------------------
 
-/** Box ids are 16 random bytes, base64url-encoded (22 chars), unguessable. */
+/** Box ids are 128-bit base64url values (22 chars) and remain unguessable. */
 const LIVE_BOX_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 
 app.get("/live/:boxId", async (c) => {
