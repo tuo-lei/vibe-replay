@@ -17,6 +17,8 @@ import { safeTargetId } from "../server-core.js";
 import type { ReplaySummary } from "../server-types.js";
 import { recordTelemetry } from "../telemetry.js";
 
+const INVALID_TARGET_ID_ERROR = "invalid targetId";
+
 interface InsightsCache {
   userInsights: ReturnType<typeof aggregateUserInsights> | null;
   projectInsights: Map<string, ProjectInsights>;
@@ -101,7 +103,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
     const provider = c.req.query("provider");
     const sessionId = c.req.query("sessionId");
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     if (!provider || !sessionId) {
       return c.json({ error: "provider and sessionId are required" }, 400);
     }
@@ -169,7 +171,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
 
     if (project) {
       const targetId = safeTargetId(c.req.query("targetId"));
-      if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+      if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
       const location: ProjectInsightLocation = targetId
         ? (scanState.results.find(
             (scan) => scan.location?.kind === "ssh" && scan.location.id === targetId,
@@ -245,7 +247,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
     const project = c.req.query("project");
     if (!project) return c.json({ error: "project parameter required" }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     if (targetId !== undefined) {
       // Project memory is read from the local filesystem. Never let a remote
       // project request accidentally read a same-named local project's memory.
