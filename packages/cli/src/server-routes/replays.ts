@@ -10,6 +10,8 @@ import type { ReplaySummary } from "../server-types.js";
 import type { ReplaySession } from "../types.js";
 import { normalizeTitle } from "../utils.js";
 
+const INVALID_TARGET_ID_ERROR = "invalid targetId";
+
 interface ReplaysRouteDeps {
   baseDir: string;
   scanReplays: () => Promise<ReplaySummary[]>;
@@ -34,7 +36,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       const session = await loadSession(result.slug, targetId);
       return c.json(sessionForExternalOutput(session));
@@ -67,7 +69,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     let body: { title?: unknown };
     try {
@@ -102,7 +104,7 @@ export function registerReplayRoutes(app: Hono, deps: ReplaysRouteDeps): void {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
     try {
       await loadSession(slug, targetId);
       await rm(await resolveReplayDir(baseDir, slug, targetId), { recursive: true });
