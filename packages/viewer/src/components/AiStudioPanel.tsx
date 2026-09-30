@@ -3,6 +3,8 @@ import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { OverlayActions } from "../hooks/useOverlays";
 import { navigateTo } from "./dashboard-utils";
 import { AiProviderSettingsModal } from "./AiProviderSettings";
+const CHATGPT_PROVIDER_ID = "chatgpt";
+const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
 
 interface Props {
   annotationActions: AnnotationActions;
@@ -148,6 +150,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   const providerConfigured = selectedProvider?.configured === true;
   const providerHasModels = (selectedProvider?.models.length || 0) > 0;
   const providerReady = providerConfigured && selectedModel !== null;
+  const usingChatGptPlan = providerReady && selectedProvider?.id === CHATGPT_PROVIDER_ID;
   const hasAiCoach = providerReady && !!runAiCoach;
 
   useEffect(() => {
@@ -358,9 +361,26 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
             </div>
           </div>
           <p className="text-[10px] font-mono leading-relaxed text-terminal-dimmer">
-            Choose a provider and model, or open Manage to connect a key, OAuth account, or local
-            OpenAI-compatible gateway.
+            {usingChatGptPlan
+              ? "Eligible AI Studio requests use your ChatGPT plan or credits balance."
+              : "Choose a provider and model, or open Manage to connect a key, OAuth account, or local OpenAI-compatible gateway."}
           </p>
+          {usingChatGptPlan && (
+            <div className="flex items-center gap-2 text-[10px] font-mono">
+              <span className="font-semibold text-terminal-green">Using ChatGPT plan</span>
+              <span className="text-terminal-dimmer" aria-hidden="true">
+                ·
+              </span>
+              <a
+                href={CHATGPT_USAGE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-terminal-green underline underline-offset-2 transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+              >
+                Manage usage
+              </a>
+            </div>
+          )}
           {annotationActions.aiProvidersError && (
             <div role="alert" className="text-[10px] font-mono leading-relaxed text-terminal-red">
               {annotationActions.aiProvidersError}
