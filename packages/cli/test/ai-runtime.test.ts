@@ -403,9 +403,17 @@ describe("PiAiRuntime", () => {
 
     expect(providers.map((provider) => provider.id)).toEqual([
       "openai",
+      "chatgpt",
       "openai-codex",
       "openrouter",
       "opencode",
+    ]);
+    expect(providers.find((provider) => provider.id === "chatgpt")?.authMethods).toEqual([
+      {
+        type: "oauth",
+        label: "Continue with ChatGPT",
+        subscription: true,
+      },
     ]);
     expect(providers.find((provider) => provider.id === "openai-codex")?.authMethods).toEqual([
       {
