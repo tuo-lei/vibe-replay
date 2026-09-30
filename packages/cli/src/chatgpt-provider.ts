@@ -172,6 +172,12 @@ class RegistrationStore {
   async saveRegistration(hostId: string, registration: ChatGptRegistration): Promise<void> {
     await this.write({ version: 1, hostId, registration });
   }
+
+  async clearRegistration(): Promise<void> {
+    const current = await this.read();
+    if (!current) return;
+    await this.write({ version: 1, hostId: current.hostId });
+  }
 }
 
 function sendCallbackPage(response: ServerResponse, status: number, message: string): void {
@@ -378,6 +384,20 @@ async function validateIdentity(
   };
 }
 
+async function validateRefreshedIdentity(
+  idToken: string,
+  clientId: string,
+  expectedSubject: string,
+): Promise<void> {
+  const { payload } = await jwtVerify(idToken, remoteJwks, {
+    issuer: ISSUER,
+    audience: clientId,
+  });
+  if (!payload.sub || payload.sub !== expectedSubject) {
+    throw new Error("ChatGPT refreshed ID token does not match the connected account");
+  }
+}
+
 function asChatGptCredential(value: unknown): ChatGptOAuthCredential | undefined {
   if (!isRecord(value) || value.type !== "oauth") return undefined;
   const access = stringField(value.access);
@@ -527,6 +547,9 @@ async function refreshChatGptCredential(
   if (!scopes.includes(SHARING_SCOPE)) {
     throw new Error("ChatGPT plan usage is no longer enabled for this connection");
   }
+  if (token.idToken) {
+    await validateRefreshedIdentity(token.idToken, current.clientId, current.subject);
+  }
   return {
     ...current,
     access: token.accessToken,
@@ -535,6 +558,10 @@ async function refreshChatGptCredential(
     scopes,
     ...(token.idToken ? { idToken: token.idToken } : {}),
   };
+}
+
+export async function resetChatGptRegistration(statePath = DEFAULT_STATE_PATH): Promise<void> {
+  await new RegistrationStore(statePath).clearRegistration();
 }
 
 export async function revokeChatGptSession(
