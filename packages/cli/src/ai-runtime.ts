@@ -39,6 +39,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import {
   CHATGPT_PROVIDER_ID,
   chatgptPlanProvider,
+  resetChatGptRegistration,
   revokeChatGptSession,
   sanitizeChatGptPlanPayload,
 } from "./chatgpt-provider.js";
@@ -51,6 +52,7 @@ const CREDENTIAL_LOCK_TIMEOUT_MS = 30_000;
 const CREDENTIAL_LOCK_STALE_MS = 60_000;
 const AI_AUTH_OPERATION_TIMEOUT_MS = 600_000;
 const CUSTOM_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+const CHATGPT_REVOCATION_TIMEOUT_MS = 30_000;
 const CUSTOM_MODEL_DISCOVERY_MAX_BYTES = 1_048_576;
 // The agent-core wrapper does not forward maxRetries to pi-ai. Keep a small,
 // interruptible retry budget here so a transient 5xx from a local gateway does
@@ -782,7 +784,7 @@ export async function ensureAiDefaultSelection(
 export interface AiRuntime {
   readonly models: Models;
   readonly credentials: CredentialStore;
-  listProviders(options?: AuthOperationOptions): Promise<AiProviderInfo[]>;
+  listProviders(options?: AiProviderListOptions): Promise<AiProviderInfo[]>;
   resolveModel(
     providerId: string,
     modelId?: string,
@@ -800,6 +802,10 @@ export interface AiRuntime {
   getSafeErrorMessage(error: unknown): Promise<string>;
   createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor>;
   runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult>;
+}
+
+export interface AiProviderListOptions extends AuthOperationOptions {
+  retryChatGptModels?: boolean;
 }
 
 function providerAuthMethods(provider: Provider): AiAuthMethodInfo[] {
@@ -1103,6 +1109,7 @@ export class PiAiRuntime implements AiRuntime {
   private customModelError?: string;
   private customRefresh?: Promise<void>;
   private chatgptModelError?: string;
+  private chatgptRefresh?: Promise<void>;
 
   constructor(
     public readonly models: MutableModels,
@@ -1202,7 +1209,30 @@ export class PiAiRuntime implements AiRuntime {
     return raceWithAbortSignal(tracked, signal);
   }
 
-  async listProviders(options?: AuthOperationOptions): Promise<AiProviderInfo[]> {
+  private async refreshChatGptProviderOnce(signal?: AbortSignal): Promise<void> {
+    const refreshed = await this.models.refresh({
+      providers: [CHATGPT_PROVIDER_ID],
+      signal,
+      force: true,
+    });
+    const error = refreshed.errors.get(CHATGPT_PROVIDER_ID);
+    this.chatgptModelError = error ? await this.getSafeErrorMessage(error) : undefined;
+  }
+
+  private refreshChatGptProvider(signal?: AbortSignal, retryAfterError = false): Promise<void> {
+    if (retryAfterError) this.chatgptModelError = undefined;
+    if (this.chatgptModelError) return Promise.resolve();
+    if (this.chatgptRefresh) return raceWithAbortSignal(this.chatgptRefresh, signal);
+
+    const operation = this.refreshChatGptProviderOnce(signal);
+    const tracked = operation.finally(() => {
+      if (this.chatgptRefresh === tracked) this.chatgptRefresh = undefined;
+    });
+    this.chatgptRefresh = tracked;
+    return raceWithAbortSignal(tracked, signal);
+  }
+
+  async listProviders(options?: AiProviderListOptions): Promise<AiProviderInfo[]> {
     await this.ensureCustomProvider(options?.signal);
     await this.refreshCustomProvider(options?.signal);
     const chatgpt = this.models.getProvider(CHATGPT_PROVIDER_ID);
@@ -1211,13 +1241,7 @@ export class PiAiRuntime implements AiRuntime {
       chatgpt.getModels().length === 0 &&
       (await this.models.checkAuth(CHATGPT_PROVIDER_ID, options))
     ) {
-      const refreshed = await this.models.refresh({
-        providers: [CHATGPT_PROVIDER_ID],
-        signal: options?.signal,
-        force: true,
-      });
-      const error = refreshed.errors.get(CHATGPT_PROVIDER_ID);
-      this.chatgptModelError = error ? await this.getSafeErrorMessage(error) : undefined;
+      await this.refreshChatGptProvider(options?.signal, options?.retryChatGptModels === true);
     }
     return Promise.all(
       this.models.getProviders().map(async (provider) => {
@@ -1263,14 +1287,8 @@ export class PiAiRuntime implements AiRuntime {
     if (providerId === CHATGPT_PROVIDER_ID) {
       const provider = this.models.getProvider(CHATGPT_PROVIDER_ID);
       if (provider && provider.getModels().length === 0) {
-        const refreshed = await this.models.refresh({
-          providers: [CHATGPT_PROVIDER_ID],
-          signal: options?.signal,
-          force: true,
-        });
-        const error = refreshed.errors.get(CHATGPT_PROVIDER_ID);
-        this.chatgptModelError = error ? await this.getSafeErrorMessage(error) : undefined;
-        if (error) throw error;
+        await this.refreshChatGptProvider(options?.signal, true);
+        if (this.chatgptModelError) throw new Error(this.chatgptModelError);
       }
     }
     const provider = this.models.getProvider(providerId);
@@ -1416,13 +1434,8 @@ export class PiAiRuntime implements AiRuntime {
         operationController.signal,
       );
       if (providerId === CHATGPT_PROVIDER_ID) {
-        const refreshed = await this.models.refresh({
-          providers: [CHATGPT_PROVIDER_ID],
-          signal: operationController.signal,
-          force: true,
-        });
-        const error = refreshed.errors.get(CHATGPT_PROVIDER_ID);
-        this.chatgptModelError = error ? await this.getSafeErrorMessage(error) : undefined;
+        this.chatgptModelError = undefined;
+        await this.refreshChatGptProvider(operationController.signal, true);
       }
       return credential;
     } catch (error) {
@@ -1448,343 +1461,16 @@ export class PiAiRuntime implements AiRuntime {
       const credential = await this.credentials.read(providerId, { signal });
       if (credential?.type === "oauth") {
         try {
-          await revokeChatGptSession(credential, signal);
+          const timeoutSignal = AbortSignal.timeout(CHATGPT_REVOCATION_TIMEOUT_MS);
+          const revocationSignal = signal
+            ? AbortSignal.any([signal, timeoutSignal])
+            : timeoutSignal;
+          await revokeChatGptSession(credential, revocationSignal);
         } catch (error) {
           chatgptRevocationError = error;
         }
       }
     }
     const logout = async () => {
-      if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
-      if (!this.models.getProvider(providerId)) {
-        throw new Error(`Unknown AI provider: ${providerId}`);
-      }
-      await this.models.logout(providerId, { signal });
-    };
-    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) {
-      await this.enqueueCustomConfigMutation(signal, logout);
-    } else {
-      await logout();
-    }
-    if (chatgptRevocationError) {
-      throw new Error(
-        "Signed out locally, but ChatGPT session revocation could not be confirmed. You can disconnect Vibe Replay from ChatGPT Settings.",
-        { cause: chatgptRevocationError },
-      );
-    }
-  }
 
-  private async getSecretValues(providerId?: string): Promise<string[]> {
-    const values = AI_AUTH_ENV_VARS.flatMap((name) => {
-      const value = process.env[name];
-      return value ? [value] : [];
-    });
-    const providers = providerId
-      ? [this.models.getProvider(providerId)].filter((provider): provider is Provider => !!provider)
-      : this.models.getProviders();
-
-    await Promise.all(
-      providers.map(async (provider) => {
-        const credential = await this.credentials.read(provider.id).catch(() => undefined);
-        if (!credential) return;
-        if (credential.type === "api_key") {
-          if (credential.key) values.push(credential.key);
-          if (credential.env) values.push(...Object.values(credential.env));
-        } else {
-          values.push(credential.access, credential.refresh);
-          for (const [key, value] of Object.entries(credential)) {
-            if (
-              key !== "type" &&
-              key !== "access" &&
-              key !== "refresh" &&
-              typeof value === "string"
-            ) {
-              values.push(value);
-            }
-          }
-        }
-      }),
-    );
-    return values;
-  }
-
-  async getSafeErrorMessage(error: unknown): Promise<string> {
-    const message =
-      error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
-    return redactSensitiveText(message, await this.getSecretValues());
-  }
-
-  async createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor> {
-    return createSensitiveTextStreamRedactor(await this.getSecretValues());
-  }
-
-  async runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult> {
-    const operationController = new AbortController();
-    let timedOut = false;
-    let cancelled = options.signal?.aborted === true;
-    let agent: Agent | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const abortOperation = (reason?: unknown) => {
-      if (!operationController.signal.aborted) operationController.abort(reason);
-      agent?.abort();
-    };
-    const onCallerAbort = () => {
-      cancelled = true;
-      abortOperation(options.signal?.reason);
-    };
-    if (options.signal?.aborted) onCallerAbort();
-    else options.signal?.addEventListener("abort", onCallerAbort, { once: true });
-
-    const deadline =
-      options.timeoutMs && options.timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            abortOperation(new Error("AI Studio operation timed out"));
-          }, options.timeoutMs)
-        : undefined;
-
-    let result: unknown;
-    const maxToolCalls =
-      options.maxToolCalls && options.maxToolCalls > 0
-        ? Math.min(Math.floor(options.maxToolCalls), 64)
-        : undefined;
-    let toolCallCount = 0;
-
-    const resultTool = options.resultTool
-      ? {
-          ...options.resultTool,
-          execute: async (
-            toolCallId: string,
-            params: any,
-            signal?: AbortSignal,
-            onUpdate?: any,
-          ) => {
-            signal?.throwIfAborted();
-            result = clone(params);
-            return options.resultTool!.execute(toolCallId, params, signal, onUpdate);
-          },
-        }
-      : undefined;
-    const tools = [...(options.tools || []), ...(resultTool ? [resultTool] : [])];
-
-    try {
-      const resolved = await this.resolveModel(options.providerId, options.modelId, {
-        signal: operationController.signal,
-      });
-      const { provider, model, auth } = resolved;
-      operationController.signal.throwIfAborted();
-
-      agent = new Agent({
-        initialState: {
-          systemPrompt: options.systemPrompt,
-          model,
-          thinkingLevel: "off",
-          tools,
-          messages: [],
-        },
-        // Agent-core 0.84 does not forward maxRetries from AgentOptions to
-        // pi-ai. Add the retry policy at this boundary, where the request
-        // signal is still available to pi-ai's abortable retry helper.
-        streamFn: (streamModel, context, streamOptions) =>
-          this.models.streamSimple(streamModel, context, {
-            ...streamOptions,
-            maxRetries: Math.max(streamOptions?.maxRetries ?? 0, AI_REQUEST_MAX_RETRIES),
-            maxRetryDelayMs: Math.min(
-              streamOptions?.maxRetryDelayMs ?? AI_REQUEST_MAX_RETRY_DELAY_MS,
-              AI_REQUEST_MAX_RETRY_DELAY_MS,
-            ),
-            ...(provider.id === CUSTOM_OPENAI_PROVIDER_ID || provider.id === CHATGPT_PROVIDER_ID
-              ? {
-                  onPayload: async (payload, payloadModel) => {
-                    const replaced = streamOptions?.onPayload
-                      ? await streamOptions.onPayload(payload, payloadModel)
-                      : payload;
-                    if (provider.id === CHATGPT_PROVIDER_ID) {
-                      return sanitizeChatGptPlanPayload(replaced ?? payload);
-                    }
-                    return normalizeCustomOpenAiPayload(
-                      requireToolPayload(replaced ?? payload, !!options.resultTool),
-                    );
-                  },
-                }
-              : {}),
-          }),
-        sessionId: options.sessionId || randomUUID(),
-        toolExecution: "sequential",
-        ...(maxToolCalls
-          ? {
-              beforeToolCall: async () => {
-                if (toolCallCount >= maxToolCalls) {
-                  const reason = `AI tool-call budget exceeded (${maxToolCalls})`;
-                  abortOperation(new Error(reason));
-                  return { block: true, terminate: true, reason };
-                }
-                toolCallCount++;
-                return undefined;
-              },
-            }
-          : {}),
-      });
-
-      unsubscribe = agent.subscribe((event) => options.onEvent?.(event));
-      await raceWithAbortSignal(agent.prompt(options.prompt), operationController.signal);
-      if (timedOut) {
-        throw new Error(`AI Studio operation timed out after ${options.timeoutMs}ms`);
-      }
-      if (cancelled || options.signal?.aborted) {
-        throw new Error("AI Studio operation cancelled");
-      }
-
-      // A provider response can contain replay content or echoed request data;
-      // redact every configured credential, not only the key used for this
-      // request, before returning model output to the caller.
-      const exactSecrets = await this.getSecretValues();
-      const rawResult = result;
-      const output =
-        rawResult === undefined ? assistantText(agent.state.messages) : JSON.stringify(rawResult);
-      if (rawResult === undefined) {
-        const failure = agent.state.errorMessage || assistantFailure(agent.state.messages);
-        if (failure) {
-          throw new Error(`${provider.name} request failed: ${failure}`);
-        }
-      }
-      const safeOutput = redactSensitiveText(output, exactSecrets);
-      if (!safeOutput.trim()) {
-        throw new Error(`${provider.name} returned no usable response`);
-      }
-
-      return {
-        providerId: provider.id,
-        providerName: provider.name,
-        modelId: model.id,
-        authType: auth.type,
-        authSubscription: auth.type === "oauth" && provider.auth.oauth?.isSubscription === true,
-        authSource: auth.source,
-        output: safeOutput,
-        ...(rawResult === undefined ? {} : { result: redactUnknown(rawResult, exactSecrets) }),
-      };
-    } catch (error) {
-      if (timedOut) {
-        throw new Error(`AI Studio operation timed out after ${options.timeoutMs}ms`, {
-          cause: error,
-        });
-      }
-      if (cancelled || options.signal?.aborted) {
-        throw new Error("AI Studio operation cancelled", { cause: error });
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      const compatibilityMessage = customToolCompatibilityMessage(options.providerId, message);
-      if (compatibilityMessage) throw new Error(compatibilityMessage, { cause: error });
-      throw error;
-    } finally {
-      if (deadline) clearTimeout(deadline);
-      unsubscribe?.();
-      options.signal?.removeEventListener("abort", onCallerAbort);
-    }
-  }
-}
-
-export function createAiRuntime(
-  options: { authPath?: string; customConfigPath?: string } = {},
-): AiRuntime {
-  const authPath = options.authPath || getAiAuthPath();
-  const customConfigPath = options.customConfigPath || getAiConfigPath();
-  const credentials = new FileCredentialStore(authPath);
-  const customConfig = new FileCustomProviderConfigStore(customConfigPath);
-  const models = createModels({ credentials });
-  models.setProvider(openaiProvider());
-  models.setProvider(chatgptPlanProvider({ credentialStore: credentials }));
-  models.setProvider(openaiCodexProvider());
-  models.setProvider(openrouterProvider());
-  models.setProvider(opencodeProvider());
-  return new PiAiRuntime(models, credentials, customConfig, `${customConfigPath}.transaction`);
-}
-
-let defaultRuntime: AiRuntime | undefined;
-
-export function getAiRuntime(): AiRuntime {
-  defaultRuntime ??= createAiRuntime();
-  return defaultRuntime;
-}
-
-function safeAuthUrlForLog(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl);
-    return `${url.origin}${url.pathname}`;
-  } catch {
-    return "[REDACTED URL]";
-  }
-}
-
-/**
- * Browser-oriented auth interaction for local dashboard routes.
- *
- * Pi's provider-owned OAuth implementations open the browser and resolve via
- * their loopback callback. The only interactive choice currently needed by
- * the supported providers is browser vs device-code login; prefer browser
- * here and keep secrets/tokens inside the provider credential store.
- */
-export function createBrowserAuthInteraction(signal?: AbortSignal): AuthInteraction {
-  return {
-    signal,
-    async prompt(prompt: AuthPrompt): Promise<string> {
-      signal?.throwIfAborted();
-      prompt.signal?.throwIfAborted();
-      if (prompt.type === "select") {
-        const browser = prompt.options.find((option) => option.id === "browser");
-        const first = browser || prompt.options[0];
-        if (!first) throw new Error("Authentication offered no login methods");
-        return first.id;
-      }
-      if (prompt.type === "manual_code") {
-        // OpenRouter races this prompt against its loopback callback. Keep the
-        // manual branch pending so a successful browser callback wins instead
-        // of being reported as an authentication failure.
-        return new Promise<string>((_resolve, reject) => {
-          let settled = false;
-          const promptSignals = [prompt.signal, signal].filter(
-            (candidate, index, all): candidate is AbortSignal =>
-              !!candidate && all.indexOf(candidate) === index,
-          );
-          const cleanup = () => {
-            for (const promptSignal of promptSignals) {
-              promptSignal.removeEventListener("abort", cancel);
-            }
-          };
-          const cancel = () => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error("Browser authentication cancelled"));
-          };
-          if (promptSignals.some((promptSignal) => promptSignal.aborted)) {
-            cancel();
-          } else {
-            for (const promptSignal of promptSignals) {
-              promptSignal.addEventListener("abort", cancel, { once: true });
-            }
-          }
-        });
-      }
-      throw new Error("This provider requires interactive terminal input");
-    },
-    notify(event: AuthEvent): void {
-      if (event.type === "auth_url") {
-        if (process.env.VIBE_REPLAY_NO_AUTO_OPEN !== "1") {
-          void open(event.url).catch(() => {});
-        }
-        if (process.env.VIBE_REPLAY_DEBUG) {
-          console.error(`[vibe-replay] Open ${safeAuthUrlForLog(event.url)} to complete AI login`);
-        }
-      } else if (event.type === "device_code" && process.env.VIBE_REPLAY_DEBUG) {
-        console.error(
-          `[vibe-replay] Open ${safeAuthUrlForLog(event.verificationUri)} and complete AI login`,
-        );
-      } else if (event.type === "info" && process.env.VIBE_REPLAY_DEBUG) {
-        console.error(`[vibe-replay] ${redactSensitiveText(event.message)}`);
-      } else if (event.type === "progress" && process.env.VIBE_REPLAY_DEBUG) {
-        console.error(`[vibe-replay] ${redactSensitiveText(event.message)}`);
-      }
-    },
-  };
-}
+[Showing lines 1-1474 of 1812 (50.0KB limit). Use offset=1475 to continue.]
