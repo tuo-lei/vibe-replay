@@ -1,9 +1,13 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildChatGptAuthorizeUrl,
   CHATGPT_PROVIDER_ID,
   chatgptPlanProvider,
   mapChatGptModels,
+  resetChatGptRegistration,
   revokeChatGptSession,
   sanitizeChatGptPlanPayload,
 } from "../src/chatgpt-provider.js";
@@ -150,6 +154,35 @@ describe("ChatGPT plan provider", () => {
       expect(body.get("client_id")).toBe("oaiapp_saved");
     } finally {
       fetchMock.mockRestore();
+    }
+  });
+
+  it("clears the issued registration on sign-out so a different account can connect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-chatgpt-registration-"));
+    const statePath = join(root, "registration.json");
+    const hostId = "urn:uuid:11111111-2222-4333-8444-555555555555";
+    try {
+      await writeFile(
+        statePath,
+        JSON.stringify({
+          version: 1,
+          hostId,
+          registration: {
+            clientId: "oaiapp_saved",
+            subject: "old-account",
+            email: "old@example.com",
+          },
+        }),
+      );
+
+      await resetChatGptRegistration(statePath);
+
+      expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual({
+        version: 1,
+        hostId,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });
