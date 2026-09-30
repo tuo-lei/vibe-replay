@@ -36,6 +36,13 @@ import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-code
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { opencodeProvider } from "@earendil-works/pi-ai/providers/opencode";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
+import {
+  CHATGPT_PROVIDER_ID,
+  chatgptPlanProvider,
+  resetChatGptRegistration,
+  revokeChatGptSession,
+  sanitizeChatGptPlanPayload,
+} from "./chatgpt-provider.js";
 
 const DEFAULT_AI_AUTH_PATH = join(homedir(), ".vibe-replay", "ai-auth.json");
 const DEFAULT_AI_CONFIG_PATH = join(homedir(), ".vibe-replay", "ai-providers.json");
@@ -45,6 +52,7 @@ const CREDENTIAL_LOCK_TIMEOUT_MS = 30_000;
 const CREDENTIAL_LOCK_STALE_MS = 60_000;
 const AI_AUTH_OPERATION_TIMEOUT_MS = 600_000;
 const CUSTOM_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+const CHATGPT_REVOCATION_TIMEOUT_MS = 30_000;
 const CUSTOM_MODEL_DISCOVERY_MAX_BYTES = 1_048_576;
 // The agent-core wrapper does not forward maxRetries to pi-ai. Keep a small,
 // interruptible retry budget here so a transient 5xx from a local gateway does
@@ -58,6 +66,7 @@ export const DEFAULT_CUSTOM_OPENAI_NAME = "Custom OpenAI-compatible";
 
 export type AiProviderId =
   | "openai"
+  | typeof CHATGPT_PROVIDER_ID
   | "openai-codex"
   | "openrouter"
   | "opencode"
@@ -99,6 +108,8 @@ export interface AiProviderInfo {
   configured: boolean;
   authType?: AuthType;
   authSource?: string;
+  /** Local-only display label for an authenticated account, never a token or subject id. */
+  accountLabel?: string;
   authMethods: AiAuthMethodInfo[];
   models: AiModelInfo[];
   /** Present only for the user-configured OpenAI-compatible provider. */
@@ -773,7 +784,7 @@ export async function ensureAiDefaultSelection(
 export interface AiRuntime {
   readonly models: Models;
   readonly credentials: CredentialStore;
-  listProviders(options?: AuthOperationOptions): Promise<AiProviderInfo[]>;
+  listProviders(options?: AiProviderListOptions): Promise<AiProviderInfo[]>;
   resolveModel(
     providerId: string,
     modelId?: string,
@@ -791,6 +802,10 @@ export interface AiRuntime {
   getSafeErrorMessage(error: unknown): Promise<string>;
   createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor>;
   runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult>;
+}
+
+export interface AiProviderListOptions extends AuthOperationOptions {
+  retryChatGptModels?: boolean;
 }
 
 function providerAuthMethods(provider: Provider): AiAuthMethodInfo[] {
@@ -1093,6 +1108,8 @@ export class PiAiRuntime implements AiRuntime {
   private customConfig?: CustomAiProviderConfig;
   private customModelError?: string;
   private customRefresh?: Promise<void>;
+  private chatgptModelError?: string;
+  private chatgptRefresh?: Promise<void>;
 
   constructor(
     public readonly models: MutableModels,
@@ -1192,9 +1209,40 @@ export class PiAiRuntime implements AiRuntime {
     return raceWithAbortSignal(tracked, signal);
   }
 
-  async listProviders(options?: AuthOperationOptions): Promise<AiProviderInfo[]> {
+  private async refreshChatGptProviderOnce(signal?: AbortSignal): Promise<void> {
+    const refreshed = await this.models.refresh({
+      providers: [CHATGPT_PROVIDER_ID],
+      signal,
+      force: true,
+    });
+    const error = refreshed.errors.get(CHATGPT_PROVIDER_ID);
+    this.chatgptModelError = error ? await this.getSafeErrorMessage(error) : undefined;
+  }
+
+  private refreshChatGptProvider(signal?: AbortSignal, retryAfterError = false): Promise<void> {
+    if (retryAfterError) this.chatgptModelError = undefined;
+    if (this.chatgptModelError) return Promise.resolve();
+    if (this.chatgptRefresh) return raceWithAbortSignal(this.chatgptRefresh, signal);
+
+    const operation = this.refreshChatGptProviderOnce(signal);
+    const tracked = operation.finally(() => {
+      if (this.chatgptRefresh === tracked) this.chatgptRefresh = undefined;
+    });
+    this.chatgptRefresh = tracked;
+    return raceWithAbortSignal(tracked, signal);
+  }
+
+  async listProviders(options?: AiProviderListOptions): Promise<AiProviderInfo[]> {
     await this.ensureCustomProvider(options?.signal);
     await this.refreshCustomProvider(options?.signal);
+    const chatgpt = this.models.getProvider(CHATGPT_PROVIDER_ID);
+    if (
+      chatgpt &&
+      chatgpt.getModels().length === 0 &&
+      (await this.models.checkAuth(CHATGPT_PROVIDER_ID, options))
+    ) {
+      await this.refreshChatGptProvider(options?.signal, options?.retryChatGptModels === true);
+    }
     return Promise.all(
       this.models.getProviders().map(async (provider) => {
         const auth = await this.models.checkAuth(provider.id, options);
@@ -1211,6 +1259,15 @@ export class PiAiRuntime implements AiRuntime {
           info.custom = { baseUrl: this.customConfig.baseUrl };
           if (this.customModelError) info.modelError = this.customModelError;
         }
+        if (provider.id === CHATGPT_PROVIDER_ID && this.chatgptModelError) {
+          info.modelError = this.chatgptModelError;
+        }
+        if (provider.id === CHATGPT_PROVIDER_ID && auth) {
+          const credential = await this.credentials.read(CHATGPT_PROVIDER_ID, options);
+          if (isRecord(credential) && typeof credential.email === "string") {
+            info.accountLabel = credential.email;
+          }
+        }
         return info;
       }),
     );
@@ -1225,6 +1282,13 @@ export class PiAiRuntime implements AiRuntime {
       const provider = await this.ensureCustomProvider(options?.signal);
       if (provider && provider.getModels().length === 0) {
         await this.refreshCustomProvider(options?.signal);
+      }
+    }
+    if (providerId === CHATGPT_PROVIDER_ID) {
+      const provider = this.models.getProvider(CHATGPT_PROVIDER_ID);
+      if (provider && provider.getModels().length === 0) {
+        await this.refreshChatGptProvider(options?.signal, true);
+        if (this.chatgptModelError) throw new Error(this.chatgptModelError);
       }
     }
     const provider = this.models.getProvider(providerId);
@@ -1362,13 +1426,18 @@ export class PiAiRuntime implements AiRuntime {
     }, AI_AUTH_OPERATION_TIMEOUT_MS);
 
     try {
-      return await raceWithAbortSignal(
+      const credential = await raceWithAbortSignal(
         this.models.login(providerId, type, {
           ...interaction,
           signal: operationController.signal,
         }),
         operationController.signal,
       );
+      if (providerId === CHATGPT_PROVIDER_ID) {
+        this.chatgptModelError = undefined;
+        await this.refreshChatGptProvider(operationController.signal, true);
+      }
+      return credential;
     } catch (error) {
       if (timedOut) {
         throw new Error(`AI authentication timed out after ${AI_AUTH_OPERATION_TIMEOUT_MS}ms`, {
@@ -1387,6 +1456,21 @@ export class PiAiRuntime implements AiRuntime {
 
   async logout(providerId: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
+    let chatgptRevocationError: unknown;
+    if (providerId === CHATGPT_PROVIDER_ID) {
+      const credential = await this.credentials.read(providerId, { signal });
+      if (credential?.type === "oauth") {
+        try {
+          const timeoutSignal = AbortSignal.timeout(CHATGPT_REVOCATION_TIMEOUT_MS);
+          const revocationSignal = signal
+            ? AbortSignal.any([signal, timeoutSignal])
+            : timeoutSignal;
+          await revokeChatGptSession(credential, revocationSignal);
+        } catch (error) {
+          chatgptRevocationError = error;
+        }
+      }
+    }
     const logout = async () => {
       if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
       if (!this.models.getProvider(providerId)) {
@@ -1398,6 +1482,16 @@ export class PiAiRuntime implements AiRuntime {
       await this.enqueueCustomConfigMutation(signal, logout);
     } else {
       await logout();
+    }
+    if (providerId === CHATGPT_PROVIDER_ID) {
+      this.chatgptModelError = undefined;
+      await resetChatGptRegistration();
+    }
+    if (chatgptRevocationError) {
+      throw new Error(
+        "Signed out locally, but ChatGPT session revocation could not be confirmed. You can disconnect Vibe Replay from ChatGPT Settings.",
+        { cause: chatgptRevocationError },
+      );
     }
   }
 
@@ -1520,12 +1614,15 @@ export class PiAiRuntime implements AiRuntime {
               streamOptions?.maxRetryDelayMs ?? AI_REQUEST_MAX_RETRY_DELAY_MS,
               AI_REQUEST_MAX_RETRY_DELAY_MS,
             ),
-            ...(provider.id === CUSTOM_OPENAI_PROVIDER_ID
+            ...(provider.id === CUSTOM_OPENAI_PROVIDER_ID || provider.id === CHATGPT_PROVIDER_ID
               ? {
                   onPayload: async (payload, payloadModel) => {
                     const replaced = streamOptions?.onPayload
                       ? await streamOptions.onPayload(payload, payloadModel)
                       : payload;
+                    if (provider.id === CHATGPT_PROVIDER_ID) {
+                      return sanitizeChatGptPlanPayload(replaced ?? payload);
+                    }
                     return normalizeCustomOpenAiPayload(
                       requireToolPayload(replaced ?? payload, !!options.resultTool),
                     );
@@ -1617,6 +1714,7 @@ export function createAiRuntime(
   const customConfig = new FileCustomProviderConfigStore(customConfigPath);
   const models = createModels({ credentials });
   models.setProvider(openaiProvider());
+  models.setProvider(chatgptPlanProvider({ credentialStore: credentials }));
   models.setProvider(openaiCodexProvider());
   models.setProvider(openrouterProvider());
   models.setProvider(opencodeProvider());

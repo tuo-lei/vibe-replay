@@ -100,6 +100,97 @@ describe("useAiProviderSettings", () => {
     second.unmount();
   });
 
+  it("synchronizes provider login state across mounted AI surfaces", async () => {
+    const codexProvider = {
+      id: "openai-codex",
+      name: "OpenAI Codex",
+      configured: true,
+      authMethods: [{ type: "oauth", label: "Sign in with Codex", subscription: true }],
+      models: [
+        {
+          id: "codex-model",
+          name: "Codex model",
+          api: "openai-codex-responses",
+          reasoning: true,
+          input: ["text"],
+        },
+      ],
+    };
+    const chatgptBefore = {
+      id: "chatgpt",
+      name: "ChatGPT",
+      configured: false,
+      authMethods: [{ type: "oauth", label: "Continue with ChatGPT", subscription: true }],
+      models: [],
+    };
+    const chatgptAfter = {
+      ...chatgptBefore,
+      configured: true,
+      authType: "oauth",
+      models: [
+        {
+          id: "gpt-test",
+          name: "GPT Test",
+          api: "openai-responses",
+          reasoning: false,
+          input: ["text"],
+        },
+      ],
+    };
+    let authenticated = false;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("/api/ai/auth") && init?.method === "POST") {
+        authenticated = true;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/api/ai/providers")) {
+        return new Response(
+          JSON.stringify({
+            providers: [codexProvider, authenticated ? chatgptAfter : chatgptBefore],
+            defaultProvider: { id: "openai-codex", modelId: "codex-model" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const settings = renderHook(() => useAiProviderSettings(true));
+    const askReplay = renderHook(() => useAiProviderSettings(true));
+    await waitFor(() => {
+      expect(
+        settings.result.current.aiProviders.find((provider) => provider.id === "chatgpt")
+          ?.configured,
+      ).toBe(false);
+      expect(
+        askReplay.result.current.aiProviders.find((provider) => provider.id === "chatgpt")
+          ?.configured,
+      ).toBe(false);
+    });
+
+    await act(async () => {
+      await settings.result.current.authenticateAiProvider?.("chatgpt", "oauth");
+    });
+
+    await waitFor(() => {
+      expect(
+        askReplay.result.current.aiProviders.find((provider) => provider.id === "chatgpt"),
+      ).toMatchObject({
+        configured: true,
+        models: [expect.objectContaining({ id: "gpt-test" })],
+      });
+    });
+
+    settings.unmount();
+    askReplay.unmount();
+  });
+
   it("does not select an unconfigured provider as the active fallback", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(

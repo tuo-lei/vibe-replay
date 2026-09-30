@@ -403,9 +403,17 @@ describe("PiAiRuntime", () => {
 
     expect(providers.map((provider) => provider.id)).toEqual([
       "openai",
+      "chatgpt",
       "openai-codex",
       "openrouter",
       "opencode",
+    ]);
+    expect(providers.find((provider) => provider.id === "chatgpt")?.authMethods).toEqual([
+      {
+        type: "oauth",
+        label: "Continue with ChatGPT",
+        subscription: true,
+      },
     ]);
     expect(providers.find((provider) => provider.id === "openai-codex")?.authMethods).toEqual([
       {
@@ -418,6 +426,49 @@ describe("PiAiRuntime", () => {
       { type: "api_key", label: "OpenRouter API key", subscription: false },
       { type: "oauth", label: "Sign in with OpenRouter", subscription: false },
     ]);
+  });
+
+  it("does not retry a failed ChatGPT model catalog on every provider read", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    let modelRequests = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "https://api.openai.com/v1/models") {
+        modelRequests++;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return new Response("unavailable", { status: 503 });
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    try {
+      const runtime = createAiRuntime({
+        authPath: join(root, "ai-auth.json"),
+        customConfigPath: join(root, "ai-providers.json"),
+      });
+      await runtime.credentials.modify("chatgpt", async () => ({
+        type: "oauth",
+        access: "access-token",
+        refresh: "refresh-token",
+        expires: Date.now() + 60_000,
+        clientId: "oaiapp_saved",
+        idToken: "header.payload.signature",
+        scopes: ["chatgpt.tokens.use.direct"],
+        subject: "subject-1",
+        email: "person@example.com",
+      }));
+
+      const first = await runtime.listProviders();
+      expect(first.find((provider) => provider.id === "chatgpt")?.modelError).toContain("503");
+      expect(modelRequests).toBe(1);
+
+      await Promise.all([runtime.listProviders(), runtime.listProviders()]);
+      expect(modelRequests).toBe(1);
+
+      await runtime.listProviders({ retryChatGptModels: true });
+      expect(modelRequests).toBe(2);
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it("configures an OpenAI-compatible endpoint and discovers models from /models", async () => {

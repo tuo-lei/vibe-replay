@@ -265,7 +265,9 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 - **Open in Editor** — annotate scenes, get AI feedback, export to multiple formats
 - **AI Studio** — configure Pi once from the global Settings page or the reusable Manage Providers
   dialog in AI Studio, then analyze, translate, or professionalize sessions with
-  OpenAI, ChatGPT/Codex subscription, OpenRouter, or OpenCode Zen. No Claude, OpenCode, or other
+  OpenAI, your ChatGPT plan, Codex subscription, OpenRouter, or OpenCode Zen. The ChatGPT option
+  uses OpenAI's open-source Sign in with ChatGPT flow: eligible Plus/Pro users can authorize
+  Vibe Replay to use their plan without pasting an API key. No Claude, OpenCode, or other
   headless CLI is required. You can also add an OpenAI-compatible proxy (including LiteLLM) in
   the editor; AI Studio discovers models from its `/models` endpoint and sends Chat Completions
   requests to the configured local or remote API root.
@@ -301,6 +303,9 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   Vibe Replay honors it only when the provider identity (provider id or configured endpoint) and exact
   model are both verified; it never silently chooses the first catalog entry. Provider keys and OAuth refresh tokens are stored in
   `~/.vibe-replay/ai-auth.json` with restricted permissions (`VIBE_REPLAY_AI_AUTH` can override the path).
+  Sign in with ChatGPT also keeps its stable local host id and issued client registration in
+  `~/.vibe-replay/chatgpt-registration.json`; inference goes to the public Responses API with
+  `store: false`, and the ChatGPT option remains separate from the existing Codex OAuth provider.
   Custom endpoint metadata is stored separately in `~/.vibe-replay/ai-providers.json` with the
   same local-only permissions; the endpoint file never contains the custom API key. Enter a base
   URL such as `http://127.0.0.1:58788/v1` in Settings or the AI Studio provider dialog, not
