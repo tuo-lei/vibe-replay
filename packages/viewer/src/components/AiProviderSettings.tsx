@@ -558,13 +558,12 @@ export function AiProviderSettings({
               ? "Signed in successfully."
               : "API key saved.",
       });
-      if (
-        providerId === CHATGPT_PROVIDER_ID &&
-        authMethod === "oauth" &&
-        typeof window !== "undefined" &&
-        window.localStorage.getItem(CHATGPT_WELCOME_STORAGE_KEY) !== "seen"
-      ) {
-        setShowChatGptWelcome(true);
+      if (providerId === CHATGPT_PROVIDER_ID && authMethod === "oauth") {
+        let seen = false;
+        try {
+          seen = window.localStorage.getItem(CHATGPT_WELCOME_STORAGE_KEY) === "seen";
+        } catch {}
+        if (!seen) setShowChatGptWelcome(true);
       }
     } catch (error) {
       if (isAbortError(error)) return;
@@ -608,7 +607,7 @@ export function AiProviderSettings({
   const handleRefresh = useCallback(async () => {
     if (!refreshAiProviders) return;
     try {
-      await refreshAiProviders();
+      await refreshAiProviders(undefined, { retryChatGptModels: true });
     } catch (error) {
       if (!isAbortError(error)) {
         setAuthStatus({
