@@ -30,8 +30,8 @@ function fixOriginalValues(overlays: SceneOverlay[], originalSession: ReplaySess
 export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
   const { baseDir, loadSession, isSameOriginSettingsRequest } = deps;
 
-  const getAiProvidersResponse = async (signal?: AbortSignal) => {
-    const providers = await getAiRuntime().listProviders({ signal });
+  const getAiProvidersResponse = async (signal?: AbortSignal, retryChatGptModels = false) => {
+    const providers = await getAiRuntime().listProviders({ signal, retryChatGptModels });
     const defaultSelection = await resolveDefaultAiSelection(providers);
     const defaultProvider = defaultSelection
       ? providers.find((provider) => provider.id === defaultSelection.providerId) || null
@@ -51,7 +51,7 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
 
   app.get("/api/ai/providers", async (c) => {
     try {
-      return c.json(await getAiProvidersResponse(c.req.raw.signal));
+      return c.json(await getAiProvidersResponse(c.req.raw.signal, c.req.query("refresh") === "1"));
     } catch (err) {
       return c.json(
         { available: false, providers: [], error: await getAiRuntime().getSafeErrorMessage(err) },
