@@ -1180,15 +1180,15 @@ export default function LocalChatAssistant({ context }: Props) {
                 Read-only ·{" "}
                 {!providerReady
                   ? "provider setup required"
-                  : usingChatGptPlan
-                    ? "Using ChatGPT plan"
-                    : remoteSourcesLoading && !remoteSession
-                      ? "checking source settings"
-                      : remoteDataEnabled
-                        ? "SSH data enabled"
-                        : remoteDataAvailable
-                          ? "SSH data hidden"
-                          : "local sessions only"}
+                  : `${usingChatGptPlan ? "Using ChatGPT plan · " : ""}${
+                      remoteSourcesLoading && !remoteSession
+                        ? "checking source settings"
+                        : remoteDataEnabled
+                          ? "SSH data enabled"
+                          : remoteDataAvailable
+                            ? "SSH data hidden"
+                            : "local sessions only"
+                    }`}
               </span>
               <div className="flex items-center gap-3">
                 {usingChatGptPlan && (
@@ -1214,80 +1214,5 @@ export default function LocalChatAssistant({ context }: Props) {
               type="button"
               aria-label="Resize Ask Replay from the top-left corner"
               title="Drag to resize"
-              onPointerDown={(event) => beginResize(event, { left: true, top: true })}
-              className="absolute top-0 left-0 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded text-terminal-dimmer hover:text-terminal-text"
-            >
-              <span aria-hidden="true">⋰</span>
-            </button>
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the top edge"
-              onPointerDown={(event) => beginResize(event, { top: true })}
-              className="absolute top-0 right-4 left-4 z-10 h-2 cursor-ns-resize touch-none"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the top-right corner"
-              onPointerDown={(event) => beginResize(event, { right: true, top: true })}
-              className="absolute top-0 right-0 z-10 h-4 w-4 cursor-nesw-resize touch-none rounded"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the left edge"
-              onPointerDown={(event) => beginResize(event, { left: true })}
-              className="absolute top-4 bottom-4 left-0 z-10 w-2 cursor-ew-resize touch-none"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the right edge"
-              onPointerDown={(event) => beginResize(event, { right: true })}
-              className="absolute top-4 right-0 bottom-4 z-10 w-2 cursor-ew-resize touch-none"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the bottom-left corner"
-              onPointerDown={(event) => beginResize(event, { left: true, bottom: true })}
-              className="absolute bottom-0 left-0 z-10 h-4 w-4 cursor-nesw-resize touch-none rounded"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the bottom edge"
-              onPointerDown={(event) => beginResize(event, { bottom: true })}
-              className="absolute right-4 bottom-0 left-4 z-10 h-2 cursor-ns-resize touch-none"
-            />
-            <button
-              type="button"
-              aria-label="Resize Ask Replay from the bottom-right corner"
-              onPointerDown={(event) => beginResize(event, { right: true, bottom: true })}
-              className="absolute right-0 bottom-0 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded text-terminal-dimmer hover:text-terminal-text"
-            >
-              <span aria-hidden="true">⋰</span>
-            </button>
-          </form>
-        </aside>
-      )}
 
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          onMouseEnter={() => setNudge(false)}
-          aria-label="Ask Replay"
-          title="Ask Replay — local assistant"
-          className={`flex cursor-pointer items-center gap-1 rounded-full border bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight shadow-layer-md backdrop-blur-md transition-[transform,box-shadow,border-color,background-color,color] duration-300 hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50 ${nudge ? "scale-[1.04] border-terminal-green/55 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]" : "scale-100 border-terminal-green/30 text-terminal-text"}`}
-        >
-          <span
-            className={`leading-none transition-transform ${nudge ? "scale-110" : ""} text-terminal-green`}
-          >
-            ✦
-          </span>
-          <span className="leading-none">Ask</span>
-          <span
-            className={`ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${nudge ? "animate-ping bg-terminal-green" : "bg-terminal-green/80"}`}
-            aria-hidden="true"
-          />
-        </button>
-      )}
-    </div>
-  );
-}
+[Showing lines 1-1216 of 1294 (50.0KB limit). Use offset=1217 to continue.]
