@@ -50,6 +50,27 @@ function settingsResponse(remoteSources: unknown[]) {
 }
 
 beforeEach(() => {
+  providerSettings.aiProviders = [
+    {
+      id: "openai",
+      name: "OpenAI",
+      configured: true,
+      authMethods: [],
+      models: [
+        {
+          id: "test-model",
+          name: "Test model",
+          api: "openai-responses",
+          reasoning: false,
+          input: ["text"],
+        },
+      ],
+    },
+  ];
+  providerSettings.aiProviderId = "openai";
+  providerSettings.aiModelId = "test-model";
+  providerSettings.defaultAiProviderId = null;
+  providerSettings.defaultAiModelId = null;
   localStorage.clear();
   sessionStorage.clear();
   vi.stubGlobal(
@@ -91,5 +112,36 @@ describe("LocalChatAssistant SSH consent UI", () => {
       ).toBeDefined(),
     );
     expect(screen.getByRole("button", { name: "Open Settings" })).toBeDefined();
+  });
+
+  it("shows when Ask Replay is using the ChatGPT plan", async () => {
+    providerSettings.aiProviders = [
+      {
+        id: "chatgpt",
+        name: "ChatGPT",
+        configured: true,
+        authMethods: [],
+        models: [
+          {
+            id: "gpt-test",
+            name: "GPT Test",
+            api: "openai-responses",
+            reasoning: false,
+            input: ["text"],
+          },
+        ],
+      },
+    ];
+    providerSettings.aiProviderId = "chatgpt";
+    providerSettings.aiModelId = "gpt-test";
+
+    render(<LocalChatAssistant context={{ mode: "dashboard" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Replay" }));
+
+    await waitFor(() => expect(screen.getByText(/Read-only/)).toBeDefined());
+    expect(screen.getByText(/Using ChatGPT plan/)).toBeDefined();
+    expect(screen.getByRole("link", { name: "Manage usage" }).getAttribute("href")).toBe(
+      "https://chatgpt.com/#settings/Usage",
+    );
   });
 });
