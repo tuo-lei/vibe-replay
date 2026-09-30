@@ -21,6 +21,7 @@ export interface AiProviderInfo {
   configured: boolean;
   authType?: "api_key" | "oauth";
   authSource?: string;
+  accountLabel?: string;
   authMethods: AiAuthMethodInfo[];
   models: AiModelInfo[];
   custom?: { baseUrl: string };
@@ -62,6 +63,7 @@ export interface AiProviderSettingsActions {
 
 const AI_SELECTION_STORAGE_KEY = "vibe-replay-ai-selection-v1";
 const AI_SELECTION_CHANGE_EVENT = "vibe-replay-ai-selection-change";
+const AI_PROVIDER_STATE_CHANGE_EVENT = "vibe-replay-ai-provider-state-change";
 
 interface AiSelectionPreference {
   providerId: string;
@@ -148,6 +150,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const authAbortRef = useRef<AbortController | null>(null);
   const refreshSequenceRef = useRef(0);
   const mountedRef = useRef(true);
+  const providerStateSourceRef = useRef({});
 
   const updateSelection = useCallback(
     (next: { providerId: string | null; modelId: string | null; source?: AiSelectionSource }) => {
@@ -309,6 +312,32 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
     [enabled, updateSelection],
   );
 
+  // Auth/custom-provider mutations happen inside whichever AI surface the user
+  // interacted with, but Settings, AI Studio, and Ask Replay each own their
+  // own hook instance. Broadcast provider-catalog changes so already-mounted
+  // sibling surfaces do not keep a stale pre-login snapshot.
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const onProviderStateChange = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: object }>).detail?.source;
+      if (source === providerStateSourceRef.current) return;
+      void refreshAiProviders().catch(() => {});
+    };
+    window.addEventListener(AI_PROVIDER_STATE_CHANGE_EVENT, onProviderStateChange);
+    return () => {
+      window.removeEventListener(AI_PROVIDER_STATE_CHANGE_EVENT, onProviderStateChange);
+    };
+  }, [enabled, refreshAiProviders]);
+
+  const broadcastProviderStateChange = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent(AI_PROVIDER_STATE_CHANGE_EVENT, {
+        detail: { source: providerStateSourceRef.current },
+      }),
+    );
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     if (enabled) refreshAiProviders().catch(() => {});
@@ -391,6 +420,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
           if (!response.ok) throw new Error(data?.error || "AI authentication failed");
           controller.signal.throwIfAborted();
           await refreshAiProviders(controller.signal);
+          broadcastProviderStateChange();
         } finally {
           if (authAbortRef.current === controller) authAbortRef.current = null;
         }
@@ -408,8 +438,13 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         const query = `?providerId=${encodeURIComponent(providerId)}`;
         const response = await fetch(apiUrl(`/api/ai/auth${query}`), { method: "DELETE" });
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        if (!response.ok) throw new Error(data?.error || "AI logout failed");
+        if (!response.ok) {
+          await refreshAiProviders().catch(() => {});
+          broadcastProviderStateChange();
+          throw new Error(data?.error || "AI logout failed");
+        }
         await refreshAiProviders();
+        broadcastProviderStateChange();
       }
     : null;
 
@@ -428,6 +463,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
           if (!response.ok) throw new Error(data?.error || "Custom AI provider setup failed");
           controller.signal.throwIfAborted();
           await refreshAiProviders(controller.signal);
+          broadcastProviderStateChange();
         } finally {
           if (authAbortRef.current === controller) authAbortRef.current = null;
         }
@@ -440,6 +476,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
         if (!response.ok) throw new Error(data?.error || "Custom AI provider removal failed");
         await refreshAiProviders();
+        broadcastProviderStateChange();
       }
     : null;
 
