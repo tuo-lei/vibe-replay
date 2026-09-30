@@ -11,6 +11,8 @@ import { saveAnnotations, saveOverlays } from "../server-persistence.js";
 import { requireSlug, safeTargetId } from "../server-core.js";
 import type { ReplaySession, SceneOverlay, SessionOverlays } from "../types.js";
 
+const INVALID_TARGET_ID_ERROR = "invalid targetId";
+
 interface AiRouteDeps {
   baseDir: string;
   loadSession: (slug: string, targetId?: string) => Promise<ReplaySession>;
@@ -218,7 +220,7 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const body = await c.req.json().catch(() => ({}));
@@ -269,7 +271,7 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const body = (await c.req.json().catch(() => ({}))) as {
@@ -326,7 +328,7 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId === null) return c.json({ error: INVALID_TARGET_ID_ERROR }, 400);
 
     try {
       const body = (await c.req.json().catch(() => ({}))) as {
