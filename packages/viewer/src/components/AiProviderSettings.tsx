@@ -33,6 +33,9 @@ export interface AiProviderSettingsModalProps extends AiProviderSettingsProps {
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-terminal-border-subtle bg-terminal-surface px-2.5 py-1.5 text-xs font-mono text-terminal-text outline-none placeholder:text-terminal-dimmer focus:border-terminal-purple/50 disabled:opacity-50";
+const CHATGPT_PROVIDER_ID = "chatgpt";
+const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
+const CHATGPT_WELCOME_STORAGE_KEY = "vibe-replay-chatgpt-plan-welcome-v1";
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
@@ -56,6 +59,7 @@ function providerStatus(provider: AiProviderInfo, method?: AiAuthMethodInfo["typ
 
 function providerCardStatus(provider: AiProviderInfo, method: AiAuthMethodInfo): string {
   if (!provider.configured || provider.authType !== method.type) return "setup";
+  if (provider.id === CHATGPT_PROVIDER_ID) return "connected";
   if (method.type === "api_key" && provider.authSource) {
     return `via ${authSourceLabel(provider.authSource)}`;
   }
@@ -73,7 +77,13 @@ function apiKeyHelpText(provider: AiProviderInfo): string | null {
   return "A key is configured, but it stays hidden. Enter a new key below to replace it.";
 }
 
-function authMethodKind(method: AiAuthMethodInfo): string {
+function authMethodKind(provider: AiProviderInfo, method: AiAuthMethodInfo): string {
+  if (provider.id === CHATGPT_PROVIDER_ID) {
+    return provider.configured && provider.authType === method.type
+      ? "Using ChatGPT plan"
+      : "Sign in with ChatGPT · no API key";
+  }
+  if (provider.id === "openai-codex") return "Codex subscription · separate login";
   return method.type === "oauth" ? "Account login" : "API key";
 }
 
@@ -93,12 +103,15 @@ function ProviderAuthCard({
   children?: ReactNode;
 }) {
   const configured = provider.configured && provider.authType === method.type;
+  const isChatGpt = provider.id === CHATGPT_PROVIDER_ID;
   return (
     <div
       className={`overflow-hidden rounded-lg border transition-colors ${
         selected
           ? "border-terminal-purple/50 bg-terminal-purple-subtle"
-          : "border-terminal-border-subtle bg-terminal-bg"
+          : isChatGpt
+            ? "border-terminal-green/30 bg-terminal-green-subtle/10"
+            : "border-terminal-border-subtle bg-terminal-bg"
       }`}
     >
       <button
@@ -124,12 +137,26 @@ function ProviderAuthCard({
             {providerCardStatus(provider, method)}
           </span>
         </div>
-        <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-          {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
+        <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-terminal-dimmer">
+          <span>
+            {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
+          </span>
+          {isChatGpt && configured && provider.accountLabel && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="truncate">{provider.accountLabel}</span>
+            </>
+          )}
         </div>
-        <div className="mt-2 text-[10px] font-mono text-terminal-purple">
-          {authMethodKind(method)}
-          {method.subscription ? " · subscription" : ""}
+        <div
+          className={`mt-2 text-[10px] font-mono ${
+            isChatGpt && configured ? "text-terminal-green" : "text-terminal-purple"
+          }`}
+        >
+          {authMethodKind(provider, method)}
+          {method.subscription && !isChatGpt && provider.id !== "openai-codex"
+            ? " · subscription"
+            : ""}
         </div>
       </button>
       {selected && children && (
@@ -397,7 +424,7 @@ function ProviderModelSelection({
     <div className="border-t border-terminal-border-subtle pt-3 text-[10px] font-mono">
       <div className="text-terminal-dim">Connect first to choose a model.</div>
       <div className="mt-1 text-terminal-dimmer">
-        Complete {authMethodKind(authMethod)} for {provider.name} above.
+        Complete {authMethodKind(provider, authMethod)} for {provider.name} above.
       </div>
     </div>
   );
@@ -439,6 +466,7 @@ export function AiProviderSettings({
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [showChatGptWelcome, setShowChatGptWelcome] = useState(false);
   const [customName, setCustomName] = useState("Custom gateway");
   const [customBaseUrl, setCustomBaseUrl] = useState("http://127.0.0.1:58788/v1");
   const [customApiKey, setCustomApiKey] = useState("");
@@ -523,8 +551,21 @@ export function AiProviderSettings({
       setApiKey("");
       setAuthStatus({
         type: "success",
-        text: authMethod === "oauth" ? "Signed in successfully." : "API key saved.",
+        text:
+          providerId === CHATGPT_PROVIDER_ID && authMethod === "oauth"
+            ? "Connected. Vibe Replay can now use your ChatGPT plan for eligible AI requests."
+            : authMethod === "oauth"
+              ? "Signed in successfully."
+              : "API key saved.",
       });
+      if (
+        providerId === CHATGPT_PROVIDER_ID &&
+        authMethod === "oauth" &&
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(CHATGPT_WELCOME_STORAGE_KEY) !== "seen"
+      ) {
+        setShowChatGptWelcome(true);
+      }
     } catch (error) {
       if (isAbortError(error)) return;
       setAuthStatus({
@@ -535,6 +576,17 @@ export function AiProviderSettings({
       setAuthRunning(false);
     }
   }, [apiKey, authMethod, authenticateAiProvider, providerId]);
+
+  const dismissChatGptWelcome = useCallback(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(CHATGPT_WELCOME_STORAGE_KEY, "seen");
+      } catch {
+        // A one-time education prompt should not depend on browser storage.
+      }
+    }
+    setShowChatGptWelcome(false);
+  }, []);
 
   const handleLogout = useCallback(async () => {
     if (!providerId || !logoutAiProvider) return;
@@ -614,21 +666,62 @@ export function AiProviderSettings({
     const status = providerStatus(provider, method.type);
     const apiKeyHint = apiKeyHelpText(provider);
     const apiKeyHintId = `ai-api-key-help-${provider.id}`;
+    const isChatGpt = provider.id === CHATGPT_PROVIDER_ID;
 
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-mono text-terminal-dim">
-            {method.type === "api_key" ? "API key" : "Account access"}
+            {method.type === "api_key" ? "API key" : isChatGpt ? "ChatGPT plan" : "Account access"}
           </span>
           <span
             className={`text-[10px] font-mono ${
               authConfigured ? "text-terminal-green" : "text-terminal-orange"
             }`}
           >
-            {status}
+            {isChatGpt ? (authConfigured ? "connected" : "not connected") : status}
           </span>
         </div>
+
+        {isChatGpt && (
+          <div
+            className={`rounded-lg border px-3 py-2.5 ${
+              authConfigured
+                ? "border-terminal-green/25 bg-terminal-green-subtle/20"
+                : "border-terminal-border-subtle bg-terminal-surface/40"
+            }`}
+          >
+            <div
+              className={`text-xs font-sans font-semibold ${
+                authConfigured ? "text-terminal-green" : "text-terminal-text"
+              }`}
+            >
+              {authConfigured ? "Using ChatGPT plan" : "Use your ChatGPT plan"}
+            </div>
+            <p className="mt-1 text-[10px] font-mono leading-relaxed text-terminal-dim">
+              {authConfigured
+                ? "Eligible Ask Replay and AI Studio requests use your ChatGPT plan or credits balance. Vibe Replay does not receive your ChatGPT conversations or API key."
+                : "Continue with ChatGPT to connect an eligible Plus or Pro account and use its plan for AI requests. No API key is required."}
+            </p>
+            {authConfigured && (
+              <div className="mt-2 flex items-center gap-3">
+                {provider.accountLabel && (
+                  <span className="min-w-0 truncate text-[10px] font-mono text-terminal-dimmer">
+                    {provider.accountLabel}
+                  </span>
+                )}
+                <a
+                  href={CHATGPT_USAGE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-auto shrink-0 text-[10px] font-mono font-semibold text-terminal-green underline underline-offset-2 transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                >
+                  Manage usage
+                </a>
+              </div>
+            )}
+          </div>
+        )}
 
         {method.type === "api_key" && (
           <div className="space-y-2">
@@ -671,18 +764,28 @@ export function AiProviderSettings({
 
         {method.type === "oauth" && (
           <div className="space-y-2">
-            <div className="text-[10px] font-mono text-terminal-dimmer">{method.label}</div>
+            {!isChatGpt && (
+              <div className="text-[10px] font-mono text-terminal-dimmer">{method.label}</div>
+            )}
             <button
               type="button"
               onClick={() => (authRunning ? cancelAiAuthentication?.() : void handleAuthenticate())}
               disabled={busy || (authRunning ? !cancelAiAuthentication : false)}
-              className="w-full cursor-pointer rounded-lg bg-terminal-blue-subtle px-3 py-2 text-xs font-mono font-semibold text-terminal-blue transition-colors hover:bg-terminal-blue/20 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-blue/60"
+              className={`w-full cursor-pointer rounded-lg px-3 py-2 text-xs font-mono font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 ${
+                isChatGpt
+                  ? "bg-terminal-green text-terminal-bg hover:bg-terminal-green/80 focus-visible:ring-terminal-green/60"
+                  : "bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue/20 focus-visible:ring-terminal-blue/60"
+              }`}
             >
               {authRunning
                 ? "Cancel browser sign-in"
                 : authConfigured
-                  ? "Sign in again"
-                  : "Sign in with provider"}
+                  ? isChatGpt
+                    ? "Reconnect ChatGPT"
+                    : "Sign in again"
+                  : isChatGpt
+                    ? "Continue with ChatGPT"
+                    : "Sign in with provider"}
             </button>
           </div>
         )}
@@ -697,7 +800,7 @@ export function AiProviderSettings({
               disabled={selectionLocked}
               className="cursor-pointer text-[10px] font-mono text-terminal-dimmer transition-colors hover:text-terminal-red disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-red/50"
             >
-              Sign out this provider
+              {isChatGpt ? "Sign out of ChatGPT in Vibe Replay" : "Sign out this provider"}
             </button>
           )}
 
@@ -809,9 +912,11 @@ export function AiProviderSettings({
             {accountProviders.length > 0 && (
               <div>
                 <div className="mb-2 flex items-baseline justify-between gap-3">
-                  <h3 className="text-xs font-sans font-semibold text-terminal-text">Accounts</h3>
+                  <h3 className="text-xs font-sans font-semibold text-terminal-text">
+                    Account sign-ins
+                  </h3>
                   <span className="text-[10px] font-mono text-terminal-dimmer">
-                    Sign in through the provider
+                    ChatGPT plan or provider subscription
                   </span>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -877,6 +982,57 @@ export function AiProviderSettings({
           </div>
         </>
       )}
+
+      {showChatGptWelcome &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) dismissChatGptWelcome();
+            }}
+          >
+            <dialog
+              open
+              aria-modal="true"
+              aria-labelledby="chatgpt-plan-welcome-title"
+              className="w-full max-w-md rounded-2xl border border-terminal-green/30 bg-terminal-bg p-5 shadow-layer-xl"
+            >
+              <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-terminal-green">
+                ChatGPT connected
+              </div>
+              <h3
+                id="chatgpt-plan-welcome-title"
+                className="mt-2 text-lg font-sans font-semibold text-terminal-text"
+              >
+                You’re using your ChatGPT plan
+              </h3>
+              <p className="mt-2 text-xs font-mono leading-relaxed text-terminal-dim">
+                Eligible AI requests in Vibe Replay use your ChatGPT plan or credits balance. You
+                can review usage and app limits in ChatGPT settings.
+              </p>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <a
+                  href={CHATGPT_USAGE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg px-3 py-2 text-xs font-mono font-semibold text-terminal-green transition-colors hover:bg-terminal-green-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                >
+                  Manage usage
+                </a>
+                <button
+                  type="button"
+                  onClick={dismissChatGptWelcome}
+                  className="cursor-pointer rounded-lg bg-terminal-green px-3 py-2 text-xs font-mono font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/60"
+                >
+                  Got it
+                </button>
+              </div>
+            </dialog>
+          </div>,
+          document.body,
+        )}
 
       <div
         className={`rounded-lg border bg-terminal-bg p-3 space-y-2 ${
