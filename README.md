@@ -215,7 +215,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Claude, Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot** — all providers auto-discovered, including multi-file and resumed sessions
 - **Remote SSH sources** — optionally combine remote Codex, Claude Code, and Pi JSONL sessions with local sessions using standard OpenSSH configuration
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
-- **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including OpenAI-compatible local or remote endpoints
+- **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including Sign in with ChatGPT (no API key) and OpenAI-compatible local or remote endpoints
 - **Ask Replay** — ask read-only questions about sessions, scenes, annotations, overlays, usage, coverage, projects, and Insights; get stable permalinks instead of opaque chat answers
 - **Share & export** — Quick Share an E2E-encrypted replay directly from your running machine (up to 10 MB, no account or R2 upload), or publish via GitHub Gist/cloud; animated SVG, GIF, markdown, and HTML exports are also available. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
