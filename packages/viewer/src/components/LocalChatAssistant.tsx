@@ -1,6 +1,8 @@
 import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAiProviderSettings } from "../hooks/useAiProviderSettings";
+const CHATGPT_PROVIDER_ID = "chatgpt";
+const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
 import { useRemoteDataConsent } from "../hooks/useRemoteDataConsent";
 import { navigateTo, navigateToPermalink } from "./dashboard-utils";
 import { sanitizeHtml } from "../utils/sanitize";
@@ -508,6 +510,7 @@ export default function LocalChatAssistant({ context }: Props) {
   );
   const selectedModel = selectedProvider?.models.find((model) => model.id === chatModelId);
   const providerReady = Boolean(selectedProvider?.configured && selectedModel);
+  const usingChatGptPlan = providerReady && selectedProvider?.id === CHATGPT_PROVIDER_ID;
   const hasConfiguredProvider = providerSettings.aiProviders.some(
     (provider) => provider.configured,
   );
@@ -1177,21 +1180,35 @@ export default function LocalChatAssistant({ context }: Props) {
                 Read-only ·{" "}
                 {!providerReady
                   ? "provider setup required"
-                  : remoteSourcesLoading && !remoteSession
-                    ? "checking source settings"
-                    : remoteDataEnabled
-                      ? "SSH data enabled"
-                      : remoteDataAvailable
-                        ? "SSH data hidden"
-                        : "local sessions only"}
+                  : usingChatGptPlan
+                    ? "Using ChatGPT plan"
+                    : remoteSourcesLoading && !remoteSession
+                      ? "checking source settings"
+                      : remoteDataEnabled
+                        ? "SSH data enabled"
+                        : remoteDataAvailable
+                          ? "SSH data hidden"
+                          : "local sessions only"}
               </span>
-              <button
-                type="button"
-                onClick={openProviderSettings}
-                className="cursor-pointer transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
-              >
-                Provider settings
-              </button>
+              <div className="flex items-center gap-3">
+                {usingChatGptPlan && (
+                  <a
+                    href={CHATGPT_USAGE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-terminal-green transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                  >
+                    Manage usage
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={openProviderSettings}
+                  className="cursor-pointer transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                >
+                  Provider settings
+                </button>
+              </div>
             </div>
             <button
               type="button"
