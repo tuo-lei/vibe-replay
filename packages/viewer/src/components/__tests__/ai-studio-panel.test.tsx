@@ -99,7 +99,10 @@ function makeActions(
   return { annotationActions, overlayActions };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 describe("AiStudioPanel", () => {
   it("shows subscription setup without exposing a CLI dependency", () => {
@@ -167,10 +170,82 @@ describe("AiStudioPanel", () => {
     const authHeadings = screen
       .getAllByRole("heading")
       .map((heading) => heading.textContent)
-      .filter((text): text is string => text === "Accounts" || text === "API keys");
-    expect(authHeadings).toEqual(["Accounts", "API keys"]);
+      .filter((text): text is string => text === "Account sign-ins" || text === "API keys");
+    expect(authHeadings).toEqual(["Account sign-ins", "API keys"]);
     fireEvent.click(screen.getByRole("button", { name: /OpenRouter.*Account login/ }));
     expect(screen.getByRole("button", { name: "Sign in with provider" })).toBeDefined();
+  });
+
+  it("makes Sign in with ChatGPT and plan usage explicit", async () => {
+    const authenticate = vi.fn(async () => {});
+    const actions = makeActions(
+      [
+        provider({
+          id: "chatgpt",
+          name: "ChatGPT",
+          configured: false,
+          authType: undefined,
+          authSource: undefined,
+          authMethods: [
+            {
+              type: "oauth",
+              label: "Continue with ChatGPT",
+              subscription: true,
+            },
+          ],
+          models: [],
+        }),
+      ],
+      { authenticateAiProvider: authenticate },
+    );
+
+    render(<AiStudioPanel {...actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    expect(screen.getByText("Sign in with ChatGPT · no API key")).toBeDefined();
+    expect(screen.getByText("Use your ChatGPT plan")).toBeDefined();
+    expect(
+      screen.getByText(/connect an eligible Plus or Pro account and use its plan/i),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    await waitFor(() => expect(authenticate).toHaveBeenCalledWith("chatgpt", "oauth", undefined));
+    expect(
+      await screen.findByRole("dialog", { name: "You’re using your ChatGPT plan" }),
+    ).toBeDefined();
+    expect(screen.getByRole("link", { name: "Manage usage" }).getAttribute("href")).toBe(
+      "https://chatgpt.com/#settings/Usage",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    expect(localStorage.getItem("vibe-replay-chatgpt-plan-welcome-v1")).toBe("seen");
+  });
+
+  it("shows the connected ChatGPT account and plan usage state", () => {
+    const actions = makeActions([
+      provider({
+        id: "chatgpt",
+        name: "ChatGPT",
+        configured: true,
+        authType: "oauth",
+        authSource: "stored credential",
+        accountLabel: "person@example.com",
+        authMethods: [
+          {
+            type: "oauth",
+            label: "Continue with ChatGPT",
+            subscription: true,
+          },
+        ],
+      }),
+    ]);
+
+    render(<AiStudioPanel {...actions} />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    expect(screen.getAllByText("Using ChatGPT plan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("person@example.com").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Reconnect ChatGPT" })).toBeDefined();
+    expect(screen.getAllByRole("link", { name: "Manage usage" }).length).toBeGreaterThan(0);
   });
 
   it("saves an API key through the provider auth action", async () => {
