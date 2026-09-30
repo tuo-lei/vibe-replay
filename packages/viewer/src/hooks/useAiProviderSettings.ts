@@ -46,7 +46,9 @@ export interface AiProviderSettingsActions {
   aiModelId: string | null;
   setAiProviderId: ((providerId: string) => void) | null;
   setAiModelId: ((modelId: string) => void) | null;
-  refreshAiProviders: ((signal?: AbortSignal) => Promise<void>) | null;
+  refreshAiProviders:
+    | ((signal?: AbortSignal, options?: { retryChatGptModels?: boolean }) => Promise<void>)
+    | null;
   authenticateAiProvider:
     | ((providerId: string, method: "api_key" | "oauth", apiKey?: string) => Promise<void>)
     | null;
@@ -220,7 +222,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   );
 
   const refreshAiProviders = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, options?: { retryChatGptModels?: boolean }) => {
       if (!enabled) return;
       const refreshSequence = ++refreshSequenceRef.current;
       const isCurrentRefresh = () => refreshSequenceRef.current === refreshSequence;
@@ -229,10 +231,13 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         setAiProvidersError(null);
       }
       try {
-        const response = await fetch(apiUrl("/api/ai/providers"), {
-          cache: "no-store",
-          signal,
-        });
+        const response = await fetch(
+          apiUrl(options?.retryChatGptModels ? "/api/ai/providers?refresh=1" : "/api/ai/providers"),
+          {
+            cache: "no-store",
+            signal,
+          },
+        );
         const data = (await response.json().catch(() => null)) as {
           providers?: unknown;
           defaultProvider?: { id?: unknown; modelId?: unknown } | null;
