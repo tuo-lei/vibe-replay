@@ -18,6 +18,7 @@ import type { ReplaySummary } from "../server-types.js";
 import { recordTelemetry } from "../telemetry.js";
 
 const INVALID_TARGET_ID_ERROR = "invalid targetId";
+const NO_SCAN_RESULTS_ERROR = "No scan results available. Start a scan first.";
 
 interface InsightsCache {
   userInsights: ReturnType<typeof aggregateUserInsights> | null;
@@ -155,7 +156,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
   app.get("/api/insights/rollup", async (c) => {
     const scanState = getScanState();
     if (!scanState.hasSnapshot) {
-      return c.json({ error: "No scan results available. Start a scan first." }, 503);
+      return c.json({ error: NO_SCAN_RESULTS_ERROR }, 503);
     }
     // Replay files can be created or deleted without a source scan, so refresh
     // this small list instead of trusting a potentially stale dashboard cache.
@@ -186,7 +187,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
 
       const scans = scanState.results;
       if (!scans.length) {
-        return c.json({ error: "No scan results available. Start a scan first." }, 404);
+        return c.json({ error: NO_SCAN_RESULTS_ERROR }, 404);
       }
       const memory = location === "local" ? await readProjectMemory(project) : undefined;
       const insights = aggregateProjectInsights(project, scans, memory || undefined, location);
@@ -200,7 +201,7 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
 
     const scans = scanState.results;
     if (!scans.length) {
-      return c.json({ error: "No scan results available. Start a scan first." }, 404);
+      return c.json({ error: NO_SCAN_RESULTS_ERROR }, 404);
     }
     const insights = aggregateUserInsights(scans);
     return c.json({ type: "user", insights });
