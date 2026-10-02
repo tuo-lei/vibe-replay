@@ -24,13 +24,6 @@ interface GrokBotGroupIdentity {
   groupId?: string;
 }
 
-export function discoveredGroupKey(session: SessionInfo): string | undefined {
-  if (isSandSubagentSessionId(session.sessionId)) return undefined;
-  const room = discoveredGroupTitle(session);
-  if (!room) return undefined;
-  return groupIdentityKey(room, session.groupId).key;
-}
-
 export function mergeDiscoveredGroupSessions(sessions: SessionInfo[]): SessionInfo[] {
   const groups = new Map<string, SessionInfo[]>();
   const passthrough: SessionInfo[] = [];
