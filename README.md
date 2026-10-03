@@ -217,7 +217,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
 - **AI Studio** — use the embedded Pi runtime to analyze, translate, and professionalize replays with your selected provider/model, including Sign in with ChatGPT (no API key) and OpenAI-compatible local or remote endpoints
 - **Ask Replay** — ask read-only questions about sessions, scenes, annotations, overlays, usage, coverage, projects, and Insights; get stable permalinks instead of opaque chat answers
-- **Share & export** — Quick Share an E2E-encrypted replay directly from your running machine (up to 10 MB, no account or R2 upload), or publish via GitHub Gist/cloud; animated SVG, GIF, markdown, and HTML exports are also available. Secret redaction built in
+- **Share & export** — Quick Share an E2E-encrypted replay directly from your running machine (up to 10 MB, no account or R2 upload; includes comments currently in the editor even when they differ from the saved session), or publish via GitHub Gist/cloud; animated SVG, GIF, markdown, and HTML exports are also available. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
 - **Live mode** — `vibe-replay live` follows a running local session as new turns land on disk; SSH-backed live mode is intentionally disabled
@@ -278,7 +278,7 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   data stays hidden unless you enable it in Settings. The setting is browser-local and can be changed
   at any time.
 - **Quick preview** — open in browser instantly
-- **Quick Share** — create a temporary E2E-encrypted link for one replay without uploading it to R2; the link works while your local Vibe Replay process is running and is capped at 10 MB
+- **Quick Share** — create a temporary E2E-encrypted link for one replay without uploading it to R2; the link works while your local Vibe Replay process is running and is capped at 10 MB. The snapshot includes comments currently in the editor, even when they differ from the saved session
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
 
