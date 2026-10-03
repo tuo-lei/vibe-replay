@@ -12,6 +12,17 @@ export const DEFAULT_GROK_BOT_EXPORT_ROOT = join(homedir(), ".grok-bot", "agent-
 
 const ENV_TRANSCRIPTS_DIR = "GROK_BOT_TRANSCRIPTS_DIR";
 const ENV_VIBE_DIR = "VIBE_REPLAY_GROK_BOT_DIR";
+const ENV_CLIENT_PERSISTENCE_DIR = "GROK_BOT_CLIENT_PERSISTENCE_DIR";
+
+/** Mac desktop client replica cache. Missing on Linux/box installs. */
+export function defaultGrokBotClientPersistenceDir(): string {
+  return join(homedir(), "Library", "Application Support", "Grok Bot", "sand-client-persistence");
+}
+
+export function getGrokBotClientPersistenceDir(): string | undefined {
+  const fromEnv = process.env[ENV_CLIENT_PERSISTENCE_DIR]?.trim();
+  return fromEnv || undefined;
+}
 
 export function getGrokBotEnvTranscriptsDir(): string | undefined {
   const fromGrok = process.env[ENV_TRANSCRIPTS_DIR]?.trim();

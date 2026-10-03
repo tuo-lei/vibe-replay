@@ -92,7 +92,8 @@ export function mediaPathFromPayload(value: unknown): string | undefined {
 
 /** Last path segment, accepting `/` and `\\` so Windows paths work on POSIX. */
 export function grokBotPathBasename(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "").trim();
+  const withoutQuery = path.split("?")[0]?.split("#")[0] ?? path;
+  const trimmed = withoutQuery.replace(/[\\/]+$/, "").trim();
   if (!trimmed) return path.trim() || "image";
   const parts = trimmed.split(/[\\/]/);
   return parts[parts.length - 1] || path.trim();

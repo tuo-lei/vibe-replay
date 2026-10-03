@@ -23,7 +23,7 @@ import {
   classifyGrokBotUserWake,
   formatAnsweringHeader,
   peelGrokBotMetaTag,
-  stripGrokBotHiddenPayload,
+  splitGrokBotUserSegments,
 } from "./meta-wake.js";
 import {
   formatAttachedImageMention,
@@ -43,6 +43,15 @@ import {
   isGrokBotHiddenTool,
   mapGrokBotToolArgs,
 } from "./tool-mapping.js";
+import { readAgentProfile } from "./profiles.js";
+import {
+  agentIdFromReplicaFilename,
+  mergeReplicaTurns,
+  replicaDocumentToLines,
+  replicaSideTurns,
+  replicaTitleHint,
+} from "./replica.js";
+import { formatGrokBotRichSendMessage } from "./rich-send.js";
 import { findSandSubagentId, isSandSubagentSessionId } from "./subagent.js";
 
 export {
@@ -75,6 +84,7 @@ export {
   parseGrokBotMetaWake,
   peelGrokBotMetaTag,
   SAND_HIDDEN_PROMPT,
+  splitGrokBotUserSegments,
   stripGrokBotHiddenPayload,
 } from "./meta-wake.js";
 export type { ClassifiedGrokBotUserWake, GrokBotMetaWake } from "./meta-wake.js";
@@ -132,68 +142,151 @@ export async function parseGrokBotSession(
   sessionInfo?: SessionInfo,
 ): Promise<ProviderParseResult> {
   const paths = await resolveGrokBotParsePaths(filePaths, sessionInfo);
-  if (paths.length <= 1) {
-    const sourcePath = paths[0] || (Array.isArray(filePaths) ? filePaths[0] : filePaths);
-    const content = sourcePath ? await readFile(sourcePath, "utf-8") : "";
-    const ownerName = sourcePath ? await resolveOwnerName(sourcePath, sessionInfo) : undefined;
-    const parsed = parseGrokBotLines(content.split("\n"), {
-      sourcePath,
-      sessionInfo,
-      ownerName,
-    });
-    return attachGrokBotSubAgents(parsed, sourcePath);
-  }
-
-  const members = await Promise.all(
-    paths.map(async (path) => {
-      const content = await readFile(path, "utf-8");
-      const ownerName = await resolveOwnerName(path, sessionInfo);
-      const parsed = await attachGrokBotSubAgents(
-        parseGrokBotLines(content.split("\n"), {
-          sourcePath: path,
-          sessionInfo,
-          ownerName,
-        }),
-        path,
-      );
-      return {
-        path,
-        ownerName: ownerName || parsed.agentName,
-        parsed,
-      };
-    }),
-  );
-  return mergeGrokBotGroupParses(members, sessionInfo);
+  return parseGrokBotBuckets(bucketsFromPaths(paths), sessionInfo);
 }
 
 export async function parseGrokBotLiveSession(
   members: Array<{ path: string; lines: string[] }>,
   sessionInfo?: SessionInfo,
 ): Promise<ProviderParseResult> {
-  if (members.length === 0) {
-    return parseGrokBotLines([], { sessionInfo });
+  if (members.length === 0) return parseGrokBotLines([], { sessionInfo });
+  return parseGrokBotBuckets(bucketsFromLiveMembers(members), sessionInfo);
+}
+
+interface SourceBucket {
+  agentId: string;
+  jsonl: Array<{ path: string; lines?: string[] }>;
+  replicas: string[];
+}
+
+function sourceAgentId(filePath: string): { agentId: string; replica: boolean } {
+  if (filePath.endsWith(".jsonl")) {
+    return { agentId: basename(filePath, ".jsonl"), replica: false };
+  }
+  const replicaId = agentIdFromReplicaFilename(basename(filePath));
+  if (replicaId) return { agentId: replicaId, replica: true };
+  return { agentId: filePath, replica: false };
+}
+
+function bucketsFromPaths(paths: string[]): SourceBucket[] {
+  return bucketsFromLiveMembers(paths.map((path) => ({ path, lines: [] })));
+}
+
+function bucketsFromLiveMembers(members: Array<{ path: string; lines: string[] }>): SourceBucket[] {
+  const map = new Map<string, SourceBucket>();
+  for (const member of members) {
+    if (!member.path) continue;
+    const { agentId, replica } = sourceAgentId(member.path);
+    let bucket = map.get(agentId);
+    if (!bucket) {
+      bucket = { agentId, jsonl: [], replicas: [] };
+      map.set(agentId, bucket);
+    }
+    if (replica) bucket.replicas.push(member.path);
+    else bucket.jsonl.push(member.lines.length > 0 ? member : { path: member.path });
+  }
+  return [...map.values()];
+}
+
+async function parseGrokBotBuckets(
+  buckets: SourceBucket[],
+  sessionInfo?: SessionInfo,
+): Promise<ProviderParseResult> {
+  if (buckets.length === 0) return parseGrokBotLines([], { sessionInfo });
+  const members = [];
+  for (const bucket of buckets) {
+    members.push(await parseSourceBucket(bucket, sessionInfo));
+  }
+  if (members.length === 1) return members[0].parsed;
+  return mergeGrokBotGroupParses(members, sessionInfo);
+}
+
+async function parseSourceBucket(
+  bucket: SourceBucket,
+  sessionInfo?: SessionInfo,
+): Promise<{ path: string; ownerName?: string; parsed: ProviderParseResult }> {
+  const jsonl = bucket.jsonl[0];
+  const jsonlPath = jsonl?.path;
+  let lines = jsonl?.lines;
+  if (jsonlPath && !lines) {
+    const content = await readFile(jsonlPath, "utf-8").catch(() => "");
+    lines = content.split("\n");
+  }
+  const ownerName = jsonlPath ? await resolveOwnerName(jsonlPath, sessionInfo) : undefined;
+  let parsed = parseGrokBotLines(lines || [], {
+    sourcePath: jsonlPath,
+    sessionInfo,
+    ownerName,
+  });
+  if (jsonlPath) parsed = await attachGrokBotSubAgents(parsed, jsonlPath);
+  if (!jsonlPath) {
+    parsed = { ...parsed, sessionId: bucket.agentId, slug: sessionInfo?.slug || bucket.agentId };
   }
 
-  const parsedMembers = await Promise.all(
-    members.map(async ({ path, lines }) => {
-      const ownerName = await resolveOwnerName(path, sessionInfo);
-      const parsed = await attachGrokBotSubAgents(
-        parseGrokBotLines(lines, {
-          sourcePath: path,
-          sessionInfo,
-          ownerName,
-        }),
-        path,
-      );
-      return {
-        path,
-        ownerName: ownerName || parsed.agentName,
-        parsed,
+  const extra: ParsedTurn[] = [];
+  for (const replicaPath of bucket.replicas) {
+    const rawText = await readFile(replicaPath, "utf-8").catch(() => "");
+    let doc: unknown;
+    try {
+      doc = JSON.parse(rawText);
+    } catch {
+      continue;
+    }
+    const replicaParsed = parseGrokBotLines(replicaDocumentToLines(doc), {
+      sessionInfo,
+      sourcePath: jsonlPath || replicaPath,
+      ownerName,
+    });
+    extra.push(...replicaParsed.turns, ...replicaSideTurns(doc));
+    if (!parsed.title) {
+      parsed = { ...parsed, title: replicaParsed.title || replicaTitleHint(doc) || parsed.title };
+    }
+  }
+  if (extra.length > 0) {
+    parsed = { ...parsed, turns: mergeReplicaTurns(parsed.turns, extra) };
+    const stamps = parsed.turns
+      .map((turn) => turn.timestamp)
+      .filter((stamp): stamp is string => !!stamp)
+      .sort();
+    if (stamps.length > 0) {
+      parsed = {
+        ...parsed,
+        startTime: parsed.startTime && parsed.startTime < stamps[0] ? parsed.startTime : stamps[0],
+        endTime:
+          parsed.endTime && parsed.endTime > stamps[stamps.length - 1]
+            ? parsed.endTime
+            : stamps[stamps.length - 1],
       };
-    }),
-  );
-  if (parsedMembers.length === 1) return parsedMembers[0].parsed;
-  return mergeGrokBotGroupParses(parsedMembers, sessionInfo);
+    }
+  }
+  parsed = await applyDirectProfile(parsed, bucket.agentId, jsonlPath);
+  return {
+    path: jsonlPath || bucket.replicas[0] || bucket.agentId,
+    ownerName: ownerName || parsed.agentName,
+    parsed,
+  };
+}
+
+async function applyDirectProfile(
+  parsed: ProviderParseResult,
+  agentId: string,
+  jsonlPath: string | undefined,
+): Promise<ProviderParseResult> {
+  if (!agentId || agentId.startsWith("group-") || isSandSubagentSessionId(agentId)) return parsed;
+  const roots: string[] = [];
+  if (jsonlPath) roots.push(dirname(dirname(jsonlPath)));
+  for (const root of getGrokBotTranscriptRoots()) {
+    if (!roots.includes(root)) roots.push(root);
+  }
+  for (const root of roots) {
+    const profile = await readAgentProfile(root, agentId).catch(() => undefined);
+    if (!profile) continue;
+    const groupTitle = parsed.title?.startsWith("Group:");
+    const title = groupTitle ? parsed.title : parsed.title || profile.name;
+    const cwd = parsed.cwd || profile.cwd || "";
+    return { ...parsed, ...(title ? { title } : {}), cwd };
+  }
+  return parsed;
 }
 
 interface ParseGrokBotLinesOptions {
@@ -274,59 +367,61 @@ export function parseGrokBotLines(
     const recordTs = coerceTimestamp(record.timestamp);
 
     if (role === "user") {
-      const text = stripGrokBotHiddenPayload(stripUserDecorators(extractText(content)));
-      if (!text) continue;
+      const segments = splitGrokBotUserSegments(stripUserDecorators(extractText(content)));
+      if (segments.length === 0) continue;
       const timestamp = recordTs;
       if (timestamp) {
         allTimestamps.push(timestamp);
         lastKnownTimestamp = timestamp;
       }
-      const peeled = peelGrokBotMetaTag(text);
-      const groupSource = peeled?.rest || text;
-      const groupTurns = turnsFromGroupWake(groupSource, timestamp, lastGroupHeaderKey);
-      if (groupTurns) {
-        sawGroupChat = true;
-        if (groupTurns.groupTitle) groupTitle = groupTurns.groupTitle;
-        if (groupTurns.headerKey) lastGroupHeaderKey = groupTurns.headerKey;
-        if (!ownerName && groupTurns.ownerName) ownerName = groupTurns.ownerName;
-        turns.push(...groupTurns.turns);
-        continue;
-      }
-      const classified = classifyGrokBotUserWake(text);
-      if (classified) {
-        if (classified.kind === "skip") continue;
-        if (classified.kind === "context-injection") {
+      for (const text of segments) {
+        const peeled = peelGrokBotMetaTag(text);
+        const groupSource = peeled?.rest || text;
+        const groupTurns = turnsFromGroupWake(groupSource, timestamp, lastGroupHeaderKey);
+        if (groupTurns) {
+          sawGroupChat = true;
+          if (groupTurns.groupTitle) groupTitle = groupTurns.groupTitle;
+          if (groupTurns.headerKey) lastGroupHeaderKey = groupTurns.headerKey;
+          if (!ownerName && groupTurns.ownerName) ownerName = groupTurns.ownerName;
+          turns.push(...groupTurns.turns);
+          continue;
+        }
+        const classified = classifyGrokBotUserWake(text);
+        if (classified) {
+          if (classified.kind === "skip") continue;
+          if (classified.kind === "context-injection") {
+            turns.push({
+              role: "user",
+              subtype: "context-injection",
+              ...(timestamp ? { timestamp } : {}),
+              blocks: [{ type: "text", text: classified.text }],
+            });
+            continue;
+          }
+          if (classified.label === "answering-question") {
+            const header = peeled ? formatAnsweringHeader(peeled.wake) : "";
+            if (header) {
+              turns.push({
+                role: "user",
+                subtype: "context-injection",
+                ...(timestamp ? { timestamp } : {}),
+                blocks: [{ type: "text", text: header }],
+              });
+            }
+          }
           turns.push({
             role: "user",
-            subtype: "context-injection",
             ...(timestamp ? { timestamp } : {}),
             blocks: [{ type: "text", text: classified.text }],
           });
           continue;
         }
-        if (classified.label === "answering-question") {
-          const header = peeled ? formatAnsweringHeader(peeled.wake) : "";
-          if (header) {
-            turns.push({
-              role: "user",
-              subtype: "context-injection",
-              ...(timestamp ? { timestamp } : {}),
-              blocks: [{ type: "text", text: header }],
-            });
-          }
-        }
         turns.push({
           role: "user",
           ...(timestamp ? { timestamp } : {}),
-          blocks: [{ type: "text", text: classified.text }],
+          blocks: [{ type: "text", text }],
         });
-        continue;
       }
-      turns.push({
-        role: "user",
-        ...(timestamp ? { timestamp } : {}),
-        blocks: [{ type: "text", text }],
-      });
       continue;
     }
 
@@ -358,8 +453,12 @@ export function parseGrokBotLines(
 
       if (rawName.toLowerCase() === SEND_MESSAGE_TOOL) {
         const visible = extractSendMessageText(block.input);
-        if (visible.trim()) blocks.push({ type: "text", text: visible });
-        continue;
+        if (visible.trim()) {
+          blocks.push({ type: "text", text: visible });
+          continue;
+        }
+        // Empty input with an error result is a failed reply, not a silent drop.
+        if (!result?.isError) continue;
       }
 
       if (isGrokBotHiddenTool(rawName)) continue;
@@ -501,6 +600,8 @@ function extractSendMessageTextRaw(input: unknown, depth = 0): string {
       .join("\n");
   }
   if (typeof input !== "object") return "";
+  const rich = formatGrokBotRichSendMessage(input);
+  if (rich) return rich;
   const obj = input as Record<string, unknown>;
   if (typeof obj.content === "string") return obj.content;
   if (typeof obj.text === "string") return obj.text;
@@ -546,10 +647,17 @@ function formatToolResult(result: unknown): { text: string; isError: boolean; ti
   if (typeof scrubbed === "string") return { text: scrubbed, isError: false };
   if (typeof scrubbed !== "object") return { text: String(scrubbed), isError: false };
   const obj = scrubbed as Record<string, unknown>;
+  if ("spawnError" in obj) {
+    return {
+      text: formatPayload(obj.spawnError),
+      isError: true,
+      timestamp: timestampFrom(obj.spawnError),
+    };
+  }
   if ("success" in obj) {
     return {
       text: formatSuccessPayload(obj.success),
-      isError: false,
+      isError: payloadIsError(obj.success),
       timestamp: timestampFrom(obj.success),
     };
   }
@@ -573,17 +681,114 @@ function formatToolResult(result: unknown): { text: string; isError: boolean; ti
   return { text: formatPayload(obj), isError: false, timestamp: timestampFrom(obj) };
 }
 
+function payloadIsError(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const obj = value as Record<string, unknown>;
+  if (obj.isError === true || obj.is_error === true) return true;
+  if (!Array.isArray(obj.content)) return false;
+  return obj.content.some(
+    (item) =>
+      !!item && typeof item === "object" && (item as Record<string, unknown>).isError === true,
+  );
+}
+
+function unwrapMcpContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const item of content) {
+    if (typeof item === "string" && item.trim()) {
+      parts.push(item.trim());
+      continue;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.text === "string" && obj.text.trim()) parts.push(obj.text.trim());
+    else if (obj.text && typeof obj.text === "object" && !Array.isArray(obj.text)) {
+      const nested = (obj.text as Record<string, unknown>).text;
+      if (typeof nested === "string" && nested.trim()) parts.push(nested.trim());
+    }
+    const location = obj.outputLocation ?? obj.output_location;
+    if (location && typeof location === "object" && !Array.isArray(location)) {
+      const loc = location as Record<string, unknown>;
+      const filePath = typeof loc.filePath === "string" ? loc.filePath : undefined;
+      if (filePath) {
+        const size = typeof loc.sizeBytes === "number" ? `${loc.sizeBytes} bytes` : "";
+        const lines = typeof loc.lineCount === "number" ? `${loc.lineCount} lines` : "";
+        const detail = [size, lines].filter(Boolean).join(", ");
+        parts.push(detail ? `${filePath} (spilled, ${detail})` : `${filePath} (spilled)`);
+      }
+    }
+  }
+  const text = parts.filter(Boolean).join("\n");
+  return text || undefined;
+}
+
+function isSpilledRead(obj: Record<string, unknown>): boolean {
+  return !!(obj.dataBlobId || obj.contentBlobId || obj.exceededLimit === true);
+}
+
+function formatStructuredSuccess(obj: Record<string, unknown>): string | undefined {
+  const unwrapped = unwrapMcpContent(obj.content);
+  if (unwrapped) return unwrapped;
+  if (Array.isArray(obj.references)) {
+    const titles = obj.references
+      .map((ref) => {
+        if (!ref || typeof ref !== "object" || Array.isArray(ref)) return "";
+        const item = ref as Record<string, unknown>;
+        return typeof item.title === "string"
+          ? item.title
+          : typeof item.chunk === "string"
+            ? item.chunk
+            : "";
+      })
+      .filter(Boolean);
+    if (titles.length > 0) return titles.join("\n");
+  }
+  if (
+    (obj.content == null || obj.content === "") &&
+    (obj.dataBlobId || obj.contentBlobId || obj.exceededLimit === true)
+  ) {
+    const path = typeof obj.path === "string" ? obj.path : "";
+    const blob =
+      typeof obj.dataBlobId === "string"
+        ? obj.dataBlobId
+        : typeof obj.contentBlobId === "string"
+          ? obj.contentBlobId
+          : "";
+    const lines = typeof obj.totalLines === "number" ? `${obj.totalLines} lines` : "";
+    const why = obj.exceededLimit === true ? "exceeded limit" : "spilled";
+    return [path, why, lines, blob ? `blob ${blob}` : ""].filter(Boolean).join(" · ");
+  }
+  const pending = obj.stillRunning ?? obj.complete;
+  if (pending && typeof pending === "object" && !Array.isArray(pending)) {
+    const state = obj.stillRunning ? "still running" : "complete";
+    const item = pending as Record<string, unknown>;
+    const where =
+      typeof item.outputFilePath === "string"
+        ? item.outputFilePath
+        : typeof item.taskId === "string"
+          ? item.taskId
+          : "";
+    return where ? `${state}: ${where}` : state;
+  }
+  return undefined;
+}
+
 function formatSuccessPayload(success: unknown): string {
   const scrubbed = scrubGrokBotMediaPayload(success);
   if (typeof scrubbed === "string") return scrubbed;
   if (!scrubbed || typeof scrubbed !== "object") return scrubbed == null ? "" : String(scrubbed);
   const obj = scrubbed as Record<string, unknown>;
-  if (typeof obj.content === "string") return obj.content;
+  if (typeof obj.content === "string" && (obj.content.length > 0 || !isSpilledRead(obj))) {
+    return obj.content;
+  }
   if (typeof obj.stdout === "string") return obj.stdout;
   if (typeof obj.output === "string") return obj.output;
   if (typeof obj.text === "string") return obj.text;
   const status = flattenGrokBotStatusText(obj.currentStep);
   if (status) return status;
+  const structured = formatStructuredSuccess(obj);
+  if (structured) return structured;
   const mediaPath = mediaPathFromPayload(obj);
   const rest = omitKeys(obj, ["timestamp", "messageId", "message_id"]);
   const remaining = mediaPath
@@ -656,7 +861,10 @@ function formatPayload(value: unknown): string {
     if (typeof obj.message === "string") return obj.message;
     if (typeof obj.reason === "string") return obj.reason;
     if (typeof obj.error === "string") return obj.error;
-    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.errorMessage === "string") return obj.errorMessage;
+    if (typeof obj.content === "string" && obj.content.trim()) return obj.content;
+    const stderr = firstString(obj.stderr, obj.interleavedOutput, obj.stdout)?.trim();
+    if (stderr) return stderr;
   }
   try {
     return JSON.stringify(scrubbed, null, 2);
@@ -909,34 +1117,35 @@ export function countGrokBotDiscoveryStats(content: string): {
     }
 
     if (record.role === "user") {
-      const text = stripGrokBotHiddenPayload(
+      const segments = splitGrokBotUserSegments(
         stripUserDecorators(extractText(record.message?.content)),
       );
-      if (!text) continue;
-      const peeled = peelGrokBotMetaTag(text);
-      const groupSource = peeled?.rest || text;
-      const group = parseGrokBotGroupWake(groupSource);
-      if (group) {
-        isGroupChat = true;
-        if (group.groupTitle) groupTitle = group.groupTitle;
-        const botNames = groupWakeBotNames(group);
-        for (const message of group.messages) {
-          if (!message.text.trim()) continue;
-          if (!isHumanGroupSpeaker(message.speaker, botNames)) continue;
-          promptCount++;
-          if (prompts.length < 2) prompts.push(message.text.slice(0, 200));
+      for (const text of segments) {
+        const peeled = peelGrokBotMetaTag(text);
+        const groupSource = peeled?.rest || text;
+        const group = parseGrokBotGroupWake(groupSource);
+        if (group) {
+          isGroupChat = true;
+          if (group.groupTitle) groupTitle = group.groupTitle;
+          const botNames = groupWakeBotNames(group);
+          for (const message of group.messages) {
+            if (!message.text.trim()) continue;
+            if (!isHumanGroupSpeaker(message.speaker, botNames)) continue;
+            promptCount++;
+            if (prompts.length < 2) prompts.push(message.text.slice(0, 200));
+          }
+          continue;
         }
-        continue;
-      }
-      const classified = classifyGrokBotUserWake(text);
-      if (classified) {
-        if (classified.kind !== "prompt") continue;
+        const classified = classifyGrokBotUserWake(text);
+        if (classified) {
+          if (classified.kind !== "prompt") continue;
+          promptCount++;
+          if (prompts.length < 2) prompts.push(classified.text.slice(0, 200));
+          continue;
+        }
         promptCount++;
-        if (prompts.length < 2) prompts.push(classified.text.slice(0, 200));
-        continue;
+        if (prompts.length < 2) prompts.push(text.slice(0, 200));
       }
-      promptCount++;
-      if (prompts.length < 2) prompts.push(text.slice(0, 200));
       continue;
     }
 

@@ -92,13 +92,19 @@ describe("Grok Bot parser", () => {
     ).toBe(false);
   });
 
-  it("skips hidden prompts and strips [tNu] prefixes", () => {
+  it("skips opaque hidden prompts, keeps a wrapped wake, and strips [tNu] prefixes", () => {
     expect(stripUserDecorators("[t0u]\nhello")).toBe("hello");
     expect(stripUserDecorators("[t3u] later")).toBe("later");
     const parsed = parseGrokBotLines([
       JSON.stringify({
         role: "user",
         message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT] secret" }] },
+      }),
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT][routine] ping the checklist" }],
+        },
       }),
       JSON.stringify({
         role: "user",
@@ -111,8 +117,34 @@ describe("Grok Bot parser", () => {
         },
       }),
     ]);
-    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(1);
-    expect(parsed.turns[0].blocks[0]).toEqual({ type: "text", text: "visible prompt" });
+    const userTurns = parsed.turns.filter((turn) => turn.role === "user");
+    expect(
+      userTurns.map((turn) => (turn.blocks[0]?.type === "text" ? turn.blocks[0].text : "")),
+    ).toEqual(["Routine: ping the checklist", "visible prompt"]);
+    expect(userTurns[0]?.subtype).toBe("context-injection");
+    expect(JSON.stringify(parsed.turns)).not.toContain("secret");
+  });
+
+  it("does not split a user sentence that mentions a wake word", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "Please explain [agentic mode] and what [event] means.",
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(parsed.turns).toHaveLength(1);
+    expect(parsed.turns[0]?.subtype).toBeUndefined();
+    expect(parsed.turns[0]?.blocks[0]).toEqual({
+      type: "text",
+      text: "Please explain [agentic mode] and what [event] means.",
+    });
   });
 
   it("promotes widget-bearing send_message content and pairs toolCallId results", async () => {

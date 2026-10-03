@@ -1,0 +1,55 @@
+{
+  "text": {
+    "type": "text",
+    "content": "Synthetic reply. No secrets."
+  },
+  "widget": {
+    "type": "widget",
+    "widget": {
+      "prompt": "Pick one",
+      "helpText": "optional help",
+      "allowCustom": true,
+      "dismissOnMoveOn": false,
+      "multiSelect": false,
+      "options": [
+        {
+          "label": "Option A",
+          "value": "a",
+          "style": "primary",
+          "description": "first"
+        },
+        {
+          "label": "Option B",
+          "value": "b"
+        }
+      ]
+    }
+  },
+  "auto-review-approval": {
+    "type": "auto-review-approval",
+    "approval": {
+      "requestId": "req-synthetic",
+      "surface": "computer",
+      "summary": "Allow a redacted command",
+      "reason": "Needed for the example task.",
+      "status": "expired",
+      "proposedRule": "allow echo in workspace"
+    }
+  },
+  "cursor-agent": {
+    "type": "cursor-agent",
+    "bcId": "bc-synthetic",
+    "title": "Example cloud agent"
+  },
+  "attachment": {
+    "type": "attachment",
+    "file_name": "cat.png",
+    "url": "file:///tmp/folder/cat.png?sig=REDACTED"
+  },
+  "connector": {
+    "type": "connector",
+    "connector": "example-graphql",
+    "serverId": "server-synthetic",
+    "variant": "connect"
+  }
+}

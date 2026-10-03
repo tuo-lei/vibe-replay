@@ -1,0 +1,6 @@
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "read", "input": {"path": "/tmp/big-redacted.txt", "offset": 1, "limit": 200}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "read", "result": {"success": {"path": "/tmp/big-redacted.txt", "fileSize": 500000, "totalLines": 9000, "content": null, "dataBlobId": "blob-redacted", "exceededLimit": true}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "read", "input": {"path": "/tmp/other-redacted.txt"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "read", "result": {"success": {"path": "/tmp/other-redacted.txt", "fileSize": 800000, "totalLines": 100, "readRange": {"start": 1, "end": 50}, "content": null, "contentBlobId": "content-blob-redacted"}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "read", "input": {"path": "/tmp/missing-redacted.txt"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "read", "result": {"error": {"errorMessage": "file not found"}}}]}}

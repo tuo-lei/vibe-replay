@@ -1,0 +1,4 @@
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "web_search", "input": {"searchTerm": "example query redacted", "toolCallId": "ws-1"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "web_search", "result": {"success": {"references": [{"title": "Example result", "chunk": "short redacted snippet"}]}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "web_fetch", "input": {"url": "https://example.invalid/doc", "toolCallId": "wf-1"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "web_fetch", "result": {"error": {"error": "fetch failed", "url": "https://example.invalid/doc"}}}]}}

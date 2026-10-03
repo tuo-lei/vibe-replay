@@ -122,7 +122,7 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
   }
 
   if (normalized === "web_search" || normalized === "websearch") {
-    const query = firstString(obj.query, obj.search_term, obj.q);
+    const query = firstString(obj.query, obj.search_term, obj.searchTerm, obj.q);
     if (query) obj.query = query;
   }
 
@@ -172,7 +172,13 @@ export function mapGrokBotToolArgs(toolName: string, input: unknown): Record<str
       flattenGrokBotStatusText(obj.status) ||
       flattenGrokBotStatusText(obj.currentStep) ||
       flattenGrokBotStatusText(obj.text);
-    if (update) obj.update = update;
+    if (update) {
+      obj.update = update;
+      if (typeof obj.currentStep === "string") {
+        const trimmed = obj.currentStep.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) obj.currentStep = update;
+      }
+    }
   }
 
   if (normalized === "mcp" || !isGrokBotBuiltinTool(toolName)) {
@@ -319,7 +325,17 @@ export function flattenGrokBotStatusText(value: unknown, depth = 0): string | un
   }
   if (typeof value !== "object") return undefined;
   const obj = value as Record<string, unknown>;
-  for (const key of ["result", "update", "status", "currentStep", "text", "content", "message"]) {
+  for (const key of [
+    "result",
+    "update",
+    "status",
+    "currentStep",
+    "text",
+    "content",
+    "message",
+    "error",
+    "errorMessage",
+  ]) {
     if (!(key in obj)) continue;
     const found = flattenGrokBotStatusText(obj[key], depth + 1);
     if (found) return found;
@@ -362,7 +378,7 @@ function summarizeComputerUseActions(actions: unknown): string | undefined {
     if (label && !labels.includes(label)) labels.push(label);
   }
   if (labels.length === 0) return `${actions.length} actions`;
-  if (labels.length <= 4) return labels.join(", ");
+  if (labels.length <= 8) return labels.join(", ");
   return `${actions.length} actions`;
 }
 
@@ -370,7 +386,10 @@ function computerUseActionLabel(item: unknown): string | undefined {
   if (typeof item === "string" && item.trim()) return item.trim();
   if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
   const obj = item as Record<string, unknown>;
-  return firstString(obj.action, obj.type, obj.kind, obj.name, obj.command);
+  const named = firstString(obj.action, obj.type, obj.kind, obj.name, obj.command);
+  if (named) return named;
+  // Live actions are `{ click: {...}, screenshot: {} }` — the verb is the key.
+  return Object.keys(obj).find((key) => key !== "screenshot" && key !== "screenshot_after");
 }
 
 function firstString(...values: unknown[]): string | undefined {
