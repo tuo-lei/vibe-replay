@@ -144,12 +144,6 @@ export async function findSdkAgentById(agentId: string): Promise<SdkAgent | null
   return index.get(agentId) || null;
 }
 
-/** Force-clear the SDK agent index cache. Useful for tests and live mode. */
-export function invalidateSdkAgentIndexCache(): void {
-  cachedAgentIndex = null;
-  cachedAgentIndexAt = 0;
-}
-
 async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
   if (cachedAgentIndex && Date.now() - cachedAgentIndexAt < AGENT_INDEX_TTL_MS) {
     return cachedAgentIndex;
