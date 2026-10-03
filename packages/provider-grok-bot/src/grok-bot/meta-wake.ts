@@ -57,7 +57,7 @@ const EVENT_RE = /^\s*\[event\]\s*/i;
 const FIRST_RUN_RE = /^\s*\[first run\]\s*/i;
 const TRUSTED_AUTOMATION = "[SAND_TRUSTED_AUTOMATION_PROMPT]";
 const SEGMENT_RE =
-  /\[(?:routine|agent|inbound|event|first run|A background task just completed|Answering your question|Group chat:|object Object|SAND_TRUSTED_AUTOMATION_PROMPT)/gi;
+  /\[(?:routine\]|agent\]|inbound\]|event\]|first run\]|A background task just completed\]|Answering your question\b|Group chat:|object Object\]|SAND_TRUSTED_AUTOMATION_PROMPT\])/gi;
 export function stripGrokBotProfileUpdate(text: string): string {
   return text.replace(/<<SAND_AGENT_PROFILE_UPDATE[\s\S]*?>>/gi, "").trim();
 }
@@ -95,7 +95,7 @@ export function stripGrokBotHiddenPayload(text: string): string {
  * Split on a later wake tag so the group splitter is not swallowed by the first tag.
  */
 const WAKE_SEGMENT_RE =
-  /^\s*\[(?:routine|agent|inbound|event|first run|A background task just completed|Answering your question|Group chat:)/i;
+  /^\s*\[(?:routine\]|agent\]|inbound\]|event\]|first run\]|A background task just completed\]|Answering your question\b|Group chat:)/i;
 
 function hadLeadingHiddenPrompt(text: string): boolean {
   return text
@@ -112,7 +112,8 @@ export function splitGrokBotUserSegments(text: string): string[] {
   SEGMENT_RE.lastIndex = 0;
   for (const match of cleaned.matchAll(SEGMENT_RE)) {
     const index = match.index ?? 0;
-    if (index === 0 || /\s/.test(cleaned[index - 1] || "")) indexes.push(index);
+    // Only a following wake record, not "[event]" inside a sentence.
+    if (index === 0 || cleaned[index - 1] === "\n") indexes.push(index);
   }
   const starts = indexes.length === 0 ? [0] : indexes[0] === 0 ? indexes : [0, ...indexes];
   const parts: string[] = [];

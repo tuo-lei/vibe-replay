@@ -151,7 +151,7 @@ describe("Mac client replicas", () => {
     expect(decodeBase32(encoded)).toBe(
       `sand.client.slice.account.0.transcript.replicas.${agentId}`,
     );
-    expect(encodeBase32("hi")).toBe(decodeBase32(encodeBase32("hi")) ? encodeBase32("hi") : "");
+    expect(decodeBase32(encodeBase32("hi"))).toBe("hi");
   });
 
   it("renders widget, cloud agent, attachment, connector, and voice entries", async () => {
@@ -328,6 +328,31 @@ describe("Mac client replicas", () => {
     expect(
       merged.map((turn) => (turn.blocks[0]?.type === "text" ? turn.blocks[0].text : "")),
     ).toEqual(["Name changed to New", "later prompt"]);
+  });
+
+  it("keeps a repeated replica message that JSONL only has once", () => {
+    const merged = mergeReplicaTurns(
+      [
+        {
+          role: "user",
+          blocks: [{ type: "text", text: "continue" }],
+        },
+      ],
+      [
+        {
+          role: "user",
+          timestamp: "2026-10-03T01:00:00.000Z",
+          blocks: [{ type: "text", text: "continue" }],
+        },
+        {
+          role: "user",
+          timestamp: "2026-10-03T02:00:00.000Z",
+          blocks: [{ type: "text", text: "continue" }],
+        },
+      ],
+    );
+    expect(merged).toHaveLength(2);
+    expect(merged[1]?.timestamp).toBe("2026-10-03T02:00:00.000Z");
   });
 
   it("prefers the newer of tool timestamp and file mtime", async () => {

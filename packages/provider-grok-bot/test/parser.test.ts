@@ -125,6 +125,28 @@ describe("Grok Bot parser", () => {
     expect(JSON.stringify(parsed.turns)).not.toContain("secret");
   });
 
+  it("does not split a user sentence that mentions a wake word", () => {
+    const parsed = parseGrokBotLines([
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "Please explain [agentic mode] and what [event] means.",
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(parsed.turns).toHaveLength(1);
+    expect(parsed.turns[0]?.subtype).toBeUndefined();
+    expect(parsed.turns[0]?.blocks[0]).toEqual({
+      type: "text",
+      text: "Please explain [agentic mode] and what [event] means.",
+    });
+  });
+
   it("promotes widget-bearing send_message content and pairs toolCallId results", async () => {
     await withFixture(
       [
