@@ -19,6 +19,7 @@ import type { SessionInfo } from "@vibe-replay/provider-contract";
 
 const originalTranscriptsDir = process.env.GROK_BOT_TRANSCRIPTS_DIR;
 const originalVibeDir = process.env.VIBE_REPLAY_GROK_BOT_DIR;
+const originalPersistenceDir = process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -26,6 +27,8 @@ afterEach(async () => {
   else process.env.GROK_BOT_TRANSCRIPTS_DIR = originalTranscriptsDir;
   if (originalVibeDir === undefined) delete process.env.VIBE_REPLAY_GROK_BOT_DIR;
   else process.env.VIBE_REPLAY_GROK_BOT_DIR = originalVibeDir;
+  if (originalPersistenceDir === undefined) delete process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR;
+  else process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR = originalPersistenceDir;
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -121,6 +124,7 @@ describe("bundled Grok Bot sample", () => {
     const emptyRoot = await mkdtemp(join(tmpdir(), "vibe-replay-grok-bot-empty-"));
     tempDirs.push(emptyRoot);
     process.env.GROK_BOT_TRANSCRIPTS_DIR = emptyRoot;
+    process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR = emptyRoot;
     delete process.env.VIBE_REPLAY_GROK_BOT_DIR;
 
     const discovered = await discoverGrokBotSessions();
