@@ -220,7 +220,7 @@ export function replicaSideTurns(raw: unknown): ParsedTurn[] {
 
 export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): ParsedTurn[] {
   const basePool = base
-    .map((turn) => ({ key: turnKey(turn), timestamp: turn.timestamp, used: false }))
+    .map((turn) => ({ key: turnKey(turn), used: false }))
     .filter((item) => !item.key.endsWith(":"));
   const seenExtra = new Set<string>();
   const added: ParsedTurn[] = [];
@@ -229,17 +229,13 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
     if (key.endsWith(":")) continue;
     const identity = `${key}\0${turn.timestamp || ""}`;
     if (seenExtra.has(identity)) continue;
-    const match = basePool.find(
-      (item) =>
-        !item.used &&
-        item.key === key &&
-        (!item.timestamp || !turn.timestamp || item.timestamp === turn.timestamp),
-    );
+    seenExtra.add(identity);
+    // JSONL tool-result clocks and UI-entry clocks can differ for the same message.
+    const match = basePool.find((item) => !item.used && item.key === key);
     if (match) {
       match.used = true;
       continue;
     }
-    seenExtra.add(identity);
     added.push(turn);
   }
   added.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));

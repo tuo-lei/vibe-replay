@@ -95,7 +95,7 @@ export function stripGrokBotHiddenPayload(text: string): string {
  * Split on a later wake tag so the group splitter is not swallowed by the first tag.
  */
 const WAKE_SEGMENT_RE =
-  /^\s*\[(?:routine\]|agent\]|inbound\]|event\]|first run\]|A background task just completed\]|Answering your question\b|Group chat:)/i;
+  /^\s*\[(?:routine\]|agent\]|inbound\]|event\]|first run\]|A background task just completed\]|Group chat:)/i;
 
 function hadLeadingHiddenPrompt(text: string): boolean {
   return text
@@ -112,6 +112,8 @@ export function splitGrokBotUserSegments(text: string): string[] {
   SEGMENT_RE.lastIndex = 0;
   for (const match of cleaned.matchAll(SEGMENT_RE)) {
     const index = match.index ?? 0;
+    if (/^\[Answering your question\b/i.test(match[0]) && !ANSWERING_RE.test(cleaned.slice(index)))
+      continue;
     // Only a following wake record, not "[event]" inside a sentence.
     if (index === 0 || cleaned[index - 1] === "\n") indexes.push(index);
   }
@@ -125,7 +127,8 @@ export function splitGrokBotUserSegments(text: string): string[] {
   }
   // A leading hidden marker wraps system wakes. Opaque remainder ("secret",
   // "Earlier you prompted…") is still not a user prompt.
-  if (hiddenWrapped) return parts.filter((part) => WAKE_SEGMENT_RE.test(part));
+  if (hiddenWrapped)
+    return parts.filter((part) => WAKE_SEGMENT_RE.test(part) || ANSWERING_RE.test(part));
   return parts;
 }
 
