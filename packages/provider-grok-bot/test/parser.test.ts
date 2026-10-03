@@ -92,7 +92,7 @@ describe("Grok Bot parser", () => {
     ).toBe(false);
   });
 
-  it("skips hidden prompts and strips [tNu] prefixes", () => {
+  it("keeps the remainder after a leading hidden-prompt marker and strips [tNu] prefixes", () => {
     expect(stripUserDecorators("[t0u]\nhello")).toBe("hello");
     expect(stripUserDecorators("[t3u] later")).toBe("later");
     const parsed = parseGrokBotLines([
@@ -111,8 +111,9 @@ describe("Grok Bot parser", () => {
         },
       }),
     ]);
-    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(1);
-    expect(parsed.turns[0].blocks[0]).toEqual({ type: "text", text: "visible prompt" });
+    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(2);
+    expect(parsed.turns[0].blocks[0]).toEqual({ type: "text", text: "secret" });
+    expect(parsed.turns[1].blocks[0]).toEqual({ type: "text", text: "visible prompt" });
   });
 
   it("promotes widget-bearing send_message content and pairs toolCallId results", async () => {

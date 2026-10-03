@@ -1,0 +1,4 @@
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "communicate_update", "input": {"currentStep": "{\"__sand_tool__\": true, \"tool\": \"shell\", \"result\": \"ran echo\"}"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "communicate_update", "result": {"success": {"currentStep": "ran echo"}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "communicate_update", "input": {"currentStep": "{\"__sand_tool__\": true, \"tool\": \"shell\", \"error\": \"command rejected\", \"detail\": \"approval\"}"}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "communicate_update", "result": {"error": {"error": "command rejected"}}}]}}

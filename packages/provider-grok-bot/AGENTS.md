@@ -26,16 +26,22 @@ Project/title: sibling `agents/<id>/profile.json` `name` (and `cwd` / `workspace
 when present). Missing profiles are fine. DM sessions prefer that profile name;
 group sessions use `Group: <room>`.
 
-Do **not** look under macOS Application Support. SSH remote allowlisting is
-follow-up, not this package. Skip `store.db` / conversation-blobs / encryption.
+Mac desktop replicas live in `~/Library/Application Support/Grok Bot/sand-client-persistence`.
+Blob names are base32 of `sand.client.slice.account.<slot>.transcript.replicas.<agentUuid>`.
+Override with `GROK_BOT_CLIENT_PERSISTENCE_DIR` (does not replace JSONL roots).
+That directory is in scope. Do **not** guess other Application Support trees, and do
+**not** decrypt `store.db` / conversation-blobs. SSH remote allowlisting is follow-up.
 
 ## JSONL
 
 One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [...] } }`.
 
-- Skip user text that is *only* `[SAND_HIDDEN_PROMPT]` or a lone `[first run]`.
-  Group wakes may append `[SAND_HIDDEN_PROMPT]<<SAND_AGENT_PROFILE_UPDATE…>>`
-  after the room payload — strip that suffix so the splitter still runs
+- A leading `[SAND_HIDDEN_PROMPT]` is only a wrapper: keep the remainder
+  (`[routine]`, background task, `[Group chat:`). A later marker is a suffix
+  and is still cut. Text that is *only* the marker, or a lone `[first run]`,
+  is skipped. Several wakes concatenated in one record are split so a later
+  `[Group chat:` is not swallowed. Group wakes may append
+  `[SAND_HIDDEN_PROMPT]<<SAND_AGENT_PROFILE_UPDATE…>>` after the room payload.
 - Strip leading `[t0u]` / `[t3u]` prefixes from user text
 - Meta wakes (after `[tNu]` strip):
   - `[routine]` / `[agent]` → `subtype: "context-injection"` (empty bodies dropped)
@@ -67,7 +73,10 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
   has a one-line summary. Live calls send `{ currentStep }` (sometimes a JSON
   string wrapping `__sand_tool__` / `{ text, imageKey }`) — unwrap that onto
   `update`. `_isError` still marks `failure` / `rejected` / `error`
-- Empty `send_message` (`input: {}`) is not a visible reply; do not invent text
+- Empty `send_message` (`input: {}`) is not a visible reply. If its tool
+  result is an error, keep an error tool card instead of dropping the turn.
+  Typed UI payloads (`widget`, `cursor-agent`, `attachment`, `connector`,
+  `auto-review-approval`) become a one-line reply, not an empty card.
 - `role: "tool"` lines carry `tool_result` (not Claude's user-nested pattern).
   Pair to the preceding `tool_use` by `toolCallId` when present, else by order
   (prefer matching tool name; leave unenriched rather than attaching another
@@ -79,11 +88,29 @@ One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [..
 - A parent `task` result `{ success: { agentId: "sand-subagent-<uuid>" } }` is
   the child id (input `agentId` is a different run uuid). Attach the sibling
   transcript; do not promote a non-`sand-subagent-` input id to `sessionId`
+- `shell` results with `spawnError` are errors, same as `failure` / `rejected`.
+  MCP `success.isError` marks the card failed. `success.content` text blocks are
+  unwrapped; `outputLocation` is a spill path, not raw JSON.
+- `communicate_update` envelopes that only carry `error` use that string as the
+  status line.
+- Discovery timestamp is the newer of the last tool-result time and file mtime.
+- Direct `--session` parse reads `agents/<id>/profile.json` for title and cwd
+  when discovery did not supply them.
 - Few/no top-level timestamps; synthesize ISO times from `result.success.timestamp`
   when it is epoch ms. Tool durations use the assistant record timestamp (when
   present) as the initial baseline, then advance to each result so later tools
   in the same turn are not cumulative from the start of the record
 - JSONL has no native thinking blobs; scratch text is the thinking stand-in
+
+## Mac replicas
+
+When a persistence directory exists (default Application Support path, or
+`GROK_BOT_CLIENT_PERSISTENCE_DIR`), `transcript.replicas` blobs are discovered.
+The same agent id merges onto the JSONL session: JSONL keeps the tool timeline,
+replica turns fill UI messages that are not already present (normalized text).
+Replica-only sessions are playable without a JSONL file. `sand-subagent-*` stays
+hidden. Rich `send-message` types, user attachments, voice-call context lines,
+and name-changed events are included. Spend rows are skipped.
 
 ## Tools
 

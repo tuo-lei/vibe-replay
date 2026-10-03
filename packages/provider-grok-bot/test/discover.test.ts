@@ -130,7 +130,9 @@ describe("discoverGrokBotSessions", () => {
     tempDirs.push(dataRoot);
     const transcripts = join(dataRoot, "agent-transcripts");
     const agentId = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
-    await writeSession(transcripts, agentId);
+    const jsonlPath = await writeSession(transcripts, agentId);
+    const olderThanTool = new Date(1788485400095 - 60_000);
+    await utimes(jsonlPath, olderThanTool, olderThanTool);
     await mkdir(join(dataRoot, "agents", agentId), { recursive: true });
     await writeFile(
       join(dataRoot, "agents", agentId, "profile.json"),
@@ -216,7 +218,7 @@ describe("discoverGrokBotSessions", () => {
     await writeSession(root, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", [
       {
         role: "user",
-        message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT] bootstrap" }] },
+        message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT][first run]" }] },
       },
     ]);
 

@@ -161,11 +161,13 @@ describe("Grok Bot live-session parity", () => {
       .map((block) => (block.type === "text" ? block.text : ""));
     expect(texts).toEqual(["What should I help you make?"]);
     expect(texts.every((text) => text.trim().length > 0)).toBe(true);
-    expect(
-      parsed.turns.some((turn) =>
-        turn.blocks.some((block) => block.type === "tool_use" && block.name === "send_message"),
-      ),
-    ).toBe(false);
+    const failed = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use" && block.name === "send_message");
+    expect(failed?.type === "tool_use" && failed._isError).toBe(true);
+    expect(failed?.type === "tool_use" && failed._result).toContain(
+      "content is only valid with type:text",
+    );
   });
 
   it("maps live MCP short-name tools with args and arguments payloads", () => {

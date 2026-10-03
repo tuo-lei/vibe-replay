@@ -124,6 +124,7 @@ export async function resolveGrokBotParsePaths(
 }
 
 export async function expandGroupTranscriptPaths(filePath: string): Promise<string[]> {
+  if (!filePath.endsWith(".jsonl")) return [filePath];
   const sessionId = basename(filePath, ".jsonl");
   if (!sessionId || isSandSubagentSessionId(sessionId)) return [filePath];
 

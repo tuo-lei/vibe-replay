@@ -1,13 +1,13 @@
 ---
 title: "What Does Grok Bot Store Locally? agent-transcripts JSONL Explained"
-excerpt: "Grok Bot’s sidebar lists every agent, but each durable JSONL lives on the computer that agent is bound to — cloud-box agent-transcripts, not Mac Application Support — with send_message replies and merged group rooms."
+excerpt: "Grok Bot’s durable tool timeline is cloud-box agent-transcripts JSONL. The Mac app also keeps a recent UI replica under Application Support, and replay merges the two."
 cover: "/blog/grok-bot-storage/storage-map.png"
 date: 2026-09-04
-updated: 2026-09-21
+updated: 2026-10-03
 readTime: "8 min read"
 ---
 
-Claude Code keeps sessions under `~/.claude/`. Cursor spreads them across SQLite and JSONL. Grok Bot is different: the durable chat history is still **cloud-box JSONL**, not Mac Application Support — one file per agent, with a twist that user-visible replies are a tool call. The Grok Bot sidebar is account-level; that file lives on the **computer the agent is bound to**.
+Claude Code keeps sessions under `~/.claude/`. Cursor spreads them across SQLite and JSONL. Grok Bot is different: the durable tool timeline is still **cloud-box JSONL** — one file per agent, with a twist that user-visible replies are a tool call. The Mac app also caches a recent UI window under Application Support; replay merges that onto the JSONL. The Grok Bot sidebar is account-level; that file lives on the **computer the agent is bound to**.
 
 **Try it:** `npx vibe-replay@latest -p grok-bot`. **Watch demo:** [Eng+GTM English group-chat replay](https://vibe-replay.com/view/?gist=de4b16545915ce7ae9a50ca53f58df92) (834 scenes, GCP/GA4 identifiers redacted). Public Grok Bot sessions also land on [Explore](/explore/).
 
@@ -48,7 +48,7 @@ Layout rules that matter for tooling:
 | `<agentId>.jsonl` | Append-only conversation log |
 | sibling `agents/<id>/profile.json` | Display name / cwd when present — used for titles |
 
-There is no macOS Application Support path for these sessions. If you copy transcripts off the box, the documented drop spot is `~/.grok-bot/agent-transcripts` with the same `<id>/<id>.jsonl` layout.
+The full tool timeline is still that JSONL, not a Mac-only database. The desktop app also keeps a recent UI window in `~/Library/Application Support/Grok Bot/sand-client-persistence` (base32 `transcript.replicas` blobs); replay merges those turns onto the JSONL when both exist. If you copy transcripts off the box, the documented drop spot is `~/.grok-bot/agent-transcripts` with the same `<id>/<id>.jsonl` layout.
 
 Point discovery at a copy with either env var (Pi-style override — replaces the defaults):
 

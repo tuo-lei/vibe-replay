@@ -1,0 +1,6 @@
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "send_message", "input": {"text": {"content": "See the sketch.\n![sketch](file:///tmp/folder/cat.png?sig=REDACTED&exp=1)"}}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "send_message", "result": {"success": {"messageId": "m-redacted", "timestamp": "1710000000000"}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "send_message", "input": {}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "send_message", "result": {"error": {"error": "empty message"}}}]}}
+{"role": "assistant", "message": {"content": [{"type": "tool_use", "name": "generate_image", "input": {"description": "a red square", "filePath": "/tmp/red-square.png", "aspectRatio": "3:4", "referenceImagePaths": ["/tmp/ref-redacted.png"]}}]}}
+{"role": "tool", "message": {"content": [{"type": "tool_result", "name": "generate_image", "result": {"success": {"filePath": "/tmp/red-square.png", "imageData": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}}]}}

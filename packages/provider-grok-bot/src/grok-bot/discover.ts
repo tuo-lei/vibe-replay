@@ -3,10 +3,15 @@ import { basename, join } from "node:path";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
-import { getGrokBotTranscriptRoots } from "./config.js";
+import {
+  defaultGrokBotClientPersistenceDir,
+  getGrokBotClientPersistenceDir,
+  getGrokBotTranscriptRoots,
+} from "./config.js";
 import { mergeDiscoveredGroupSessions } from "./group-merge.js";
 import { countGrokBotDiscoveryStats } from "./parser.js";
 import { readAgentGroup, readAgentProfile } from "./profiles.js";
+import { agentIdFromReplicaFilename, summarizeReplicaDocument } from "./replica.js";
 import { isSandSubagentSessionId } from "./subagent.js";
 
 export { readAgentGroup, readAgentProfile } from "./profiles.js";
@@ -19,6 +24,7 @@ export async function discoverGrokBotSessions(
 ): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
   const seenFiles = new Set<string>();
+  const jsonlByAgent = new Map<string, { filePath: string; fileSize: number; fileMtime: string }>();
 
   for (const root of await uniqueExistingDirs(roots)) {
     let entries: string[];
@@ -43,6 +49,11 @@ export async function discoverGrokBotSessions(
       const resolved = await realpath(filePath).catch(() => filePath);
       if (seenFiles.has(resolved)) continue;
       seenFiles.add(resolved);
+      jsonlByAgent.set(entry, {
+        filePath,
+        fileSize: fileStat.size,
+        fileMtime: fileStat.mtime.toISOString(),
+      });
 
       const info = await extractGrokBotSessionInfo(
         filePath,
@@ -56,8 +67,110 @@ export async function discoverGrokBotSessions(
     }
   }
 
+  await attachClientReplicas(
+    sessions,
+    jsonlByAgent,
+    roots,
+    persistenceRootsFor(roots),
+    includeUnreplayable,
+  );
+
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return mergeDiscoveredGroupSessions(sessions);
+}
+
+function persistenceRootsFor(transcriptRoots: string[]): string[] {
+  const fromEnv = getGrokBotClientPersistenceDir();
+  if (fromEnv) return [fromEnv];
+  const defaults = getGrokBotTranscriptRoots();
+  const usingDefaults =
+    transcriptRoots.length === defaults.length &&
+    transcriptRoots.every((root, index) => root === defaults[index]);
+  return usingDefaults ? [defaultGrokBotClientPersistenceDir()] : [];
+}
+
+async function attachClientReplicas(
+  sessions: SessionInfo[],
+  jsonlByAgent: Map<string, { filePath: string; fileSize: number; fileMtime: string }>,
+  transcriptRoots: string[],
+  persistenceRoots: string[],
+  includeUnreplayable: boolean,
+): Promise<void> {
+  for (const root of await uniqueExistingDirs(persistenceRoots)) {
+    let entries: string[];
+    try {
+      entries = await readdir(root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const agentId = agentIdFromReplicaFilename(entry);
+      if (!agentId || isSandSubagentSessionId(agentId)) continue;
+      const filePath = join(root, entry);
+      const fileStat = await stat(filePath).catch(() => null);
+      if (!fileStat?.isFile()) continue;
+      const resolved = await realpath(filePath).catch(() => filePath);
+      if (jsonlByAgent.has(`replica:${resolved}`)) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await readFile(filePath, "utf-8"));
+      } catch {
+        continue;
+      }
+      const summary = summarizeReplicaDocument(raw);
+      if (!summary) continue;
+      const prompts = summary.prompts.filter(Boolean);
+      if (!includeUnreplayable && prompts.length === 0 && summary.promptCount === 0) continue;
+
+      const existing = sessions.find(
+        (session) => session.sessionId === agentId || session.sessionIds?.includes(agentId),
+      );
+      const jsonl = jsonlByAgent.get(agentId);
+      const replicaStamp = newerIso(summary.timestamp, fileStat.mtime.toISOString());
+      if (existing) {
+        if (!existing.filePaths.includes(filePath)) existing.filePaths.push(filePath);
+        existing.timestamp = newerIso(existing.timestamp, replicaStamp) || existing.timestamp;
+        if (jsonl && !existing.filePaths.includes(jsonl.filePath))
+          existing.filePaths.unshift(jsonl.filePath);
+        continue;
+      }
+
+      const profile = await readAgentProfile(transcriptRoots[0] || root, agentId);
+      const title = profile?.name || summary.title;
+      const cwd = profile?.cwd || title || agentId;
+      const filePaths = jsonl ? [jsonl.filePath, filePath] : [filePath];
+      if (!includeUnreplayable && prompts.length === 0) continue;
+      sessions.push({
+        provider: "grok-bot",
+        sessionId: agentId,
+        slug: agentId,
+        title,
+        project: cwd,
+        cwd,
+        version: "1",
+        timestamp: replicaStamp || fileStat.mtime.toISOString(),
+        lineCount: summary.entryCount + (jsonl ? 1 : 0),
+        fileSize: fileStat.size + (jsonl?.fileSize || 0),
+        filePath: filePaths[0],
+        filePaths,
+        firstPrompt: prompts[0] || "",
+        prompts: prompts.length > 0 ? prompts.slice(0, 2) : undefined,
+        promptCount: summary.promptCount,
+        ...(profile?.model ? { model: profile.model } : {}),
+        ...(prompts.length === 0 ? { transcriptStatus: "no-prompts" as const } : {}),
+      });
+    }
+  }
+}
+
+function newerIso(left?: string, right?: string): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  const a = Date.parse(left);
+  const b = Date.parse(right);
+  if (Number.isNaN(a)) return right;
+  if (Number.isNaN(b)) return left;
+  return a >= b ? left : right;
 }
 
 async function extractGrokBotSessionInfo(
@@ -125,7 +238,7 @@ async function extractGrokBotSessionInfo(
     ...(groupId ? { groupId } : {}),
     ...(profile?.gitBranch ? { gitBranch: profile.gitBranch } : {}),
     ...(gitRepo ? { gitRepo } : {}),
-    timestamp: stats.timestamp || fileMtime,
+    timestamp: newerIso(stats.timestamp, fileMtime) || fileMtime,
     lineCount,
     fileSize,
     filePath,

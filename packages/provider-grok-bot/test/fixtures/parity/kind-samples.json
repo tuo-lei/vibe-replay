@@ -1,0 +1,94 @@
+{
+  "event-name": {
+    "kind": "event",
+    "id": "evt-1",
+    "timestampMs": 1710000000000,
+    "seq": 1,
+    "event": {
+      "type": "name-changed",
+      "from": "Old",
+      "to": "New"
+    }
+  },
+  "event-automation": {
+    "kind": "event",
+    "id": "evt-2",
+    "timestampMs": 1710000001000,
+    "seq": 2,
+    "event": {
+      "type": "automation-changed",
+      "action": "updated",
+      "automationId": "auto-1",
+      "automationName": "weekly"
+    }
+  },
+  "user-attachment": {
+    "kind": "user-attachment",
+    "id": "ua-1",
+    "timestampMs": 1710000002000,
+    "seq": 3,
+    "file_name": "shot.png",
+    "file_path": "/tmp/shot.png",
+    "batchId": "batch-1",
+    "clientNonce": "nonce-1",
+    "width": 100,
+    "height": 80,
+    "byteSize": 1200
+  },
+  "voice-call": {
+    "kind": "voice-call",
+    "id": "vc-1",
+    "timestampMs": 1710000003000,
+    "seq": 4,
+    "call": {
+      "callId": "call-1",
+      "realtimeConversationId": "rt-1",
+      "durationMs": 15000,
+      "endedAtMs": 1710000018000,
+      "ending": "hung-up",
+      "turnCount": 2,
+      "nudgeCount": 1,
+      "answeredNudgeCount": 0
+    }
+  },
+  "user-message": {
+    "kind": "message",
+    "id": "m-1",
+    "timestampMs": 1710000004000,
+    "seq": 5,
+    "role": "user",
+    "content": "hello",
+    "richText": "hello",
+    "isStreaming": false,
+    "author": {
+      "id": "user-1",
+      "name": "User"
+    },
+    "clientNonce": "n-1"
+  },
+  "widget-answer": {
+    "kind": "message",
+    "id": "m-2",
+    "timestampMs": 1710000005000,
+    "seq": 6,
+    "role": "user",
+    "content": "Option A",
+    "respondedValue": "a",
+    "widgetSkipped": false
+  },
+  "reaction": {
+    "kind": "message",
+    "id": "m-3",
+    "timestampMs": 1710000006000,
+    "seq": 7,
+    "role": "user",
+    "content": "",
+    "reactions": [
+      {
+        "emoji": "\ud83d\udc4d",
+        "by": "user-1"
+      }
+    ],
+    "replyTo": "m-1"
+  }
+}
