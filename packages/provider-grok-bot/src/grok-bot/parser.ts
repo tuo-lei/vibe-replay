@@ -723,6 +723,10 @@ function unwrapMcpContent(content: unknown): string | undefined {
   return text || undefined;
 }
 
+function isSpilledRead(obj: Record<string, unknown>): boolean {
+  return !!(obj.dataBlobId || obj.contentBlobId || obj.exceededLimit === true);
+}
+
 function formatStructuredSuccess(obj: Record<string, unknown>): string | undefined {
   const unwrapped = unwrapMcpContent(obj.content);
   if (unwrapped) return unwrapped;
@@ -775,7 +779,9 @@ function formatSuccessPayload(success: unknown): string {
   if (typeof scrubbed === "string") return scrubbed;
   if (!scrubbed || typeof scrubbed !== "object") return scrubbed == null ? "" : String(scrubbed);
   const obj = scrubbed as Record<string, unknown>;
-  if (typeof obj.content === "string") return obj.content;
+  if (typeof obj.content === "string" && (obj.content.length > 0 || !isSpilledRead(obj))) {
+    return obj.content;
+  }
   if (typeof obj.stdout === "string") return obj.stdout;
   if (typeof obj.output === "string") return obj.output;
   if (typeof obj.text === "string") return obj.text;
@@ -856,7 +862,9 @@ function formatPayload(value: unknown): string {
     if (typeof obj.reason === "string") return obj.reason;
     if (typeof obj.error === "string") return obj.error;
     if (typeof obj.errorMessage === "string") return obj.errorMessage;
-    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.content === "string" && obj.content.trim()) return obj.content;
+    const stderr = firstString(obj.stderr, obj.interleavedOutput, obj.stdout)?.trim();
+    if (stderr) return stderr;
   }
   try {
     return JSON.stringify(scrubbed, null, 2);

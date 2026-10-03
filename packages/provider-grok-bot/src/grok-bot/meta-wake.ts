@@ -1,7 +1,8 @@
 /**
  * Grok Bot injects system/channel wakes as ordinary `role:"user"` text with
- * bracket tags. These are not the same as `[SAND_HIDDEN_PROMPT]` (those are
- * dropped entirely). Classify the ones that would otherwise look like a
+ * bracket tags. A bare `[SAND_HIDDEN_PROMPT]` payload is still dropped.
+ * The marker is only a wrapper when a wake tag follows (`[routine]`,
+ * `[Group chat:`, background task, …). Classify the ones that would otherwise look like a
  * human prompt.
  *
  *   [routine]  scheduled/cron fire → context-injection
@@ -93,7 +94,18 @@ export function stripGrokBotHiddenPayload(text: string): string {
  * One user record can concatenate several wakes (`[routine]` then `[Group chat:`).
  * Split on a later wake tag so the group splitter is not swallowed by the first tag.
  */
+const WAKE_SEGMENT_RE =
+  /^\s*\[(?:routine|agent|inbound|event|first run|A background task just completed|Answering your question|Group chat:)/i;
+
+function hadLeadingHiddenPrompt(text: string): boolean {
+  return text
+    .replace(/^\uFEFF/, "")
+    .trimStart()
+    .startsWith(SAND_HIDDEN_PROMPT);
+}
+
 export function splitGrokBotUserSegments(text: string): string[] {
+  const hiddenWrapped = hadLeadingHiddenPrompt(text);
   const cleaned = stripGrokBotHiddenPayload(text);
   if (!cleaned) return [];
   const indexes: number[] = [];
@@ -110,6 +122,9 @@ export function splitGrokBotUserSegments(text: string): string[] {
     const trusted = slice.replace(/^\s*\[SAND_TRUSTED_AUTOMATION_PROMPT\]\s*/i, "").trim();
     if (trusted) parts.push(trusted);
   }
+  // A leading hidden marker wraps system wakes. Opaque remainder ("secret",
+  // "Earlier you prompted…") is still not a user prompt.
+  if (hiddenWrapped) return parts.filter((part) => WAKE_SEGMENT_RE.test(part));
   return parts;
 }
 

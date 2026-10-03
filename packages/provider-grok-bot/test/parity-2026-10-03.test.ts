@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverGrokBotSessions } from "../src/grok-bot/discover.js";
 import { parseGrokBotLines, parseGrokBotSession } from "../src/grok-bot/parser.js";
-import { replicaBlobFilename } from "../src/grok-bot/replica.js";
+import { mergeReplicaTurns, replicaBlobFilename } from "../src/grok-bot/replica.js";
 import { encodeBase32, decodeBase32 } from "../src/grok-bot/base32.js";
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "parity");
@@ -37,6 +37,7 @@ describe("2026-10-03 JSONL parity", () => {
     );
     const body = texts(parsed).join("\n");
     expect(body).not.toContain("[SAND_HIDDEN_PROMPT]");
+    expect(body).not.toContain("Earlier you prompted");
     expect(body).toContain("Background task completed");
     expect(body).toContain("Branch: demo/redacted");
     expect(body).toContain("Routine: Weekly review");
@@ -82,7 +83,7 @@ describe("2026-10-03 JSONL parity", () => {
       tools.map((block) => (block.type === "tool_use" ? block._isError === true : false)),
     ).toEqual([true, true, true]);
     expect(tools[0]).toMatchObject({ name: "Bash", _result: "sandbox failed to start" });
-    expect(tools[1]?.type === "tool_use" && tools[1]._result).toContain("boom");
+    expect(tools[1]).toMatchObject({ _result: "boom" });
     expect(tools[2]).toMatchObject({ _result: "approval denied" });
   });
 
@@ -299,6 +300,34 @@ describe("Mac client replicas", () => {
     expect(replies).toHaveLength(1);
     expect(texts(parsed).filter((text) => text === "hello")).toHaveLength(1);
     expect(texts(parsed).join("\n")).toContain("Pick one");
+  });
+
+  it("inserts an older replica turn before a later JSONL turn", () => {
+    const merged = mergeReplicaTurns(
+      [
+        {
+          role: "user",
+          timestamp: "2026-10-03T12:00:00.000Z",
+          blocks: [{ type: "text", text: "later prompt" }],
+        },
+      ],
+      [
+        {
+          role: "user",
+          subtype: "context-injection",
+          timestamp: "2026-10-03T01:00:00.000Z",
+          blocks: [{ type: "text", text: "Name changed to New" }],
+        },
+        {
+          role: "user",
+          timestamp: "2026-10-03T12:00:00.000Z",
+          blocks: [{ type: "text", text: "later prompt" }],
+        },
+      ],
+    );
+    expect(
+      merged.map((turn) => (turn.blocks[0]?.type === "text" ? turn.blocks[0].text : "")),
+    ).toEqual(["Name changed to New", "later prompt"]);
   });
 
   it("prefers the newer of tool timestamp and file mtime", async () => {

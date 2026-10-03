@@ -96,6 +96,7 @@ async function attachClientReplicas(
   persistenceRoots: string[],
   includeUnreplayable: boolean,
 ): Promise<void> {
+  const seenReplicas = new Set<string>();
   for (const root of await uniqueExistingDirs(persistenceRoots)) {
     let entries: string[];
     try {
@@ -110,7 +111,8 @@ async function attachClientReplicas(
       const fileStat = await stat(filePath).catch(() => null);
       if (!fileStat?.isFile()) continue;
       const resolved = await realpath(filePath).catch(() => filePath);
-      if (jsonlByAgent.has(`replica:${resolved}`)) continue;
+      if (seenReplicas.has(resolved)) continue;
+      seenReplicas.add(resolved);
       let raw: unknown;
       try {
         raw = JSON.parse(await readFile(filePath, "utf-8"));

@@ -92,13 +92,19 @@ describe("Grok Bot parser", () => {
     ).toBe(false);
   });
 
-  it("keeps the remainder after a leading hidden-prompt marker and strips [tNu] prefixes", () => {
+  it("skips opaque hidden prompts, keeps a wrapped wake, and strips [tNu] prefixes", () => {
     expect(stripUserDecorators("[t0u]\nhello")).toBe("hello");
     expect(stripUserDecorators("[t3u] later")).toBe("later");
     const parsed = parseGrokBotLines([
       JSON.stringify({
         role: "user",
         message: { content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT] secret" }] },
+      }),
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [{ type: "text", text: "[SAND_HIDDEN_PROMPT][routine] ping the checklist" }],
+        },
       }),
       JSON.stringify({
         role: "user",
@@ -111,9 +117,12 @@ describe("Grok Bot parser", () => {
         },
       }),
     ]);
-    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(2);
-    expect(parsed.turns[0].blocks[0]).toEqual({ type: "text", text: "secret" });
-    expect(parsed.turns[1].blocks[0]).toEqual({ type: "text", text: "visible prompt" });
+    const userTurns = parsed.turns.filter((turn) => turn.role === "user");
+    expect(
+      userTurns.map((turn) => (turn.blocks[0]?.type === "text" ? turn.blocks[0].text : "")),
+    ).toEqual(["Routine: ping the checklist", "visible prompt"]);
+    expect(userTurns[0]?.subtype).toBe("context-injection");
+    expect(JSON.stringify(parsed.turns)).not.toContain("secret");
   });
 
   it("promotes widget-bearing send_message content and pairs toolCallId results", async () => {

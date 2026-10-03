@@ -36,10 +36,11 @@ That directory is in scope. Do **not** guess other Application Support trees, an
 
 One object per line: `{ role: "user"|"assistant"|"tool", message: { content: [...] } }`.
 
-- A leading `[SAND_HIDDEN_PROMPT]` is only a wrapper: keep the remainder
-  (`[routine]`, background task, `[Group chat:`). A later marker is a suffix
-  and is still cut. Text that is *only* the marker, or a lone `[first run]`,
-  is skipped. Several wakes concatenated in one record are split so a later
+- A leading `[SAND_HIDDEN_PROMPT]` is only a wrapper for a following wake
+  (`[routine]`, background task, `[Group chat:`). Opaque remainder (no wake
+  tag) is still skipped, same as a marker-only line or a lone `[first run]`.
+  A later marker is a suffix and is still cut. Several wakes concatenated in
+  one record are split so a later
   `[Group chat:` is not swallowed. Group wakes may append
   `[SAND_HIDDEN_PROMPT]<<SAND_AGENT_PROFILE_UPDATE…>>` after the room payload.
 - Strip leading `[t0u]` / `[t3u]` prefixes from user text

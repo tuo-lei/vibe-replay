@@ -229,7 +229,25 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
     added.push(turn);
   }
   added.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-  return [...base, ...added];
+  if (added.length === 0) return base;
+  const merged = [...base];
+  for (const turn of added) {
+    const stamp = turn.timestamp || "";
+    if (!stamp) {
+      merged.push(turn);
+      continue;
+    }
+    let index = merged.length;
+    for (let i = 0; i < merged.length; i++) {
+      const other = merged[i]?.timestamp || "";
+      if (other && other > stamp) {
+        index = i;
+        break;
+      }
+    }
+    merged.splice(index, 0, turn);
+  }
+  return merged;
 }
 
 function turnKey(turn: ParsedTurn): string {
