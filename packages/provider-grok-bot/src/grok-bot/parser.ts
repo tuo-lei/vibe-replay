@@ -23,7 +23,6 @@ import {
   classifyGrokBotUserWake,
   formatAnsweringHeader,
   peelGrokBotMetaTag,
-  SAND_HIDDEN_PROMPT,
   stripGrokBotHiddenPayload,
 } from "./meta-wake.js";
 import {
@@ -440,10 +439,6 @@ export function parseGrokBotLines(
     ],
     ...(parseWarnings.length > 0 ? { parseWarnings } : {}),
   };
-}
-
-export function isHiddenPrompt(text: string): boolean {
-  return text.includes(SAND_HIDDEN_PROMPT) && !stripGrokBotHiddenPayload(text);
 }
 
 export function stripUserDecorators(text: string): string {
