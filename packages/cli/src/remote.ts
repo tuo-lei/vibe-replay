@@ -47,6 +47,9 @@ const MAX_REMOTE_INDEX_BYTES = 2 * 1024 * 1024 * 1024;
 const REMOTE_CACHE_LOCK_TIMEOUT_MS = 2 * 60_000;
 const REMOTE_CACHE_LOCK_STALE_MS = 30 * 60_000;
 const UNSAFE_REMOTE_FILE_PATH_ERROR = "Unsafe remote file path";
+const OPENSSH_CLIENT_UNAVAILABLE_ERROR = "OpenSSH client unavailable";
+const SSH_FILE_TRANSFER_EXCEEDED_MANIFEST_ERROR = "SSH file transfer exceeded manifest";
+const SSH_FILE_TRANSFER_FAILED_ERROR = "SSH file transfer failed";
 
 /**
  * A configured SSH endpoint. Authentication is intentionally not part of this
@@ -603,7 +606,7 @@ function runSsh(
     });
     child.stderr.resume();
     child.stdin.on("error", () => {});
-    child.on("error", () => fail(new Error("OpenSSH client unavailable")));
+    child.on("error", () => fail(new Error(OPENSSH_CLIENT_UNAVAILABLE_ERROR)));
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
@@ -1136,8 +1139,8 @@ done`;
   }, sshTimeoutMs(target));
   const closePromise = new Promise<number | null>((resolve, reject) => {
     child.on("error", () => {
-      stdout.destroy(new Error("OpenSSH client unavailable"));
-      reject(new Error("OpenSSH client unavailable"));
+      stdout.destroy(new Error(OPENSSH_CLIENT_UNAVAILABLE_ERROR));
+      reject(new Error(OPENSSH_CLIENT_UNAVAILABLE_ERROR));
     });
     child.on("close", resolve);
   });
@@ -1158,7 +1161,7 @@ done`;
             if (buffer.length > 32) throw new Error("Invalid SSH file transfer header");
             break;
           }
-          if (fileIndex >= files.length) throw new Error("SSH file transfer exceeded manifest");
+          if (fileIndex >= files.length) throw new Error(SSH_FILE_TRANSFER_EXCEEDED_MANIFEST_ERROR);
           const sizeText = buffer.subarray(0, newlineIndex).toString("ascii");
           if (!/^(?:0|[1-9][0-9]*)$/.test(sizeText)) {
             throw new Error("Invalid SSH file transfer size");
@@ -1211,7 +1214,7 @@ done`;
       remaining !== undefined ||
       buffer.length !== 0
     ) {
-      throw new Error(timedOut ? "SSH file transfer timed out" : "SSH file transfer failed");
+      throw new Error(timedOut ? "SSH file transfer timed out" : SSH_FILE_TRANSFER_FAILED_ERROR);
     }
   } catch (error) {
     child.kill("SIGTERM");
@@ -1249,7 +1252,7 @@ async function downloadRemoteFile(
       transform(chunk: Buffer, _encoding, callback) {
         transferredBytes += chunk.length;
         if (transferredBytes > file.size) {
-          callback(new Error("SSH file transfer exceeded manifest"));
+          callback(new Error(SSH_FILE_TRANSFER_EXCEEDED_MANIFEST_ERROR));
         } else {
           callback(null, chunk);
         }
@@ -1279,14 +1282,16 @@ async function downloadRemoteFile(
       clearTimeout(timer);
       if (childCode !== 0 || timedOut) {
         void unlink(localPath).catch(() => {});
-        reject(new Error(timedOut ? "SSH file transfer timed out" : "SSH file transfer failed"));
+        reject(
+          new Error(timedOut ? "SSH file transfer timed out" : SSH_FILE_TRANSFER_FAILED_ERROR),
+        );
       } else {
         resolve();
       }
     };
 
     output.on("error", () => fail(new Error("local remote-session cache could not be written")));
-    limiter.on("error", () => fail(new Error("SSH file transfer exceeded manifest")));
+    limiter.on("error", () => fail(new Error(SSH_FILE_TRANSFER_EXCEEDED_MANIFEST_ERROR)));
     output.on("finish", () => {
       outputFinished = true;
       finish();
@@ -1294,7 +1299,7 @@ async function downloadRemoteFile(
     stdoutStream.pipe(limiter).pipe(output);
     stderrStream.resume();
     stdinStream.on("error", () => {});
-    child.on("error", () => fail(new Error("OpenSSH client unavailable")));
+    child.on("error", () => fail(new Error(OPENSSH_CLIENT_UNAVAILABLE_ERROR)));
     child.on("close", (code) => {
       if (settled) return;
       childCode = code;
@@ -1388,7 +1393,7 @@ async function syncRemoteFiles(
         }
         const remoteFilesChanged = await remoteFilesChangedSinceIndex(target, changed);
         if (transferredPaths.size === 0 && changed.length > 0 && !remoteFilesChanged) {
-          throw new Error("SSH file transfer failed", { cause: error });
+          throw new Error(SSH_FILE_TRANSFER_FAILED_ERROR, { cause: error });
         }
         if (remoteFilesChanged && process.env.VIBE_REPLAY_DEBUG) {
           console.error(
