@@ -35,6 +35,8 @@ const MAX_DIAGNOSTIC_EVENTS = 50;
 const MAX_ANNOTATIONS = 40;
 const MAX_OVERLAYS = 40;
 const MAX_SESSION_LIST = 20;
+const GENERATED_REPLAY_SLUG_DESC = "Generated replay slug";
+const SSH_REMOTE_SESSION_TARGET_ID_DESC = "SSH source id when the session is remote";
 
 function generatedReplayNotFoundError(slug: string): Error {
   return new Error(`Generated replay not found: ${slug}`);
@@ -1562,10 +1564,8 @@ export function createLocalAssistantTools(
     description:
       "Read structured metadata and a compact prompt/tool summary for one generated local replay. Requires a slug returned by search_sessions or the current replay context.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
     }),
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as SessionArgs;
@@ -1588,10 +1588,8 @@ export function createLocalAssistantTools(
     description:
       "Read a bounded slice of scenes from one generated local replay. Use sceneStart/sceneEnd or query to avoid loading an entire large replay.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       sceneStart: Type.Optional(Type.Number({ description: "Inclusive scene index" })),
       sceneEnd: Type.Optional(Type.Number({ description: "Inclusive scene index" })),
       query: Type.Optional(Type.String({ description: "Text to find in scene content" })),
@@ -1680,10 +1678,8 @@ export function createLocalAssistantTools(
     description:
       "Read one exact scene from a generated local replay. Use the scene index from a citation or get_session_content.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       sceneIndex: Type.Number({ description: "Exact zero-based scene index" }),
     }),
     execute: async (_toolCallId, rawArgs) => {
@@ -1750,10 +1746,8 @@ export function createLocalAssistantTools(
     description:
       "Read the comments/feedback attached to replay scenes, including selected text and resolved state. Use this when the user asks what was noted, coached, or left unresolved on a replay.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       sceneIndex: Type.Optional(Type.Number({ description: "Only annotations for this scene" })),
       unresolvedOnly: Type.Optional(Type.Boolean({ description: "Only unresolved annotations" })),
       limit: Type.Optional(Type.Number({ description: "Maximum annotations, from 1 to 40" })),
@@ -1816,10 +1810,8 @@ export function createLocalAssistantTools(
     description:
       "Read non-destructive AI Studio edits (translations, tone adjustments, or manual overlays) applied to a replay. This is read-only and helps distinguish the original transcript from what the user currently sees.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       sceneIndex: Type.Optional(Type.Number({ description: "Only overlays for this scene" })),
       source: Type.Optional(
         Type.Union([Type.Literal("translate"), Type.Literal("tone"), Type.Literal("manual")]),
@@ -2141,9 +2133,7 @@ export function createLocalAssistantTools(
       slug: Type.Optional(
         Type.String({ description: "Generated replay slug for a session-level breakdown" }),
       ),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       project: Type.Optional(
         Type.String({ description: "Project filter for an aggregate breakdown" }),
       ),
@@ -2311,9 +2301,7 @@ export function createLocalAssistantTools(
       "Explain persisted compaction outcomes and ordinary assistant/API errors for one session or matching local sessions. Pi's JSONL format does not persist failed compaction lifecycle events, so absence of a failure is reported as inconclusive rather than treated as success.",
     parameters: Type.Object({
       slug: Type.Optional(Type.String({ description: "Generated replay or source session slug" })),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       provider: Type.Optional(
         Type.String({ description: "Provider filter; use pi for Pi session diagnostics" }),
       ),
@@ -2402,9 +2390,7 @@ export function createLocalAssistantTools(
       "Prepare a safe user handoff for an operation that changes replay state or publishes data. This tool never performs the mutation; it returns a same-origin permalink and an explicit UI action for the user to review and click.",
     parameters: Type.Object({
       slug: Type.String({ description: "Source or generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       intent: Type.Union([
         Type.Literal("generate_replay"),
         Type.Literal("regenerate_replay"),
@@ -2522,10 +2508,8 @@ export function createLocalAssistantTools(
     description:
       "Prepare a navigation action to open a generated local replay, summary, or export view, optionally at a specific scene. Use only when the user asks to open, inspect, or jump to a result.",
     parameters: Type.Object({
-      slug: Type.String({ description: "Generated replay slug" }),
-      targetId: Type.Optional(
-        Type.String({ description: "SSH source id when the session is remote" }),
-      ),
+      slug: Type.String({ description: GENERATED_REPLAY_SLUG_DESC }),
+      targetId: Type.Optional(Type.String({ description: SSH_REMOTE_SESSION_TARGET_ID_DESC })),
       sceneIndex: Type.Optional(Type.Number({ description: "Scene index to focus" })),
       view: Type.Optional(
         Type.Union([Type.Literal("replay"), Type.Literal("summary"), Type.Literal("export")]),
