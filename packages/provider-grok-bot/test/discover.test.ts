@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { getGrokBotTranscriptRoots } from "../src/grok-bot/config.js";
 import { discoverGrokBotSessions } from "../src/grok-bot/discover.js";
@@ -9,13 +9,22 @@ import { mergeDiscoveredGroupSessions } from "../src/grok-bot/parser.js";
 
 const originalTranscriptsDir = process.env.GROK_BOT_TRANSCRIPTS_DIR;
 const originalVibeDir = process.env.VIBE_REPLAY_GROK_BOT_DIR;
+const originalPersistenceDir = process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR;
 const tempDirs: string[] = [];
+
+beforeEach(async () => {
+  const persistence = await mkdtemp(join(tmpdir(), "vibe-grok-discover-persistence-"));
+  tempDirs.push(persistence);
+  process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR = persistence;
+});
 
 afterEach(async () => {
   if (originalTranscriptsDir === undefined) delete process.env.GROK_BOT_TRANSCRIPTS_DIR;
   else process.env.GROK_BOT_TRANSCRIPTS_DIR = originalTranscriptsDir;
   if (originalVibeDir === undefined) delete process.env.VIBE_REPLAY_GROK_BOT_DIR;
   else process.env.VIBE_REPLAY_GROK_BOT_DIR = originalVibeDir;
+  if (originalPersistenceDir === undefined) delete process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR;
+  else process.env.GROK_BOT_CLIENT_PERSISTENCE_DIR = originalPersistenceDir;
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
