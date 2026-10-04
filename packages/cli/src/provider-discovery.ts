@@ -1,3 +1,4 @@
+import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
 import { deduplicateSessionsByProvider } from "./providers/index.js";
 import { discoverConfiguredRemoteSessions } from "./remote.js";
@@ -6,7 +7,7 @@ export interface ProviderDiscoveryCoverage {
   provider: string;
   status: "ready" | "empty" | "failed";
   sessionCount: number;
-  errorCode?: "schema-incompatible" | "read-failed";
+  errorCode?: "schema-incompatible" | "read-failed" | "checkpoint-required";
   message?: string;
 }
 
@@ -49,6 +50,7 @@ export async function discoverProvidersSafely(
         : await provider.discover();
     } catch (error) {
       failedProviders.push(provider.name);
+      const checkpointError = error instanceof SqliteSnapshotRequiredError;
       const schemaError =
         error instanceof Error &&
         /no such (?:table|column)|unsupported.*schema/i.test(error.message);
@@ -56,10 +58,16 @@ export async function discoverProvidersSafely(
         provider: provider.name,
         status: "failed",
         sessionCount: 0,
-        errorCode: schemaError ? "schema-incompatible" : "read-failed",
-        message: schemaError
-          ? "The installed provider storage format is incompatible. Update Vibe Replay or report the schema mismatch."
-          : "Provider discovery failed. Run with VIBE_REPLAY_DEBUG=1 for local diagnostics.",
+        errorCode: checkpointError
+          ? "checkpoint-required"
+          : schemaError
+            ? "schema-incompatible"
+            : "read-failed",
+        message: checkpointError
+          ? "Read-only workflows require a checkpointed database. Checkpoint in the source application or use a saved replay."
+          : schemaError
+            ? "The installed provider storage format is incompatible. Update Vibe Replay or report the schema mismatch."
+            : "Provider discovery failed. Run with VIBE_REPLAY_DEBUG=1 for local diagnostics.",
       });
       if (process.env.VIBE_REPLAY_DEBUG) {
         console.error(`[vibe-replay] ${provider.name} discovery failed:`, error);

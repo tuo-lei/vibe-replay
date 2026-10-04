@@ -1,6 +1,7 @@
 /// <reference path="../sql-js.d.ts" />
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { assertSqliteSnapshotCurrent } from "@vibe-replay/provider-core/utils";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
@@ -116,6 +117,7 @@ const getSqlJs = createRetryableInit<SqlJsStatic>(async () => {
 export async function openHermesDb(
   dbPath = hermesDbPath(),
 ): Promise<{ db: Database; dbPath: string } | null> {
+  await assertSqliteSnapshotCurrent(dbPath);
   let db: Database | null = null;
   try {
     const SQL = await getSqlJs();
@@ -147,11 +149,22 @@ export async function openAllHermesDbs(): Promise<Array<{ db: Database; dbPath: 
   const paths = hermesDbPaths();
   if (paths.length === 0) return [];
   const out: Array<{ db: Database; dbPath: string }> = [];
-  for (const p of paths) {
-    const opened = await openHermesDb(p);
-    if (opened) out.push(opened);
+  try {
+    for (const p of paths) {
+      const opened = await openHermesDb(p);
+      if (opened) out.push(opened);
+    }
+    return out;
+  } catch (error) {
+    for (const { db } of out) {
+      try {
+        db.close();
+      } catch {
+        /* preserve the original discovery failure */
+      }
+    }
+    throw error;
   }
-  return out;
 }
 
 /** True when the session id looks like a Hermes session id (`YYYYMMDD_HHMMSS_...`). */

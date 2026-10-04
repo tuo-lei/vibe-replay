@@ -159,6 +159,13 @@ export function normalizeGitUrl(url: string): string | undefined {
   return undefined;
 }
 
+export class SqliteSnapshotRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SqliteSnapshotRequiredError";
+  }
+}
+
 const sqliteNoWrites = new AsyncLocalStorage<boolean>();
 
 /** Carry the zero-write contract through async provider discovery and parsing. */
@@ -174,7 +181,7 @@ export async function assertSqliteWalReadable(path: string): Promise<void> {
   const wal = await stat(`${path}-wal`);
   if (wal.size === 0) return;
   if (sqliteNoWrites.getStore())
-    throw new Error(
+    throw new SqliteSnapshotRequiredError(
       "Read-only export and preflight cannot query an active WAL because SQLite may change its shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay.",
     );
   if (!existsSync(`${path}-shm`) || !(await stat(`${path}-shm`)).isFile())
@@ -190,4 +197,9 @@ export async function sqliteReadOnlyLocation(path: string): Promise<string> {
   path = realpathSync(path);
   if (existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) return path;
   return `${pathToFileURL(path).href}?immutable=1`;
+}
+
+/** WASM readers cannot apply WAL frames; zero-write flows require a current snapshot. */
+export async function assertSqliteSnapshotCurrent(path: string): Promise<void> {
+  if (sqliteNoWrites.getStore()) await assertSqliteWalReadable(path);
 }

@@ -1,5 +1,6 @@
 /// <reference path="../sql-js.d.ts" />
 import { readFile } from "node:fs/promises";
+import { assertSqliteSnapshotCurrent } from "@vibe-replay/provider-core/utils";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
@@ -52,6 +53,7 @@ const getSqlJs = createRetryableInit<SqlJsStatic>(async () => {
 export async function openOpencodeDb(
   dbPath = opencodeDbPath(),
 ): Promise<{ db: Database; dbPath: string } | null> {
+  await assertSqliteSnapshotCurrent(dbPath);
   try {
     const SQL = await getSqlJs();
     const buffer = await readFile(dbPath);

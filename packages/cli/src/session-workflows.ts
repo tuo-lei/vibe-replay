@@ -308,8 +308,12 @@ export async function resolveCliSource(
   try {
     info = resolveSessionReference(discovery.sessions, ref, options);
   } catch (error) {
-    if (error instanceof SessionReferenceError && discovery.failedProviders.length)
-      error.message += ` Discovery incomplete: ${discovery.failedProviders.join(", ")}; run vibe-replay doctor --json.`;
+    if (error instanceof SessionReferenceError && discovery.failedProviders.length) {
+      const checkpoint = discovery.coverage.find(
+        (entry) => entry.errorCode === "checkpoint-required",
+      );
+      error.message += ` Discovery incomplete: ${discovery.failedProviders.join(", ")}${checkpoint ? `. ${checkpoint.message}` : "; run vibe-replay doctor --json."}`;
+    }
     throw error;
   }
   return {

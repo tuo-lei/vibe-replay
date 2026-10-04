@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import { discoverProvidersSafely } from "../src/provider-discovery.js";
 import type { Provider } from "../src/types.js";
 
@@ -33,4 +34,28 @@ describe("provider failure coverage", () => {
     expect(result.failedProviders).toEqual(["opencode"]);
     expect(JSON.stringify(result.coverage)).not.toContain("secret-token");
   });
+});
+
+it("reports checkpoint-required coverage without exposing a source error's private details", async () => {
+  const providers = [
+    {
+      name: "hermes",
+      displayName: "Hermes",
+      discover: async () => {
+        throw new SqliteSnapshotRequiredError("PRIVATE SOURCE PATH AND PROMPT");
+      },
+      parse: vi.fn(),
+    },
+  ] as Provider[];
+  const result = await discoverProvidersSafely(providers, undefined, { readOnly: true });
+  expect(result.coverage).toEqual([
+    {
+      provider: "hermes",
+      status: "failed",
+      sessionCount: 0,
+      errorCode: "checkpoint-required",
+      message: expect.stringContaining("Checkpoint"),
+    },
+  ]);
+  expect(JSON.stringify(result)).not.toContain("PRIVATE SOURCE");
 });
