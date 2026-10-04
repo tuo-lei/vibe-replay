@@ -1,6 +1,7 @@
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { describe, expect, it } from "vitest";
 import { extractCodexSessionInfo, mergeCodexSessionMetadata } from "../src/codex/discover.js";
 import { nestedExecTools } from "../src/codex/exec-tools.js";
@@ -287,5 +288,134 @@ describe("Codex host accounting", () => {
     expect(replay.meta.stats.toolCalls).toBe(count * 2);
     expect(replay.meta.stats.automationTriggerCount).toBe(count);
     expect(replay.scenes.length).toBe(count * 5);
+  });
+});
+
+describe("Codex wrapped triggers and chronological accounting", () => {
+  it.each(["response_item", "event_msg"])(
+    "classifies wrapped host messages in %s records",
+    async (format) => {
+      const wrap = (text: string) =>
+        `<environment_context>cwd=/tmp/project</environment_context>\n<app-context>host</app-context>\n${text}`;
+      const msgs = [
+        wrap(heartbeat),
+        wrap("Automation: Audit\nAutomation ID: audit\nCheck results"),
+        wrap("# AGENTS.md instructions for /tmp/project\n<INSTRUCTIONS>Use pnpm</INSTRUCTIONS>"),
+        "Human request",
+      ];
+      const records = encode([
+        { type: "session_meta", payload: { id: "wrapped-triggers", cwd: "/tmp/project" } },
+        ...msgs.map((text) =>
+          format === "event_msg"
+            ? { type: "event_msg", payload: { type: "user_message", message: text } }
+            : message(text),
+        ),
+      ]);
+      const parsed = parseCodexLines(records);
+      expect(parsed.turns.map((turn) => turn.subtype)).toEqual([
+        "automation-trigger",
+        "automation-trigger",
+        "context-injection",
+        undefined,
+      ]);
+      expect(transformToReplay(parsed, "codex").meta.stats.userPrompts).toBe(1);
+      const root = await mkdtemp(join(tmpdir(), "codex-wrapped-trigger-"));
+      try {
+        const path = join(root, "rollout.jsonl");
+        await writeFile(path, records.join("\n"));
+        const info = await extractCodexSessionInfo(path, (await stat(path)).size);
+        expect(info).toMatchObject({
+          promptCount: 1,
+          automationTriggerCount: 2,
+          firstPrompt: "Human request",
+        });
+        expect(info?.prompts).toEqual(["Human request"]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("does not attribute earlier tokens or tools to a model learned by discovery later", () => {
+    const parsed = parseCodexLines(
+      encode([
+        message("First request"),
+        usage(100, 20, 10),
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "early",
+            name: "exec_command",
+            arguments: '{"cmd":"pwd"}',
+          },
+        },
+        context("later-model"),
+        usage(150, 30, 15),
+      ]),
+      { model: "later-model" } as SessionInfo,
+    );
+    expect(parsed.tokenUsageByModel).toEqual({
+      unknown: { inputTokens: 80, cacheReadTokens: 20, outputTokens: 10, cacheCreationTokens: 0 },
+      "later-model": {
+        inputTokens: 40,
+        cacheReadTokens: 10,
+        outputTokens: 5,
+        cacheCreationTokens: 0,
+      },
+    });
+    expect(
+      parsed.turns.find((turn) => turn.blocks.some((block) => block.type === "tool_use"))?.model,
+    ).toBeUndefined();
+    expect(parsed.model).toBe("later-model");
+    expect(
+      parseCodexLines(encode([message("No recorded model")]), {
+        model: "discovery-only",
+      } as SessionInfo).model,
+    ).toBe("discovery-only");
+  });
+
+  const timed = (record: object, seconds: number) => ({
+    ...record,
+    timestamp: new Date(Date.parse("2026-10-01T00:00:00Z") + seconds * 1000).toISOString(),
+  });
+  const completed = (duration_ms: number) => ({
+    type: "event_msg",
+    payload: { type: "task_complete", duration_ms },
+  });
+  it("uses complete provider durations for automation-only transcripts", () => {
+    const parsed = parseCodexLines(
+      encode([timed(message(heartbeat), 0), timed(completed(1200), 50)]),
+    );
+    expect(parsed.totalDurationMs).toBe(1200);
+    expect(parsed.turnStats).toBeUndefined();
+  });
+  it("requires a completion in every trigger interval, not merely enough completions", () => {
+    const parsed = parseCodexLines(
+      encode([
+        timed(message(heartbeat), 0),
+        timed(completed(1000), 1),
+        timed(completed(2000), 2),
+        timed(message("Human request with no completion"), 10),
+        timed(
+          { type: "event_msg", payload: { type: "agent_message", message: "Still working" } },
+          20,
+        ),
+      ]),
+    );
+    expect(parsed.totalDurationMs).toBe(20000);
+  });
+  it("sums complete human and automation intervals without orphan completions", () => {
+    const parsed = parseCodexLines(
+      encode([
+        timed(completed(900000), 0),
+        timed(message(heartbeat), 1),
+        timed(completed(1000), 5),
+        timed(message("Human request"), 10),
+        timed(completed(2000), 20),
+      ]),
+    );
+    expect(parsed.totalDurationMs).toBe(3000);
+    expect(parsed.turnStats).toMatchObject([{ durationMs: 2000 }]);
   });
 });

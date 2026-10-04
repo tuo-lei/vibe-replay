@@ -292,7 +292,7 @@ export async function extractCodexSessionInfo(
           const subtype = codexUserMessageSubtype(rawText);
           if (
             subtype === "automation-trigger" &&
-            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "")
+            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "", true)
           )
             automationTriggerCount++;
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
@@ -319,7 +319,7 @@ export async function extractCodexSessionInfo(
           const subtype = codexUserMessageSubtype(rawText);
           if (
             subtype === "automation-trigger" &&
-            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "")
+            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "", true)
           )
             automationTriggerCount++;
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
@@ -581,9 +581,10 @@ function recordDiscoveredPrompt(
   timestamp: string | undefined,
   text: string,
   imageKey: string,
+  allowHostContext = false,
 ): boolean {
   const hasImages = imageKey.length > 0;
-  if (isCodexContextMessage(text)) return false;
+  if (!allowHostContext && isCodexContextMessage(text)) return false;
   if (!text && !hasImages) return false;
   const key = `${text}:images:${imageKey}`;
   const time = timestamp ? Date.parse(timestamp) : Number.NaN;

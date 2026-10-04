@@ -81,7 +81,8 @@ export function parseCodexLines(
   let slug = sessionInfo?.slug || "";
   let title = sessionInfo?.title;
   let cwd = sessionInfo?.cwd || "";
-  let model = sessionInfo?.model;
+  // Discovery knows the latest model, not the model at the start of the rollout.
+  let model: string | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
   let gitBranch = sessionInfo?.gitBranch;
@@ -111,9 +112,10 @@ export function parseCodexLines(
   const turnOrder = new Map<ParsedTurn, number>();
   const toolOrder = new Map<string, number>();
   const pushTurn = (turn: ParsedTurn, order = currentLineIndex): void => {
+    const turnModel = "model" in turn ? turn.model : model;
     turns.push({
       ...turn,
-      ...(turn.role === "assistant" && (turn.model || model) ? { model: turn.model || model } : {}),
+      ...(turn.role === "assistant" && turnModel ? { model: turnModel } : {}),
     });
     turnOrder.set(turns[turns.length - 1], order);
   };
@@ -604,14 +606,19 @@ export function parseCodexLines(
   const modelAccounting = codexUsageByModel(tokenSnapshots, tokenUsage);
   const tokenUsageByModel = modelAccounting.usage;
   const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, turnOrder);
-  const summedTaskDurationMs = taskDurations.reduce(
-    (sum, duration) => sum + duration.durationMs,
-    0,
+  const triggerTurns = turns.filter(
+    (turn) => turn.role === "user" && (!turn.subtype || turn.subtype === "automation-trigger"),
   );
-  const userPromptTurnCount = turns.filter((turn) => turn.role === "user" && !turn.subtype).length;
+  const completedTriggerDurations = triggerTurns.map((turn, index) => {
+    const start = turnOrder.get(turn) ?? 0;
+    const next = triggerTurns[index + 1];
+    const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
+    return taskDurations.filter((task) => task.sourceIndex > start && task.sourceIndex < end);
+  });
   const completeTaskDurationMs =
-    userPromptTurnCount > 0 && taskDurations.length >= userPromptTurnCount
-      ? summedTaskDurationMs
+    completedTriggerDurations.length > 0 &&
+    completedTriggerDurations.every((tasks) => tasks.length > 0)
+      ? completedTriggerDurations.flat().reduce((sum, task) => sum + task.durationMs, 0)
       : undefined;
   const contextComponents: NonNullable<ProviderParseResult["contextBreakdown"]>["components"] = [];
   if (baseInstructionsBytes > 0) {
@@ -634,7 +641,7 @@ export function parseCodexLines(
     slug: slug || sessionId.slice(0, 8),
     title,
     cwd,
-    model,
+    model: model || sessionInfo?.model,
     startTime,
     endTime,
     totalDurationMs: completeTaskDurationMs || estimateActiveDuration(allTimestamps),
