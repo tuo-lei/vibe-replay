@@ -259,9 +259,9 @@ async function inferProvider(path: string): Promise<string> {
     /"(?:sessionId|uuid)"\s*:/.test(head)
   )
     return "claude-code";
+  if (looksLikeGrokTranscript(head)) return "grok-bot";
   if (cursorPath) return "cursor";
-  if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base) || looksLikeGrokTranscript(head))
-    return "grok-bot";
+  if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
   if (
     /\[user\]/.test(head) ||
     (/"role"\s*:\s*"(?:user|assistant)"/.test(head) && /"message"\s*:/.test(head))
