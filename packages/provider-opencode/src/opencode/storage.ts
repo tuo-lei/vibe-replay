@@ -145,39 +145,45 @@ export function prepareOpencodeStorage(db: Database): void {
           },
         ];
       } else if (type === "assistant") {
-        parts = (Array.isArray(data.content) ? data.content : []).map((value) => {
-          const content = object(value);
-          if (content.type !== "tool") return content;
-          const state = object(content.state);
-          const toolTime = object(content.time);
-          const metadata = { ...object(state.metadata), ...object(state.structured) };
-          const output = (Array.isArray(state.content) ? state.content : [])
-            .map((item) => object(item).text)
-            .filter((text) => typeof text === "string")
-            .join("\n");
-          return {
-            type: "tool",
-            tool: content.name,
-            callID: content.id,
-            state: {
-              ...state,
-              status: metadata.error === true ? "error" : state.status,
-              output: output || object(state.error).message || "",
-              images: (Array.isArray(state.content) ? state.content : [])
-                .map(object)
-                .filter(
-                  (item) =>
-                    item.type === "file" &&
-                    typeof item.uri === "string" &&
-                    typeof item.mime === "string" &&
-                    item.mime.startsWith("image/"),
-                )
-                .map((item) => item.uri),
-              metadata: { ...metadata, sessionId: metadata.sessionId || metadata.sessionID },
-              time: { start: toolTime.ran || toolTime.created, end: toolTime.completed },
-            },
-          };
-        });
+        parts = (Array.isArray(data.content) ? data.content : [])
+          .filter((value) => {
+            const content = object(value);
+            // Partial arguments are not an invocation until the tool starts running.
+            return content.type !== "tool" || object(content.state).status !== "streaming";
+          })
+          .map((value) => {
+            const content = object(value);
+            if (content.type !== "tool") return content;
+            const state = object(content.state);
+            const toolTime = object(content.time);
+            const metadata = { ...object(state.metadata), ...object(state.structured) };
+            const output = (Array.isArray(state.content) ? state.content : [])
+              .map((item) => object(item).text)
+              .filter((text) => typeof text === "string")
+              .join("\n");
+            return {
+              type: "tool",
+              tool: content.name,
+              callID: content.id,
+              state: {
+                ...state,
+                status: metadata.error === true ? "error" : state.status,
+                output: output || object(state.error).message || "",
+                images: (Array.isArray(state.content) ? state.content : [])
+                  .map(object)
+                  .filter(
+                    (item) =>
+                      item.type === "file" &&
+                      typeof item.uri === "string" &&
+                      typeof item.mime === "string" &&
+                      item.mime.startsWith("image/"),
+                  )
+                  .map((item) => item.uri),
+                metadata: { ...metadata, sessionId: metadata.sessionId || metadata.sessionID },
+                time: { start: toolTime.ran || toolTime.created, end: toolTime.completed },
+              },
+            };
+          });
       }
       insert(message, [id, sessionId, created, seq, JSON.stringify(meta)]);
       parts.forEach((data, index) =>

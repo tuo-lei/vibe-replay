@@ -443,6 +443,35 @@ describe("OpenCode v2 storage compatibility", () => {
     }
   });
 
+  it("keeps streamed tool arguments out of discovery and replay invocations while preserving billed usage", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, { text: "Edit" });
+      add(db, "a", "assistant", 1, {
+        tokens: { input: 10, output: 5 },
+        content: [
+          {
+            type: "tool",
+            id: "not-invoked",
+            name: "edit",
+            state: { status: "streaming", input: '{"filePath":' },
+          },
+        ],
+      });
+      const discovered = listSessionsFromDb(db);
+      expect(discovered.find((session) => session.sessionId === "ses_parent")).toMatchObject({
+        toolCallCount: 0,
+        editCountEst: 0,
+      });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.turns.map((turn) => turn.role)).toEqual(["user"]);
+      expect(JSON.stringify(parsed.turns)).not.toContain("not-invoked");
+      expect(parsed.tokenUsage?.outputTokens).toBe(5);
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves repeated native v2 skill activations without turning their prompt text into scenes", async () => {
     const db = await v2Db();
     try {
