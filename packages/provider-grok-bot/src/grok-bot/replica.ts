@@ -229,12 +229,20 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
     if (key.endsWith(":")) continue;
     const identity = `${key}\0${turn.timestamp || ""}`;
     if (seenExtra.has(identity)) continue;
-    const match = basePool.find(
-      (item) =>
-        !item.used &&
-        item.key === key &&
-        (!item.timestamp || !turn.timestamp || item.timestamp === turn.timestamp),
-    );
+    // Allow small tool-result/UI clock skew, never match old and recent activity
+    // solely by text. Missing clocks retain legacy one-to-one content matching.
+    const stamp = turn.timestamp ? Date.parse(turn.timestamp) : NaN;
+    const match =
+      basePool.find(
+        (item) =>
+          !item.used &&
+          item.key === key &&
+          item.timestamp &&
+          Math.abs(Date.parse(item.timestamp) - stamp) <= 5_000,
+      ) ||
+      basePool.find(
+        (item) => !item.used && item.key === key && (!item.timestamp || !turn.timestamp),
+      );
     if (match) {
       match.used = true;
       continue;

@@ -9,9 +9,14 @@ import {
   getGrokBotTranscriptRoots,
 } from "./config.js";
 import { mergeDiscoveredGroupSessions } from "./group-merge.js";
-import { countGrokBotDiscoveryStats } from "./parser.js";
+import { countGrokBotDiscoveryStats, parseGrokBotLines, parseGrokBotSession } from "./parser.js";
 import { readAgentGroup, readAgentProfile } from "./profiles.js";
-import { agentIdFromReplicaFilename, summarizeReplicaDocument } from "./replica.js";
+import {
+  agentIdFromReplicaFilename,
+  replicaDocumentToLines,
+  replicaSideTurns,
+  summarizeReplicaDocument,
+} from "./replica.js";
 import { isSandSubagentSessionId } from "./subagent.js";
 
 export { readAgentGroup, readAgentProfile } from "./profiles.js";
@@ -121,8 +126,11 @@ async function attachClientReplicas(
       }
       const summary = summarizeReplicaDocument(raw);
       if (!summary) continue;
+      const hasReplayableActivity =
+        parseGrokBotLines(replicaDocumentToLines(raw)).turns.length > 0 ||
+        replicaSideTurns(raw).length > 0;
+      if (!hasReplayableActivity) continue;
       const prompts = summary.prompts.filter(Boolean);
-      if (!includeUnreplayable && prompts.length === 0 && summary.promptCount === 0) continue;
 
       const existing = sessions.find(
         (session) => session.sessionId === agentId || session.sessionIds?.includes(agentId),
@@ -134,6 +142,23 @@ async function attachClientReplicas(
         existing.timestamp = newerIso(existing.timestamp, replicaStamp) || existing.timestamp;
         if (jsonl && !existing.filePaths.includes(jsonl.filePath))
           existing.filePaths.unshift(jsonl.filePath);
+        const parsed = await parseGrokBotSession(existing.filePaths, existing);
+        const mergedPrompts = parsed.turns
+          .filter((turn) => turn.role === "user" && !turn.subtype)
+          .map((turn) =>
+            cleanPromptText(
+              turn.blocks
+                .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                .join("\n"),
+            ),
+          )
+          .filter(Boolean);
+        existing.promptCount = mergedPrompts.length;
+        existing.firstPrompt = mergedPrompts[0]?.slice(0, 200) || "";
+        existing.prompts = mergedPrompts.length
+          ? mergedPrompts.slice(0, 2).map((text) => text.slice(0, 200))
+          : undefined;
+        if (mergedPrompts.length) delete existing.transcriptStatus;
         continue;
       }
 

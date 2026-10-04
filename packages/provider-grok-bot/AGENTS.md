@@ -109,6 +109,10 @@ When a persistence directory exists (default Application Support path, or
 `GROK_BOT_CLIENT_PERSISTENCE_DIR`), `transcript.replicas` blobs are discovered.
 The same agent id merges onto the JSONL session: JSONL keeps the tool timeline,
 replica turns fill UI messages that are not already present (normalized text).
+Cross-source copies consume one JSONL occurrence only when timestamps differ by
+at most five seconds; missing timestamps retain one-to-one content matching.
+Older identical activity stays separate from a recent replica window. Attached
+session prompt counts and previews come from the same merged timeline as replay.
 Replica-only sessions are playable without a JSONL file. `sand-subagent-*` stays
 hidden. Rich `send-message` types, user attachments, voice-call context lines,
 and name-changed events are included. Spend rows are skipped.
