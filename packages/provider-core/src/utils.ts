@@ -199,7 +199,10 @@ export async function sqliteReadOnlyLocation(path: string): Promise<string> {
   await assertSqliteWalReadable(path);
   if (!existsSync(path)) return path;
   path = realpathSync(path);
-  if (existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) return path;
+  if (existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) {
+    await assertSqliteWalReadable(path);
+    if (!sqliteNoWrites.getStore()) return path;
+  }
   return `${pathToFileURL(path).href}?immutable=1`;
 }
 
