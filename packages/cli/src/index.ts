@@ -312,7 +312,8 @@ program
     if (
       commandName === "telemetry" ||
       process.argv[2] === "telemetry" ||
-      (commandName === "share" && actionCommand.opts().dryRun)
+      (commandName === "share" && actionCommand.opts().dryRun) ||
+      (commandName === "export" && actionCommand.opts().stdout)
     )
       return;
     const notice = await getTelemetryNotice();
@@ -1122,6 +1123,7 @@ workflowCommand("export", "Export a session in one format; previews are optional
     const { replay, outputDir } = await loadCliSession(ref, {
       ...opts,
       preferReplay: true,
+      readOnly: opts.stdout,
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
     if (opts.stdout) {

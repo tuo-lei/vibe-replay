@@ -5,6 +5,6 @@ import { parseCodexSession } from "./parser.js";
 export const codexProvider: Provider = {
   name: "codex",
   displayName: "Codex",
-  discover: discoverCodexSessions,
+  discover: () => discoverCodexSessions(),
   parse: parseCodexSession,
 };

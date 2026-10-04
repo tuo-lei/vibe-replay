@@ -119,6 +119,8 @@ npx vibe-replay export <session-id> --format markdown --json
 
 This writes `github-summary.md` and `redactions.json` under `~/.vibe-replay/<slug>/exports/`; use the exact paths in the JSON result. Export/share by ID preserves an existing replay snapshot and its editor edits. Pass the explicit source path to regenerate from the current source instead. The review, opt-in cleanup, and PR-append rules below still apply.
 
+Use `--stdout` for Markdown or JSON without creating files, discovery caches, or telemetry. SSH stdout exports and sharing preflight read already staged sessions; run `sessions --refresh` first when needed.
+
 For the full preview bundle, run `vibe-replay` with the provider when known:
 
 ```bash

@@ -291,10 +291,15 @@ export type ToolResultContent =
   | { type: "tool_result"; tool_use_id: string; content: string }
   | { type: "image"; source: { type: string; media_type: string; data: string } };
 
+export interface ProviderDiscoveryOptions {
+  /** Read local storage without writing persistent discovery caches. */
+  readOnly?: boolean;
+}
+
 export interface Provider {
   name: string;
   displayName: string;
-  discover(): Promise<SessionInfo[]>;
+  discover(options?: ProviderDiscoveryOptions): Promise<SessionInfo[]>;
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
 }
 

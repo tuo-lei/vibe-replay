@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { SessionInfo } from "@vibe-replay/provider-contract";
+import type { ProviderDiscoveryOptions, SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
 import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
@@ -20,20 +20,26 @@ const ENTRY_STAT_CONCURRENCY = 32;
 const decodedProjectDirCache = new Map<string, Promise<string>>();
 const sdkWorkspaceRepoCache = new Map<string, Promise<string | undefined>>();
 const transcriptDelegatedPrompts = new Map<string, string[]>();
-let cursorDiscoveryInFlight: Promise<SessionInfo[]> | null = null;
+const cursorDiscoveryInFlight = new Map<boolean, Promise<SessionInfo[]>>();
 
 /** Coalesce dashboard/source scans that request the same local catalog concurrently. */
-export function discoverCursorSessions(): Promise<SessionInfo[]> {
-  if (cursorDiscoveryInFlight) return cursorDiscoveryInFlight;
-  const current = discoverCursorSessionsOnce();
+export function discoverCursorSessions(
+  options: ProviderDiscoveryOptions = {},
+): Promise<SessionInfo[]> {
+  const readOnly = options.readOnly === true;
+  const existing = cursorDiscoveryInFlight.get(readOnly);
+  if (existing) return existing;
+  const current = discoverCursorSessionsOnce(options);
   const tracked = current.finally(() => {
-    if (cursorDiscoveryInFlight === tracked) cursorDiscoveryInFlight = null;
+    if (cursorDiscoveryInFlight.get(readOnly) === tracked) cursorDiscoveryInFlight.delete(readOnly);
   });
-  cursorDiscoveryInFlight = tracked;
+  cursorDiscoveryInFlight.set(readOnly, tracked);
   return tracked;
 }
 
-async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
+async function discoverCursorSessionsOnce(
+  options: ProviderDiscoveryOptions,
+): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
   // SDK databases are independent from IDE transcript/store discovery. Start
   // their machine-wide index in parallel instead of paying both costs serially.
@@ -70,7 +76,7 @@ async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
   for (const s of sqliteOnly) knownIds.add(s.sessionId);
 
   // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
-  const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths);
+  const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths, options);
   sessions.push(...globalState.sessions);
   const globalStateById = new Map(
     globalState.allSessions.map((session) => [session.sessionId, session]),

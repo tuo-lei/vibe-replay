@@ -5,6 +5,6 @@ import { parsePiSession } from "./parser.js";
 export const piProvider: Provider = {
   name: "pi",
   displayName: "Pi",
-  discover: discoverPiSessions,
+  discover: () => discoverPiSessions(),
   parse: parsePiSession,
 };

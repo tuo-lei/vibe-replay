@@ -236,8 +236,10 @@ after selecting a session.
 
 `export` supports `markdown`, `json`, and `html`, defaulting to Markdown with no
 preview images. Files go under `~/.vibe-replay/<slug>/exports` unless `--output` is
-provided. `--stdout` emits only Markdown or replay JSON and creates no files;
-file exports include a redaction report. `--github` remains available for the
+provided. `--stdout` emits only Markdown or replay JSON and creates no files,
+including discovery caches and telemetry. SSH stdout exports use already staged
+sessions; run `sessions --refresh` first if the session is not staged.
+File exports include a redaction report. `--github` remains available for the
 Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
 replay with its editor overlays and annotations when available; an explicit source
 path reparses the source, while an explicit `replay.json` uses that saved snapshot.

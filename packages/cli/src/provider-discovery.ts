@@ -44,7 +44,9 @@ export async function discoverProvidersSafely(
   for (const provider of providers) {
     let sessions: SessionInfo[];
     try {
-      sessions = await provider.discover();
+      sessions = options?.readOnly
+        ? await provider.discover({ readOnly: true })
+        : await provider.discover();
     } catch (error) {
       failedProviders.push(provider.name);
       const schemaError =

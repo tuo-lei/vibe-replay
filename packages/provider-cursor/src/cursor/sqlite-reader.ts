@@ -23,6 +23,7 @@ import type {
   Compaction,
   ContentBlock,
   ParsedTurn,
+  ProviderDiscoveryOptions,
   SessionInfo,
 } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
@@ -1714,6 +1715,7 @@ function finalizeGlobalStateDiscovery(
 export async function discoverGlobalStateOnlySessions(
   knownSessionIds: Set<string>,
   decodedWorkspacePaths: string[] = [],
+  options: ProviderDiscoveryOptions = {},
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
   const globalStateDb = await openGlobalStateDb();
@@ -1827,16 +1829,17 @@ export async function discoverGlobalStateOnlySessions(
     // no-op: ignore malformed db rows and return what we have
   }
 
-  await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
-    dbPath,
-    size: globalStateDb.size,
-    mtimeMs: globalStateDb.mtimeMs,
-    walSize: globalStateDb.walSize,
-    walMtimeMs: globalStateDb.walMtimeMs,
-    decodedPathsHash,
-    sessions: discoveredSessions,
-    sessionIds: [...sessionIds],
-  });
+  if (!options.readOnly)
+    await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
+      dbPath,
+      size: globalStateDb.size,
+      mtimeMs: globalStateDb.mtimeMs,
+      walSize: globalStateDb.walSize,
+      walMtimeMs: globalStateDb.walMtimeMs,
+      decodedPathsHash,
+      sessions: discoveredSessions,
+      sessionIds: [...sessionIds],
+    });
 
   return {
     sessions: finalizeGlobalStateDiscovery(discoveredSessions, knownSessionIds),

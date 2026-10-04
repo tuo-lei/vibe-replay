@@ -17,6 +17,15 @@ afterEach(() => {
 });
 
 describe("CLI preflight discovery", () => {
+  it("propagates read-only mode to local providers without changing ordinary discovery", async () => {
+    const discover = vi.spyOn(getProvider("pi")!, "discover").mockResolvedValue([]);
+    await discoverCliSessions({ provider: "pi", readOnly: true, refresh: true });
+    expect(discover).toHaveBeenCalledExactlyOnceWith({ readOnly: true });
+    discover.mockClear();
+    await discoverCliSessions({ provider: "pi", refresh: true });
+    expect(discover).toHaveBeenCalledExactlyOnceWith();
+  });
+
   it("propagates read-only mode to remote discovery and suppresses the CLI cache write", async () => {
     vi.spyOn(getProvider("pi")!, "discover").mockResolvedValue([]);
     const result = await discoverCliSessions({ provider: "pi", readOnly: true, refresh: true });

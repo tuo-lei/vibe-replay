@@ -75,10 +75,24 @@ export function resolveSessionReference(
         (s.location?.kind === "ssh" ? s.location.id : "local") === options.target),
   );
   const expanded = expandUserPath(ref);
-  const exact = scoped.filter((s) =>
-    [s.sessionId, ...(s.sessionIds || []), s.slug, s.filePath, ...s.filePaths].some(
-      (id) => id === ref || id === expanded || id === resolve(expanded),
-    ),
+  const storage = splitStorageReference(expanded);
+  if (storage.suffix && !storage.marker) throw new Error("Session marker must contain an ID");
+  const storageMatches = scoped.filter((s) =>
+    [s.filePath, ...s.filePaths]
+      .filter(Boolean)
+      .some(
+        (candidate) =>
+          resolve(expandUserPath(splitStorageReference(candidate).base)) === resolve(storage.base),
+      ),
+  );
+  if (storage.marker && storageMatches.length)
+    return resolveSessionReference(storageMatches, storage.marker, options);
+  const exact = scoped.filter(
+    (s) =>
+      (!storage.suffix && storageMatches.includes(s)) ||
+      [s.sessionId, ...(s.sessionIds || []), s.slug, s.filePath, ...s.filePaths].some(
+        (id) => id === ref || id === expanded || id === resolve(expanded),
+      ),
   );
   const matches = exact.length
     ? exact
@@ -137,12 +151,12 @@ async function inferProvider(path: string): Promise<string> {
   }
   if (/"type"\s*:\s*"session_meta"/.test(head)) return "codex";
   if (/"type"\s*:\s*"session"/.test(head) && /"version"\s*:/.test(head)) return "pi";
-  if (cursorPath || /\[user\]/.test(head)) return "cursor";
   if (
     /"type"\s*:\s*"(?:user|assistant|system)"/.test(head) &&
     /"(?:sessionId|uuid)"\s*:/.test(head)
   )
     return "claude-code";
+  if (cursorPath || /\[user\]/.test(head)) return "cursor";
   throw new Error("Could not infer the provider from this source. Specify --provider <name>.");
 }
 

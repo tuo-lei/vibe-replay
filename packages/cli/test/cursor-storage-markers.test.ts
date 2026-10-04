@@ -69,3 +69,21 @@ it("keeps transcript header inference ahead of Cursor directory hints", async ()
   sessions = [];
   expect((await resolveCliSource(transcript)).provider).toBe("codex");
 });
+
+it("recognizes copied Claude JSONL before the Cursor directory hint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vibe-cursor-claude-header-"));
+  roots.push(root);
+  const folder = join(root, ".cursor");
+  await mkdir(folder);
+  const transcript = join(folder, "copied-claude.jsonl");
+  await writeFile(
+    transcript,
+    JSON.stringify({
+      type: "user",
+      sessionId: "claude-id",
+      message: { role: "user", content: "Fix the build" },
+    }),
+  );
+  sessions = [];
+  expect((await resolveCliSource(transcript)).provider).toBe("claude-code");
+});
