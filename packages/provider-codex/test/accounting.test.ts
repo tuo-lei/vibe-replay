@@ -1,0 +1,291 @@
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { extractCodexSessionInfo, mergeCodexSessionMetadata } from "../src/codex/discover.js";
+import { nestedExecTools } from "../src/codex/exec-tools.js";
+import { parseCodexLines } from "../src/codex/parser.js";
+import { transformToReplay } from "./helpers/transform.js";
+
+const message = (text: string) => ({
+  type: "response_item",
+  payload: {
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text }],
+  },
+});
+const context = (model: string) => ({ type: "turn_context", payload: { model } });
+const usage = (input: number, cached: number, output: number) => ({
+  type: "event_msg",
+  payload: {
+    type: "token_count",
+    info: {
+      total_token_usage: {
+        input_tokens: input,
+        cached_input_tokens: cached,
+        output_tokens: output,
+      },
+      last_token_usage: { input_tokens: 50, cached_input_tokens: 20, output_tokens: 5 },
+    },
+  },
+});
+const encode = (records: unknown[]) => records.map((record) => JSON.stringify(record));
+const heartbeat =
+  "<heartbeat><automation_id>review</automation_id><instructions>Check the current PR.</instructions></heartbeat>";
+const patch =
+  "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** Add File: src/b.ts\n+hello\n*** End Patch";
+const script = `text(await tools.apply_patch(${JSON.stringify(patch)}));\ntext(await tools.mcp__devspace__read({workspace_id: "work", path: "src/a.ts"}));`;
+const batch = (source = script, result = "Script completed\nOutput:\nbatch output") => [
+  {
+    type: "response_item",
+    payload: { type: "custom_tool_call", name: "exec", call_id: "batch", input: source },
+  },
+  {
+    type: "response_item",
+    payload: {
+      type: "custom_tool_call_output",
+      call_id: "batch",
+      output: [{ type: "input_text", text: result }],
+    },
+  },
+];
+
+describe("Codex host accounting", () => {
+  it("keeps heartbeat context visible while discovery and replay count only human interventions", async () => {
+    const records = encode([
+      { type: "session_meta", payload: { id: "host-accounting", cwd: "/tmp/project" } },
+      message("# AGENTS.md instructions for /tmp/project\n<INSTRUCTIONS>Use pnpm.</INSTRUCTIONS>"),
+      message('<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'),
+      message("# Files mentioned by the user:\n## My request: Fix the layout"),
+      message(heartbeat),
+      message("Now check the screenshots"),
+    ]);
+    const parsed = parseCodexLines(records);
+    const replay = transformToReplay(parsed, "codex");
+    expect(replay.meta.stats.userPrompts).toBe(2);
+    expect(replay.meta.stats.automationTriggerCount).toBe(1);
+    expect(replay.scenes.filter((scene) => scene.type === "user-prompt")).toMatchObject([
+      { content: "Fix the layout" },
+      { content: "Now check the screenshots" },
+    ]);
+    expect(replay.scenes).toContainEqual(
+      expect.objectContaining({
+        type: "context-injection",
+        injectionType: "automation",
+        content: heartbeat,
+      }),
+    );
+    const root = await mkdtemp(join(tmpdir(), "codex-host-accounting-"));
+    try {
+      const path = join(root, "rollout.jsonl");
+      await writeFile(path, records.join("\n"));
+      const discovered = await extractCodexSessionInfo(path, (await stat(path)).size);
+      expect(discovered).toMatchObject({
+        promptCount: 2,
+        automationTriggerCount: 1,
+        firstPrompt: "Fix the layout",
+      });
+      expect(discovered?.prompts).toEqual(["Fix the layout", "Now check the screenshots"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows automation-only transcripts to replay instead of classifying them as no-prompts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-auto-only-"));
+    try {
+      const path = join(root, "rollout.jsonl");
+      await writeFile(
+        path,
+        encode([{ type: "session_meta", payload: { id: "automatic" } }, message(heartbeat)]).join(
+          "\n",
+        ),
+      );
+      const discovered = await extractCodexSessionInfo(path, (await stat(path)).size);
+      expect(discovered).toMatchObject({ promptCount: 0, automationTriggerCount: 1 });
+      expect(discovered?.transcriptStatus).toBeUndefined();
+      expect(
+        mergeCodexSessionMetadata(discovered!, {
+          sessionId: "automatic",
+          firstUserMessage: heartbeat,
+        }).firstPrompt,
+      ).toBe("");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the batch output and attributes nested edits/MCP once without inventing child success", () => {
+    const parsed = parseCodexLines(encode([message("Update the source files"), ...batch()]));
+    const blocks = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use");
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toMatchObject({
+      name: "exec",
+      _isToolContainer: true,
+      _result: "Script completed\nOutput:\nbatch output",
+      _hasResult: true,
+    });
+    expect(blocks[1]).toMatchObject({
+      name: "Edit",
+      input: { file_paths: ["src/a.ts", "src/b.ts"] },
+      _hasResult: false,
+    });
+    expect(blocks[2]).toMatchObject({ name: "mcp__devspace__read", _hasResult: false });
+    expect(parsed.mcpServersUsed).toEqual(["devspace"]);
+    const replay = transformToReplay(parsed, "codex");
+    expect(replay.meta.stats.toolCalls).toBe(2);
+    expect(replay.scenes.filter((scene) => scene.type === "tool-call")).toHaveLength(3);
+  });
+
+  it.each([
+    'if (false) await tools.apply_patch("patch");',
+    "for (const path of paths) await tools.exec_command({cmd: path});",
+    'const unused = () => tools.apply_patch("patch");',
+    'tools.apply_patch("patch");',
+    'let cmd = "old"; cmd = "new"; await tools.exec_command({cmd});',
+    'const input = {cmd:"old"}; input.cmd = "new"; await tools.exec_command(input);',
+    'exit(); await tools.apply_patch("patch");',
+    'tools.apply_patch = fake; await tools.apply_patch("patch");',
+  ])("leaves unsupported exec control flow opaque: %s", (source) => {
+    expect(nestedExecTools(source, "Script completed\nOutput:")).toBeUndefined();
+    const parsed = parseCodexLines(encode(batch(source)));
+    expect(
+      parsed.turns.flatMap((turn) => turn.blocks).filter((block) => block.type === "tool_use"),
+    ).toMatchObject([{ name: "exec", _hasResult: true }]);
+  });
+
+  it("reads literal parallel calls without executing JavaScript or scraping tool names from strings", () => {
+    const source =
+      'const cmd = "tools.apply_patch(fake)"; globalThis.__vibeExecParserExecuted = true; const results = await Promise.allSettled([tools.exec_command({cmd}), tools.mcp__test__read({path:"src/a.ts"})]); results.forEach(text);';
+    expect(nestedExecTools(source, "Script completed\nOutput:")).toEqual([
+      { name: "exec_command", input: { cmd: "tools.apply_patch(fake)" } },
+      { name: "mcp__test__read", input: { path: "src/a.ts" } },
+    ]);
+    expect((globalThis as Record<string, unknown>).__vibeExecParserExecuted).toBeUndefined();
+    expect(nestedExecTools(source, "Script running with cell ID 1")).toBeUndefined();
+    expect(nestedExecTools(source, "Script failed\nOutput:")).toBeUndefined();
+  });
+
+  it("attributes cumulative deltas to the actual model and prompt, keeping automation billing separate", () => {
+    const parsed = parseCodexLines(
+      encode([
+        context("model-a"),
+        message("First human request"),
+        usage(100, 20, 10),
+        usage(100, 20, 10),
+        usage(160, 40, 20),
+        message(heartbeat),
+        context("model-b"),
+        usage(200, 50, 30),
+        message("Second human request"),
+        usage(300, 90, 50),
+      ]),
+    );
+    expect(parsed.model).toBe("model-b");
+    expect(parsed.tokenUsage).toEqual({
+      inputTokens: 210,
+      cacheReadTokens: 90,
+      outputTokens: 50,
+      cacheCreationTokens: 0,
+    });
+    expect(parsed.tokenUsageByModel).toEqual({
+      "model-a": {
+        inputTokens: 120,
+        cacheReadTokens: 40,
+        outputTokens: 20,
+        cacheCreationTokens: 0,
+      },
+      "model-b": { inputTokens: 90, cacheReadTokens: 50, outputTokens: 30, cacheCreationTokens: 0 },
+    });
+    expect(parsed.turnStats).toMatchObject([
+      {
+        turnIndex: 0,
+        model: "model-a",
+        tokenUsage: { inputTokens: 120, cacheReadTokens: 40, outputTokens: 20 },
+      },
+      {
+        turnIndex: 1,
+        model: "model-b",
+        tokenUsage: { inputTokens: 60, cacheReadTokens: 40, outputTokens: 20 },
+      },
+    ]);
+  });
+
+  it("marks reset counters unknown instead of billing the latest model for earlier work", () => {
+    const parsed = parseCodexLines(
+      encode([
+        context("gpt-5.4"),
+        message("Before resume"),
+        usage(100, 20, 10),
+        context("gpt-5.4-mini"),
+        message("After resume"),
+        usage(50, 10, 5),
+      ]),
+    );
+    expect(parsed.tokenUsageByModel).toEqual({ unknown: parsed.tokenUsage });
+    expect(transformToReplay(parsed, "codex").meta.stats.costEstimate).toBeUndefined();
+    expect(parsed.dataSourceInfo?.notes?.join(" ")).toContain("counters reset");
+  });
+
+  it("retains known model deltas after a reset, with aggregate totals conserved", () => {
+    const parsed = parseCodexLines(
+      encode([
+        context("model-a"),
+        message("Before resume"),
+        usage(100, 20, 10),
+        message("After resume"),
+        usage(50, 10, 5),
+        context("model-b"),
+        usage(150, 40, 15),
+      ]),
+    );
+    expect(parsed.tokenUsageByModel).toEqual({
+      unknown: { inputTokens: 40, cacheReadTokens: 10, outputTokens: 5, cacheCreationTokens: 0 },
+      "model-b": { inputTokens: 70, cacheReadTokens: 30, outputTokens: 10, cacheCreationTokens: 0 },
+    });
+    expect(parsed.tokenUsage).toEqual({
+      inputTokens: 110,
+      cacheReadTokens: 40,
+      outputTokens: 15,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it("classifies native scheduled-task headers separately from human prompts", () => {
+    const parsed = parseCodexLines(
+      encode([message("Automation: docs sync\nAutomation ID: docs-sync\nCheck the README.")]),
+    );
+    const replay = transformToReplay(parsed, "codex");
+    expect(replay.meta.stats.userPrompts).toBe(0);
+    expect(replay.meta.stats.automationTriggerCount).toBe(1);
+  });
+
+  it.each([6, 100])("handles small and large replays with %i batches", (count) => {
+    const records = [
+      context("gpt-5.4"),
+      ...Array.from({ length: count }, (_, i) => [
+        message(`Human request ${i}`),
+        message(heartbeat),
+        ...batch(script.replaceAll("batch", `batch-${i}`)),
+      ]).flat(),
+    ];
+    // Give each persisted call its own ID as a real rollout does.
+    let call = 0;
+    for (const [index, record] of records.entries()) {
+      Object.assign(record, {
+        timestamp: new Date(Date.UTC(2026, 9, 1, 0, 0, index * 3)).toISOString(),
+      });
+      const payload = record.payload as Record<string, unknown>;
+      if (payload.type === "custom_tool_call") payload.call_id = `batch-${call}`;
+      if (payload.type === "custom_tool_call_output") payload.call_id = `batch-${call++}`;
+    }
+    const replay = transformToReplay(parseCodexLines(encode(records)), "codex");
+    expect(replay.meta.stats.userPrompts).toBe(count);
+    expect(replay.meta.stats.toolCalls).toBe(count * 2);
+    expect(replay.meta.stats.automationTriggerCount).toBe(count);
+    expect(replay.scenes.length).toBe(count * 5);
+  });
+});

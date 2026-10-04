@@ -224,6 +224,9 @@ importers:
       '@vibe-replay/provider-core':
         specifier: workspace:*
         version: link:../provider-core
+      acorn:
+        specifier: 8.16.0
+        version: 8.16.0
       sql.js:
         specifier: ^1.14.2
         version: 1.14.2

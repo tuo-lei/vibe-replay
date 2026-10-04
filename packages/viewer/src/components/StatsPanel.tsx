@@ -214,6 +214,13 @@ export default function StatsPanel({ session }: Props) {
 
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-user" />
+        {(meta.stats.automationTriggerCount ?? 0) > 0 && (
+          <StatCard
+            label="Auto Triggers"
+            value={meta.stats.automationTriggerCount!}
+            color="text-terminal-context"
+          />
+        )}
         <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
         <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-tool" />
         <StatCard

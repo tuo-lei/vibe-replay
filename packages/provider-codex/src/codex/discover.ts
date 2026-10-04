@@ -10,6 +10,7 @@ import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
 import {
   CODEX_CONTEXT_TAGS,
   codexStripTwoPass,
+  codexUserMessageSubtype,
   contentText,
   isCodexToolCallType,
 } from "./constants.js";
@@ -175,6 +176,7 @@ async function sessionInfoFromThreadRow(
     firstPrompt,
     prompts,
     promptCount: transcriptStatus === undefined ? extracted?.promptCount : 0,
+    automationTriggerCount: extracted?.automationTriggerCount,
     toolCallCount: extracted?.toolCallCount,
     model: row.model || extracted?.model,
     durationMsEst: extracted?.durationMsEst,
@@ -196,6 +198,8 @@ export async function extractCodexSessionInfo(
   let gitBranch: string | undefined;
   let lineCount = 0;
   let promptCount = 0;
+  let automationTriggerCount = 0;
+  const automationSeen = new Map<string, number[]>();
   let toolCallCount = 0;
   let editCountEst = 0;
   let durationMsEst = 0;
@@ -263,7 +267,7 @@ export async function extractCodexSessionInfo(
 
       if (obj.type === "turn_context") {
         const p = obj.payload || {};
-        model = model || p.model;
+        model = p.model || model;
         continue;
       }
 
@@ -285,9 +289,18 @@ export async function extractCodexSessionInfo(
         if (p.type === "thread_name_updated" && p.thread_name) title = p.thread_name;
         if (p.type === "user_message") {
           const rawText = typeof p.message === "string" ? p.message : "";
-          const cleaned = normalizeDiscoveredUserMessage(rawText);
+          const subtype = codexUserMessageSubtype(rawText);
+          if (
+            subtype === "automation-trigger" &&
+            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "")
+          )
+            automationTriggerCount++;
+          const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
           const imageKey = userImageDedupeKey(p);
-          if (recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)) {
+          if (
+            !codexUserMessageSubtype(rawText) &&
+            recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)
+          ) {
             promptCount++;
           }
         }
@@ -303,9 +316,18 @@ export async function extractCodexSessionInfo(
         if (p.type === "compaction") recordCompaction("codex");
         if (p.type === "message" && p.role === "user") {
           const rawText = contentText(p.content);
-          const cleaned = normalizeDiscoveredUserMessage(rawText);
+          const subtype = codexUserMessageSubtype(rawText);
+          if (
+            subtype === "automation-trigger" &&
+            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "")
+          )
+            automationTriggerCount++;
+          const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
           const imageKey = contentImageDedupeKey(p.content);
-          if (recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)) {
+          if (
+            !codexUserMessageSubtype(rawText) &&
+            recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)
+          ) {
             promptCount++;
           }
         }
@@ -334,7 +356,7 @@ export async function extractCodexSessionInfo(
   const transcriptStatus =
     readFailed || !sawKnownRecord
       ? ("unreadable" as const)
-      : prompts.length === 0
+      : prompts.length === 0 && automationTriggerCount === 0
         ? ("no-prompts" as const)
         : undefined;
   const fallbackStat = timestamp ? undefined : await stat(filePath).catch(() => undefined);
@@ -357,6 +379,7 @@ export async function extractCodexSessionInfo(
     firstPrompt: prompts[0] || "",
     prompts: prompts.length > 0 ? prompts : undefined,
     promptCount,
+    automationTriggerCount,
     toolCallCount,
     model,
     durationMsEst: durationMsEst || undefined,
@@ -496,6 +519,7 @@ function isEditTool(name?: string): boolean {
 }
 
 function normalizeDiscoveredUserMessage(text: string): string {
+  if (codexUserMessageSubtype(text)) return "";
   return cleanPromptText(codexStripTwoPass(text));
 }
 

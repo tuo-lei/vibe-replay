@@ -211,12 +211,13 @@ export function transformToReplay(
             content: redactSecrets(redactPath(content)),
             timestamp: turn.timestamp,
           });
-        } else if (turn.subtype === "context-injection") {
+        } else if (turn.subtype === "context-injection" || turn.subtype === "automation-trigger") {
           scenes.push({
             type: "context-injection",
             content: redactSecrets(redactPath(content)),
             timestamp: turn.timestamp,
-            injectionType: classifyInjection(content),
+            injectionType:
+              turn.subtype === "automation-trigger" ? "automation" : classifyInjection(content),
           });
         } else {
           scenes.push({
@@ -267,6 +268,8 @@ export function transformToReplay(
         scene.timestamp = turn.timestamp;
         scene.isError = !!block._isError;
         scene.hasResult = block._hasResult ?? block._result !== undefined;
+        if (block._isToolContainer) scene.isToolContainer = true;
+        if (block._resultUnavailable) scene.resultUnavailable = true;
         if (block._durationMs) scene.durationMs = block._durationMs;
         if (block._durationSource) scene.durationSource = block._durationSource;
         if (block._durationAnchor) scene.durationAnchor = block._durationAnchor;
@@ -304,7 +307,7 @@ export function transformToReplay(
         }
         if (speakerFields.speaker) scene.speaker = speakerFields.speaker;
         scenes.push(scene);
-        toolCalls++;
+        if (!block._isToolContainer) toolCalls++;
       }
     }
   }
@@ -353,6 +356,8 @@ export function transformToReplay(
       stats: {
         sceneCount: scenes.length,
         userPrompts,
+        automationTriggerCount: parsed.turns.filter((turn) => turn.subtype === "automation-trigger")
+          .length,
         toolCalls,
         thinkingBlocks,
         durationMs,

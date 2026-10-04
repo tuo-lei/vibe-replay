@@ -36,6 +36,7 @@ export interface SessionQueryMatch {
   filePaths: string[];
   toolPaths?: string[];
   promptCount?: number;
+  automationTriggerCount?: number;
   toolCallCount?: number;
   editCount?: number;
   durationMs?: number;
@@ -52,6 +53,7 @@ export interface SessionQueryMatch {
 
 export interface SessionQueryScanSummary {
   promptCount: number;
+  automationTriggerCount?: number;
   toolCallCount: number;
   editCount: number;
   filesModified: Array<{ file: string; count: number }>;
@@ -64,6 +66,7 @@ export interface SessionQueryScanSummary {
   editsPerPrompt?: number;
   medianTurnDurationMs?: number;
   tokenUsage?: SessionScanResult["tokenUsage"];
+  tokenUsageByModel?: SessionScanResult["tokenUsageByModel"];
   contextBreakdown?: SessionScanResult["contextBreakdown"];
   dataQualityNotes?: string[];
 }
@@ -258,6 +261,7 @@ function sessionInfoToMatch(
     filePaths: session.filePaths,
     toolPaths: session.toolPaths,
     promptCount: session.promptCount,
+    automationTriggerCount: session.automationTriggerCount,
     toolCallCount: session.toolCallCount,
     editCount: session.editCountEst,
     durationMs: session.durationMsEst,
@@ -275,6 +279,7 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
   const promptCount = scan.promptCount;
   return {
     promptCount,
+    automationTriggerCount: scan.automationTriggerCount,
     toolCallCount: scan.toolCallCount,
     editCount: scan.editCount,
     filesModified: scan.filesModified.slice(0, 20),
@@ -283,10 +288,13 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
     apiErrorCount: scan.apiErrorCount,
     compactionCount: scan.compactionCount,
     subAgentCount: scan.subAgentCount,
-    toolCallsPerPrompt: ratio(scan.toolCallCount, promptCount),
-    editsPerPrompt: ratio(scan.editCount, promptCount),
+    toolCallsPerPrompt: scan.automationTriggerCount
+      ? undefined
+      : ratio(scan.toolCallCount, promptCount),
+    editsPerPrompt: scan.automationTriggerCount ? undefined : ratio(scan.editCount, promptCount),
     medianTurnDurationMs: median(scan.turnDurations),
     tokenUsage: scan.tokenUsage,
+    tokenUsageByModel: scan.tokenUsageByModel,
     contextBreakdown: scan.contextBreakdown,
     dataQualityNotes: scan.dataQualityNotes,
   };

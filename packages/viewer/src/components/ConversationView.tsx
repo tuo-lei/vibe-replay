@@ -1064,11 +1064,13 @@ const GroupCard = memo(function GroupCard({
       ? `Skill: ${it.slice(6)}`
       : it.startsWith("command:")
         ? `Command: ${it.slice(8)}`
-        : it === "image"
-          ? "Image Injection"
-          : it === "local-command"
-            ? "Local Command"
-            : "System Context";
+        : it === "automation"
+          ? "Automation Trigger"
+          : it === "image"
+            ? "Image Injection"
+            : it === "local-command"
+              ? "Local Command"
+              : "System Context";
     return (
       <div
         id={`scene-${firstIndex}`}

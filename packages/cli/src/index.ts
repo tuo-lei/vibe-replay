@@ -166,7 +166,8 @@ function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
 // keep showing the old exploded paths in the picker.
 // v4 → v5: Codex explicit session_index names supersede generated titles.
 // v5 → v6: provider compaction counts and Cursor storage fingerprints.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v6";
+// v6 → v7: distinguish Codex automation triggers from human prompts.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v7";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";

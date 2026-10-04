@@ -43,7 +43,11 @@ interface Props {
 
 function ToolResultBadge({ scene }: { scene: ToolScene }) {
   if (scene.hasResult === false) {
-    const label = scene.isError ? "no result" : "pending";
+    const label = scene.resultUnavailable
+      ? "not recorded"
+      : scene.isError
+        ? "no result"
+        : "pending";
     return (
       <span
         className="text-[10px] font-mono text-terminal-dimmer shrink-0"
