@@ -231,19 +231,30 @@ async function inferProvider(path: string): Promise<string> {
     const buffer = Buffer.alloc(64_000);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     head = buffer.subarray(0, bytesRead).toString("utf-8");
-    // Grok and Cursor share role/message envelopes. Never infer from a truncated
-    // first record; bootstrap instructions routinely exceed the short probe.
+    // Grok and Cursor share role/message envelopes. Complete the record that
+    // crosses the probe boundary, including after leading progress events.
     if (
       bytesRead === buffer.length &&
-      !head.includes("\n") &&
+      !head.endsWith("\n") &&
       !head.startsWith("SQLite format 3\0")
     ) {
-      const complete = Buffer.alloc(1024 * 1024);
-      const extended = await file.read(complete, 0, complete.length, 0);
-      head = complete.subarray(0, extended.bytesRead).toString("utf-8");
-      if (extended.bytesRead === complete.length && !head.includes("\n")) {
+      const chunks = [buffer.subarray(0, bytesRead)];
+      let offset = bytesRead;
+      const limit = 1024 * 1024;
+      while (offset < limit) {
+        const extra = Buffer.alloc(Math.min(64_000, limit - offset));
+        const next = await file.read(extra, 0, extra.length, offset);
+        if (!next.bytesRead) break;
+        const newline = extra.subarray(0, next.bytesRead).indexOf(10);
+        const count = newline >= 0 ? newline + 1 : next.bytesRead;
+        chunks.push(extra.subarray(0, count));
+        offset += count;
+        if (newline >= 0 || next.bytesRead < extra.length) break;
+      }
+      head = Buffer.concat(chunks).toString("utf-8");
+      if (offset === limit && !head.endsWith("\n")) {
         try {
-          JSON.parse(head);
+          JSON.parse(head.slice(head.lastIndexOf("\n") + 1));
         } catch {
           initialRecordIncomplete = true;
         }
@@ -263,6 +274,16 @@ async function inferProvider(path: string): Promise<string> {
     if (base.includes("hermes")) return "hermes";
   }
   if (sqlite) throw new Error("Could not infer the SQLite provider. Specify --provider <name>.");
+  head = head
+    .split("\n")
+    .filter((line) => {
+      try {
+        return JSON.parse(line)?.type !== "progress";
+      } catch {
+        return true;
+      }
+    })
+    .join("\n");
   if (/"type"\s*:\s*"session_meta"/.test(head)) return "codex";
   if (/"type"\s*:\s*"session"/.test(head) && /"version"\s*:/.test(head)) return "pi";
   if (
@@ -272,7 +293,7 @@ async function inferProvider(path: string): Promise<string> {
     return "claude-code";
   if (initialRecordIncomplete) {
     throw new Error(
-      "The initial source record exceeds the 1 MiB provider-inference limit. Specify --provider <name>.",
+      "A source record crosses the 1 MiB provider-inference limit. Specify --provider <name>.",
     );
   }
   if (looksLikeGrokTranscript(head)) return "grok-bot";
