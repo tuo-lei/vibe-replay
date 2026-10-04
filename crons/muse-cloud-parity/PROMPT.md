@@ -57,9 +57,12 @@ so in your report.
    confirm sessions from the last 14 days are found.
 4. **Integrity.** Stream (never fully load) recent session files. Flag
    corrupt/truncated JSONL lines, sessions that fail to parse, and sessions
-   that are truly empty — a session with zero prompts but one or more tool
-   calls is replayable by design (discovery's predicate), so only flag
-   sessions with neither prompts nor tool calls. Shapes and type names
+   that are truly empty (neither prompts nor tool calls). Separately, flag
+   any zero-prompt-but-tool-calls session as a discovery/generation
+   mismatch: discovery lists it as replayable, but `hasReplayableContent`
+   (`packages/cli/src/server-core.ts`) requires at least one `user-prompt`
+   scene, so generation would reject it — that gap is a parity failure
+   until the CLI actually supports tool-only replays. Shapes and type names
    only — never raw prompts, tool arguments, or tool outputs.
 5. **Drift.** Collect top-level record types, item `type` values, the
    shallow field-name set per type, the tool names actually invoked, and the
@@ -90,9 +93,18 @@ so in your report.
    single most recent one. A green unit suite alone does not
    pass this step — this is the "Lei can actually use Replay on Muse
    sessions" test.
-7. **Fix, test, PR.** Implement the fixes. Before commit: `pnpm lint:check`
-   (fix all errors) and a security review of the diff (no secrets, keys,
-   tokens, credentials). Before PR: `pnpm verify` with sequential stages.
+7. **Fix, test, PR.** Create and switch to a task branch
+   (`git checkout -b <task-branch>`) before editing or committing — never
+   commit fixes on local `main`, or the local checkout diverges from the
+   squash-merged remote `main` and breaks the next run's pull. Implement
+   the fixes. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`)
+   and commit normally so the lefthook pre-commit hook runs — it applies
+   and stages oxlint/oxfmt fixes, which `pnpm lint:check` alone does not.
+   If the hook fails for an environment reason despite pnpm being on PATH,
+   report blocked rather than committing with `--no-verify`. Also do a
+   security review of the diff before commit (no secrets, keys, tokens,
+   credentials). Before PR:
+   `pnpm verify` with sequential stages.
    Open the PR with `~/workspace/skills/github/bin/gh_push_pr.py`, always
    passing `--branch <branch>` explicitly (its default branch is stale).
    Never bump versions or publish.
