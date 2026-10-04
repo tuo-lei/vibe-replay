@@ -218,9 +218,10 @@ function inferenceRecord(line: string): Record<string, any> | undefined {
   }
 }
 
-function looksLikeGrokTranscript(head: string): boolean {
+function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean): boolean {
   let hasMetaWake = false;
   let hasMessageEnvelope = false;
+  let hasCursorToolId = false;
   for (const line of head.split("\n")) {
     try {
       const record = JSON.parse(line);
@@ -244,20 +245,28 @@ function looksLikeGrokTranscript(head: string): boolean {
             typeof block.text === "string" &&
             parseGrokBotMetaWake(block.text) !== null,
         );
-      if (record.role === "assistant")
+      if (record.role === "assistant") {
+        hasCursorToolId ||= blocks.some(
+          (block) =>
+            block?.type === "tool_use" &&
+            typeof block.id === "string" &&
+            block.id.trim().length > 0,
+        );
         hasMessageEnvelope ||= blocks.some(
           (block) =>
             block?.type === "tool_use" &&
             block.name === "send_message" &&
             typeof block.input?.text?.content === "string",
         );
+      }
     } catch {
       /* The bounded header can end halfway through a record. */
     }
   }
-  // Generic wake tags and custom tool names can each occur in Cursor. A bare
-  // wake needs the characteristic Sand reply envelope as a second signal.
-  return hasMetaWake && hasMessageEnvelope;
+  // Cursor's native inline calls use `id`; Sand uses toolCallId or no ID.
+  // That source-format signal and known Cursor paths take precedence over
+  // generic wake tags plus arbitrary custom-tool payloads.
+  return allowMetaWakeInference && !hasCursorToolId && hasMetaWake && hasMessageEnvelope;
 }
 
 async function inferProvider(path: string): Promise<string> {
@@ -336,7 +345,7 @@ async function inferProvider(path: string): Promise<string> {
     )
   )
     return "claude-code";
-  if (looksLikeGrokTranscript(head)) return "grok-bot";
+  if (looksLikeGrokTranscript(head, !cursorPath)) return "grok-bot";
   if (initialRecordIncomplete) {
     throw new Error(
       "A source record crosses the 1 MiB provider-inference limit. Specify --provider <name>.",
