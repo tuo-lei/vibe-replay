@@ -105,6 +105,46 @@ describe("JSONL and Mac replica review regressions", () => {
     ]);
   });
 
+  it("preserves a repeated untimestamped replica turn after one copy matches the base", () => {
+    const turn = () => ({
+      role: "assistant" as const,
+      blocks: [{ type: "text" as const, text: "done" }],
+    });
+    const merged = mergeReplicaTurns([turn()], [turn(), turn()]);
+    expect(merged).toHaveLength(2);
+    expect(
+      merged.flatMap((item) =>
+        item.blocks.flatMap((block) => (block.type === "text" ? [block.text] : [])),
+      ),
+    ).toEqual(["done", "done"]);
+  });
+
+  it("ignores a spend-only replica instead of refreshing an existing session", async () => {
+    const jsonlPath = join(transcripts, agentId, `${agentId}.jsonl`);
+    await writeFile(jsonlPath, JSON.stringify(prompt("hello", "2026-10-03T01:00:00.000Z")));
+    const before = await discoverGrokBotSessions([transcripts], false);
+    expect(before).toHaveLength(1);
+
+    await writeFile(
+      join(persistence, replicaBlobFilename(agentId)),
+      JSON.stringify({
+        value: {
+          entries: [
+            {
+              kind: "spend",
+              timestampMs: Date.parse("2030-01-01T00:00:00.000Z"),
+            },
+          ],
+        },
+      }),
+    );
+
+    const after = await discoverGrokBotSessions([transcripts], false);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.filePaths).toEqual([jsonlPath]);
+    expect(after[0]!.timestamp).toBe(before[0]!.timestamp);
+  });
+
   it("matches discovery prompt counts and previews to the merged replay timeline", async () => {
     await writeSources(
       [prompt("continue", "2026-10-03T02:00:00.000Z")],
