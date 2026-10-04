@@ -708,7 +708,11 @@ async function existingPath(path: string): Promise<string | null> {
  * main DB mtime moves. These paths are triggers only; parsing still goes through
  * the normal SQLite/global-state reader so we keep one source of truth.
  */
-export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<string[]> {
+export function resolveCursorLiveWatchPaths(sessionId: string): Promise<string[]> {
+  return withSqliteSnapshotScope(() => resolveCursorLiveWatchPathsOnce(sessionId));
+}
+
+async function resolveCursorLiveWatchPathsOnce(sessionId: string): Promise<string[]> {
   const paths = new Set<string>();
 
   const addIfExists = async (path: string) => {
@@ -740,7 +744,13 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
   return [...paths];
 }
 
-export async function readCursorLiveDiagnostics(
+export function readCursorLiveDiagnostics(
+  sessionId: string,
+): Promise<CursorLiveDiagnostics | null> {
+  return withSqliteSnapshotScope(() => readCursorLiveDiagnosticsOnce(sessionId));
+}
+
+async function readCursorLiveDiagnosticsOnce(
   sessionId: string,
 ): Promise<CursorLiveDiagnostics | null> {
   const globalStateDb = await openGlobalStateDb();

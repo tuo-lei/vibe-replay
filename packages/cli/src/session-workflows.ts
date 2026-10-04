@@ -271,7 +271,7 @@ function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean):
 
 async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
-  const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
+  const cursorPath = /(?:^|[/\\])(?:\.cursor|Cursor)[/\\]/i.test(base);
   if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
   const file = await open(base, "r");
   let head: string;
@@ -346,13 +346,13 @@ async function inferProvider(path: string): Promise<string> {
   )
     return "claude-code";
   if (looksLikeGrokTranscript(head, !cursorPath)) return "grok-bot";
+  if (cursorPath) return "cursor";
+  if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
   if (initialRecordIncomplete) {
     throw new Error(
       "A source record crosses the 1 MiB provider-inference limit. Specify --provider <name>.",
     );
   }
-  if (cursorPath) return "cursor";
-  if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
   if (
     /\[user\]/.test(head) ||
     (/"role"\s*:\s*"(?:user|assistant)"/.test(head) && /"message"\s*:/.test(head))
