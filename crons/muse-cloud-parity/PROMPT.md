@@ -44,9 +44,11 @@ so in your report.
    actually passed them: the base SHA for a clean run, or the merged PR's
    merge-commit SHA for a run that shipped fixes (the pre-fix base failed
    checks and must never be recorded as verified).
-2. **Build.** After every sync, run `pnpm install` (a reused checkout's
-   `node_modules` can be stale even when present — a pull that only bumps
-   an installed dep would otherwise test the old tree), then `pnpm build`.
+2. **Build.** After every sync, run `pnpm install --frozen-lockfile` (a
+   reused checkout's `node_modules` can be stale even when present — a pull
+   that only bumps an installed dep would otherwise test the old tree; the
+   frozen flag also keeps the run from silently repairing `pnpm-lock.yaml`
+   instead of validating the committed graph), then `pnpm build`.
    The install's EPERM chown of `.modules.yaml` is non-fatal here (exit 0);
    verify with `pnpm build` rather than re-running.
    Environment quirks: if `pnpm` is missing, install the exact pinned
