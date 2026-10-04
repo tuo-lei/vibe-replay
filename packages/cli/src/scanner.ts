@@ -1665,7 +1665,7 @@ function turnToolCallCount(blocks: ContentBlock[]): number {
       block as {
         _subAgent?: {
           usageEvents?: UsageEvent[];
-          scenes?: Array<{ type?: string }>;
+          scenes?: Array<{ type?: string; isToolContainer?: boolean }>;
         };
       }
     )._subAgent;
@@ -1673,7 +1673,9 @@ function turnToolCallCount(blocks: ContentBlock[]): number {
     if (nestedEvents?.length) {
       count += nestedEvents.filter((event) => event.kind === "tool").length;
     } else if (subAgent?.scenes) {
-      count += subAgent.scenes.filter((scene) => scene.type === "tool-call").length;
+      count += subAgent.scenes.filter(
+        (scene) => scene.type === "tool-call" && !scene.isToolContainer,
+      ).length;
     }
   }
   return count;
@@ -1958,7 +1960,7 @@ function buildScanResultFromParsed(
           }
         }
         for (const saScene of block._subAgent.scenes) {
-          if (saScene.type !== "tool-call") continue;
+          if (saScene.type !== "tool-call" || saScene.isToolContainer) continue;
           // When a complete provider-side index exists, it has already
           // contributed the nested call count and usage events above.
           if (!nestedUsageEvents?.length) {

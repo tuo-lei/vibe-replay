@@ -1259,7 +1259,7 @@ function CompactAssistantGroup({
     let subAgentCalls = 0;
     const subAgentTypes: string[] = [];
     for (const { scene } of allScenes) {
-      if (scene.type === "tool-call") {
+      if (scene.type === "tool-call" && !scene.isToolContainer) {
         totalTools++;
         if (scene.toolName === "Agent" && scene.subAgent) {
           subAgentCalls++;
@@ -1567,6 +1567,8 @@ function BatchedScenes({
       prev &&
       prev.scene.type === "tool-call" &&
       item.scene.type === "tool-call" &&
+      !prev.scene.isToolContainer &&
+      !item.scene.isToolContainer &&
       prev.scene.toolName === item.scene.toolName &&
       !item.scene.diff &&
       !item.scene.bashOutput &&

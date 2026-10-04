@@ -2,7 +2,7 @@ import type { Scene } from "../types";
 
 /** Check if a tool-call scene is "simple" (batchable — no diff, no bash output) */
 export function isBatchable(scene: Scene): scene is Extract<Scene, { type: "tool-call" }> {
-  return scene.type === "tool-call" && !scene.diff && !scene.bashOutput;
+  return scene.type === "tool-call" && !scene.isToolContainer && !scene.diff && !scene.bashOutput;
 }
 
 /** Find the end of a consecutive batch of same-name batchable tool calls starting at idx */

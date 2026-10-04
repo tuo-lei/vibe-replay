@@ -236,11 +236,11 @@ export default function SummaryView({ session }: Props) {
             });
             // Count file modifications from sub-agent scenes
             for (const saScene of sa.scenes) {
-              if (saScene.type === "tool-call" && saScene.diff) {
+              if (saScene.type === "tool-call" && !saScene.isToolContainer && saScene.diff) {
                 const f = getFile(saScene.diff.filePath);
                 f.editCount++;
                 const turnIdx = turns.length;
-                f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
+                if (humanTurnActive) f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
                 const oldL = saScene.diff.oldContent
                   ? saScene.diff.oldContent.split("\n").length
                   : 0;

@@ -29,6 +29,31 @@ function session(overrides: Partial<SessionInfo>): SessionInfo {
 }
 
 describe("session query", () => {
+  it.each([0, 1])(
+    "keeps automation-aware brief signals with discovery count %s",
+    async (automationTriggerCount) => {
+      const result = await queryLocalSessions(
+        [
+          session({
+            provider: "codex",
+            filePaths: ["/missing/query-accounting.jsonl"],
+            filePath: "/missing/query-accounting.jsonl",
+            promptCount: 1,
+            toolCallCount: 80,
+            automationTriggerCount,
+          }),
+        ],
+        { brief: true },
+      );
+      expect(result[0]?.brief?.signals.some((signal) => signal.includes("high tool density"))).toBe(
+        automationTriggerCount === 0,
+      );
+      expect(formatSessionQueryText(result).includes("automation triggers: 1")).toBe(
+        automationTriggerCount === 1,
+      );
+    },
+  );
+
   const sessions = [
     session({
       sessionId: "older",

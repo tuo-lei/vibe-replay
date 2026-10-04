@@ -164,7 +164,7 @@ function computeToolStats(scenes: Scene[]): ToolStats {
       responses++;
     } else if (scene.type === "thinking") {
       thinking++;
-    } else if (scene.type === "tool-call") {
+    } else if (scene.type === "tool-call" && !scene.isToolContainer) {
       totalTools++;
       const name = shortToolName(scene.toolName);
       breakdown[name] = (breakdown[name] || 0) + 1;

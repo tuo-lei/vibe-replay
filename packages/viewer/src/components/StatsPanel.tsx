@@ -39,6 +39,7 @@ export default function StatsPanel({ session }: Props) {
           responseChars += scene.content.length;
           break;
         case "tool-call": {
+          if (scene.isToolContainer) break;
           toolCounts.set(scene.toolName, (toolCounts.get(scene.toolName) || 0) + 1);
           const diffs = getToolDiffs(scene);
           if (diffs.length > 0) {
@@ -50,7 +51,11 @@ export default function StatsPanel({ session }: Props) {
             delegatedTools += scene.subAgent.toolCalls;
             // Count file modifications from sub-agent scenes
             for (const saScene of scene.subAgent.scenes) {
-              if (saScene.type === "tool-call" && getToolDiffs(saScene).length > 0) {
+              if (
+                saScene.type === "tool-call" &&
+                !saScene.isToolContainer &&
+                getToolDiffs(saScene).length > 0
+              ) {
                 editCount++;
                 for (const diff of getToolDiffs(saScene)) filesModified.add(diff.filePath);
               }

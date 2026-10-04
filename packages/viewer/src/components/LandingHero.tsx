@@ -37,7 +37,8 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
         continue;
       }
       if (seenPrompts !== 1) continue;
-      if (scene.type === "tool-call") {
+      if (scene.type === "context-injection" && scene.injectionType === "automation") break;
+      if (scene.type === "tool-call" && !scene.isToolContainer) {
         totalTools++;
         const name = scene.toolName.replace(/^mcp__.*__/, "");
         toolBreakdown[name] = (toolBreakdown[name] || 0) + 1;

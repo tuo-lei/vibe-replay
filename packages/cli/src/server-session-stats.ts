@@ -8,7 +8,7 @@ export function countSessionStats(turns: ParsedTurn[]): {
   let promptCount = 0;
   let toolCallCount = 0;
   for (const turn of turns) {
-    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+    if (turn.role === "user" && !turn.subtype) {
       const hasText = turn.blocks.some(
         (block) =>
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
@@ -19,7 +19,7 @@ export function countSessionStats(turns: ParsedTurn[]): {
       if (hasText || hasImages) promptCount++;
     }
     for (const block of turn.blocks) {
-      if (block.type === "tool_use") toolCallCount++;
+      if (block.type === "tool_use" && !block._isToolContainer) toolCallCount++;
     }
   }
   return { promptCount, toolCallCount };
@@ -28,7 +28,7 @@ export function countSessionStats(turns: ParsedTurn[]): {
 export function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[] {
   const prompts: string[] = [];
   for (const turn of turns) {
-    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
+    if (turn.role !== "user" || turn.subtype) continue;
     const text = turn.blocks
       .filter((block) => block.type === "text")
       .map((block) => block.text)

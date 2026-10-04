@@ -298,7 +298,7 @@ export async function extractCodexSessionInfo(
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
           const imageKey = userImageDedupeKey(p);
           if (
-            !codexUserMessageSubtype(rawText) &&
+            !subtype &&
             recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)
           ) {
             promptCount++;
@@ -325,7 +325,7 @@ export async function extractCodexSessionInfo(
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
           const imageKey = contentImageDedupeKey(p.content);
           if (
-            !codexUserMessageSubtype(rawText) &&
+            !subtype &&
             recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)
           ) {
             promptCount++;
