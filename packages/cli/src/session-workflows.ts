@@ -168,6 +168,36 @@ async function inferSqliteProvider(path: string): Promise<string | undefined> {
   }
 }
 
+async function discoverDatabaseSessions(path: string, provider: string): Promise<SessionInfo[]> {
+  if (provider === "hermes") {
+    const { openHermesDb } = await import("@vibe-replay/provider-hermes/sqlite");
+    const { listSessionsFromDb } = await import("@vibe-replay/provider-hermes/discover");
+    const opened = await openHermesDb(path);
+    if (!opened) throw new Error("Cannot read the supplied Hermes database");
+    try {
+      return listSessionsFromDb(opened.db, path);
+    } finally {
+      opened.db.close();
+    }
+  }
+  if (provider === "opencode") {
+    const { openOpencodeDb } = await import("@vibe-replay/provider-opencode/sqlite");
+    const { listSessionsFromDb } = await import("@vibe-replay/provider-opencode/discover");
+    const opened = await openOpencodeDb(path);
+    if (!opened) throw new Error("Cannot read the supplied OpenCode database");
+    try {
+      return listSessionsFromDb(opened.db).map((session) => ({
+        ...session,
+        filePath: `${path}#session:${session.sessionId}`,
+        filePaths: [`${path}#session:${session.sessionId}`],
+      }));
+    } finally {
+      opened.db.close();
+    }
+  }
+  return [];
+}
+
 async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
   const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
@@ -218,6 +248,14 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
         .filter(Boolean)
         .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(base)),
     );
+    if (!matches.length && ["hermes", "opencode"].includes(provider)) {
+      matches.push(...(await discoverDatabaseSessions(resolve(base), provider)));
+      if (!marker && !matches.length)
+        throw new SessionReferenceError(
+          "not-found",
+          "The supplied database has no replayable sessions. Use a #session:<id> marker for a specific session.",
+        );
+    }
     const scoped = options.target
       ? matches.filter(
           (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === options.target,
