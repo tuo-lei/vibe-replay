@@ -24,8 +24,13 @@ export function isCodexToolCallType(type?: string): boolean {
 
 function stripUserMessagePrefix(text: string): string {
   for (const prefix of USER_MESSAGE_PREFIXES) {
-    const idx = text.indexOf(prefix);
-    if (idx !== -1) return text.slice(idx + prefix.length);
+    if (text.startsWith(prefix)) return text.slice(prefix.length);
+  }
+  // File/IDE context is a host envelope. Prefix-looking examples elsewhere in
+  // a human's prose must remain part of that human request.
+  if (/^# (?:Files mentioned by the user|Context from my IDE setup):(?:\r?\n|$)/.test(text)) {
+    const request = /^## My request(?: for Codex)?:/m.exec(text);
+    if (request) return text.slice(request.index + request[0].length);
   }
   return text;
 }

@@ -313,6 +313,74 @@ describe("Codex host accounting", () => {
 });
 
 describe("Codex wrapped triggers and chronological accounting", () => {
+  it.each(["## My request:", "## My request for Codex:"])(
+    "retains a human prompt quoting a request prefix and automation payload: %s",
+    async (prefix) => {
+      const text = `Document this example without changing it:\n${prefix}\nAutomation: Audit\nAutomation ID: audit\nCheck results`;
+      const records = encode([
+        { type: "session_meta", payload: { id: "quoted-request", cwd: "/tmp/project" } },
+        message(text),
+      ]);
+      const replay = transformToReplay(parseCodexLines(records), "codex");
+      expect(replay.meta.stats.userPrompts).toBe(1);
+      expect(replay.meta.stats.automationTriggerCount).toBe(0);
+      expect(replay.scenes).toMatchObject([{ type: "user-prompt", content: text }]);
+      const root = await mkdtemp(join(tmpdir(), "codex-quoted-request-"));
+      try {
+        const path = join(root, "rollout.jsonl");
+        await writeFile(path, records.join("\n"));
+        expect(await extractCodexSessionInfo(path, (await stat(path)).size)).toMatchObject({
+          promptCount: 1,
+          automationTriggerCount: 0,
+          firstPrompt: text.replaceAll("\n", " "),
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([100, 160])(
+    "does not treat an automation snapshot at %s as a final bill for later work",
+    (autoInput) => {
+      const parsed = parseCodexLines(
+        encode([
+          context("model-a"),
+          message("First request"),
+          usage(100, 20, 10),
+          message(heartbeat),
+          context("model-auto"),
+          usage(autoInput, 20, 10),
+          {
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Later automatic work" }],
+            },
+          },
+          message("Second request"),
+          context("model-b"),
+          usage(300, 60, 30),
+          usage(300, 60, 30),
+        ]),
+      );
+      expect(parsed.turnStats?.[1]?.tokenUsage).toBeUndefined();
+      expect(parsed.tokenUsageByModel?.unknown).toEqual({
+        inputTokens: 260 - autoInput,
+        cacheReadTokens: 40,
+        outputTokens: 20,
+        cacheCreationTokens: 0,
+      });
+      expect(parsed.tokenUsage).toEqual({
+        inputTokens: 240,
+        cacheReadTokens: 60,
+        outputTokens: 30,
+        cacheCreationTokens: 0,
+      });
+    },
+  );
+
   it.each([heartbeat, "Automation: Audit\nAutomation ID: audit\nCheck results"])(
     "deduplicates normalized paired automation records and retains a later trigger: %s",
     async (trigger) => {

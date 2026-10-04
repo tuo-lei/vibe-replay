@@ -94,7 +94,7 @@ export function codexUsageByModel(
     notes: [
       ...(snapshots.some((snapshot) => snapshot.attributionGap)
         ? [
-            "Some Codex cumulative token deltas span an automation interval with no usage snapshot; model and human-turn attribution are unknown.",
+            "Some Codex cumulative token deltas span an automation interval with no usage snapshot recording a positive final bill; model and human-turn attribution are unknown.",
           ]
         : []),
       ...(reset

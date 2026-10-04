@@ -606,13 +606,24 @@ export function parseCodexLines(
   const triggerTurns = turns.filter(
     (turn) => turn.role === "user" && (!turn.subtype || turn.subtype === "automation-trigger"),
   );
+  const positiveDeltas = snapshotUsageDeltas(tokenSnapshots).deltas.filter(({ usage }) =>
+    Object.values(usage).some((count) => count > 0),
+  );
+  const changedTotalIndices = new Set(positiveDeltas.map(({ snapshot }) => snapshot.sourceIndex));
   const unreportedAutomationRanges = triggerTurns.flatMap((turn, index) => {
     if (turn.subtype !== "automation-trigger") return [];
     const start = turnOrder.get(turn) ?? 0;
     const next = triggerTurns[index + 1];
     const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
-    const reported = tokenSnapshots.some(
-      (snapshot) => snapshot.total && snapshot.sourceIndex > start && snapshot.sourceIndex < end,
+    const lastActivity = turns.reduce((last, candidate) => {
+      const position = turnOrder.get(candidate) ?? -1;
+      return candidate.role === "assistant" && position > start && position < end
+        ? Math.max(last, position)
+        : last;
+    }, start);
+    const reported = positiveDeltas.some(
+      ({ snapshot, attributable }) =>
+        attributable && snapshot.sourceIndex > lastActivity && snapshot.sourceIndex < end,
     );
     return reported ? [] : [{ start, end }];
   });
@@ -622,9 +633,10 @@ export function parseCodexLines(
     // An ending human snapshot cannot separate an unreported automation bill
     // from that human's work. Keep the aggregate, but not its attribution.
     snapshot.attributionGap = unreportedAutomationRanges.some(
-      (range) => range.start > previousTotalIndex && range.end < snapshot.sourceIndex,
+      (range) => range.end > previousTotalIndex && range.end < snapshot.sourceIndex,
     );
-    previousTotalIndex = snapshot.sourceIndex;
+    // A repeated pre-work snapshot is not a new bill or attribution baseline.
+    if (changedTotalIndices.has(snapshot.sourceIndex)) previousTotalIndex = snapshot.sourceIndex;
   }
   const modelAccounting = codexUsageByModel(tokenSnapshots, tokenUsage);
   const tokenUsageByModel = modelAccounting.usage;
@@ -1129,7 +1141,8 @@ function buildCodexTurnStats(
     );
     if (usageDeltas.length > 0) {
       for (const delta of usageDeltas) addUsage(usage, delta.usage);
-      stat.tokenUsage = usage;
+      if (Object.values(usage).some((count) => count > 0) || !inTurn.some((s) => s.attributionGap))
+        stat.tokenUsage = usage;
     }
     const last = inTurn.at(-1)?.last;
     if (last) stat.contextTokens = last.input_tokens;
