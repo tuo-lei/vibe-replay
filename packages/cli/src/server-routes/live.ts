@@ -109,6 +109,11 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
         return;
       }
 
+      if (providerName === "dot") {
+        await sendError("Live mode is unavailable for dot conversation imports");
+        return;
+      }
+
       const provider = getProvider(providerName);
       if (!provider) {
         await sendError(`Unknown provider: ${providerName}`);

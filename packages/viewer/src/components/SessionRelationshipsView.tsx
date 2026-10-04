@@ -957,9 +957,16 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                 <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
               )}
               <div>
-                {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
-                {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
-                {plural(tooltip.session.toolCallCount, "tool")}
+                {tooltip.session.promptCount}p
+                {tooltip.session.provider === "dot" ? (
+                  " · Tool and edit counts unavailable"
+                ) : (
+                  <>
+                    {" "}
+                    · {tooltip.session.editCount} {plural(tooltip.session.editCount, "edit")} ·{" "}
+                    {tooltip.session.toolCallCount} {plural(tooltip.session.toolCallCount, "tool")}
+                  </>
+                )}
               </div>
               {tooltip.session.gitBranch && (
                 <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>

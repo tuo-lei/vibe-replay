@@ -350,7 +350,7 @@ export function transformToReplay(
       endTime,
       model: parsed.model,
       cwd: redactFilePath(parsed.cwd),
-      project,
+      project: project || (provider === "dot" ? "dot conversations" : project),
       ...(options?.generator ? { generator: options.generator } : {}),
       stats: {
         sceneCount: scenes.length,

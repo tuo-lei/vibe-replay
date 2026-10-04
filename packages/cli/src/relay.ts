@@ -257,8 +257,11 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       existing.viewers.add(subscriber);
       return existing.sceneCount;
     }
-    const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const info = await findSessionInfo(sessionId);
+    if (info?.provider === "dot") {
+      throw new Error("Live mode is unavailable for dot conversation imports");
+    }
+    const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const filePaths = info?.filePaths ?? [];
     const poll = async (): Promise<void> => {
       const tail = tails.get(sessionId);

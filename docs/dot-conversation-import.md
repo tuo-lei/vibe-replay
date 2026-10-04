@@ -157,3 +157,7 @@ authorized to read and share.
 Tests and examples for this provider use synthetic fixtures. They validate this
 bounded import contract; they do not establish compatibility with an unverified
 native dot export or internal session format.
+
+Direct imports use the neutral `dot conversations` project label when no project
+is supplied. Imports are snapshots: live watching and relay tailing are unavailable.
+Timeline tool and edit counts are unavailable, rather than measured zeros.

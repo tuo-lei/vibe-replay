@@ -133,3 +133,12 @@ describe("transformToReplay cost precedence", () => {
     expect(typeof replay.meta.startTime).toBe("string");
   });
 });
+
+it("labels a direct dot import without inventing a working directory", () => {
+  const parsed = makeParsed({ cwd: "" });
+  const replay = transformToReplay(parsed, "dot", "");
+  expect(replay.meta.project).toBe("dot conversations");
+  expect(parsed.cwd).toBe("");
+  expect(transformToReplay(parsed, "codex", "").meta.project).toBe("");
+  expect(transformToReplay(parsed, "dot", "supplied label").meta.project).toBe("supplied label");
+});

@@ -43,3 +43,40 @@ it("does not draw an execution-duration rail from a dot conversation's chat boun
   expect(tooltip?.textContent).not.toContain("→");
   expect(tooltip?.textContent).not.toContain("estimated time");
 });
+
+it("does not present unknown dot tool and edit counts as measured zero", () => {
+  const startTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  vi.mocked(useRelationshipData).mockReturnValue({
+    sessions: [
+      {
+        sessionId: "synthetic-dot-timeline",
+        provider: "dot",
+        project: "dot conversations",
+        slug: "synthetic-dot-timeline",
+        title: "dot conversation",
+        startTime,
+        endTime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        promptCount: 1,
+        toolCallCount: 0,
+        editCount: 0,
+        filesModified: [],
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+      },
+    ],
+    loading: false,
+    error: null,
+  });
+  render(<SessionRelationshipsView view="timeline" />);
+  const bar = screen.getByRole("button", { name: "Open dot conversation" });
+  expect(screen.queryByTitle("actual duration")).toBeNull();
+  fireEvent.mouseEnter(bar, { clientX: 100, clientY: 100 });
+  const tooltip = document.body.querySelector(".fixed");
+  expect(tooltip?.textContent).toContain("Execution duration unavailable");
+  expect(tooltip?.textContent).not.toContain("→");
+  expect(tooltip?.textContent).not.toContain("estimated time");
+  expect(tooltip?.textContent).not.toContain("0 edits");
+  expect(tooltip?.textContent).not.toContain("0 tools");
+  expect(tooltip?.textContent).toContain("Tool and edit counts unavailable");
+});

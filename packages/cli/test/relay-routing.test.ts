@@ -766,3 +766,29 @@ describe("shipper viewer presence", () => {
     }
   });
 });
+
+it("rejects a dot snapshot tail command with a clear availability error", async () => {
+  providerState.sessionInfo.provider = "dot";
+  try {
+    void startTestRelay();
+    await waitFor(() => FakeSocket.instances.length > 0, "shipper dials out");
+    const sock = FakeSocket.instances[0]!;
+    sock.onopen!();
+    sock.onmessage!({
+      data: JSON.stringify({
+        t: "frame",
+        iv: "mock-iv",
+        via: "viewer-dot",
+        data: JSON.stringify({ seq: 99, cmd: "tail", id: "sess-1" }),
+      }),
+    });
+    await waitFor(() => sock.sent.length > 1, "tail rejection");
+    expect(JSON.parse(lastOuter(sock).data as string)).toEqual({
+      seq: 99,
+      ok: false,
+      error: "Live mode is unavailable for dot conversation imports",
+    });
+  } finally {
+    providerState.sessionInfo.provider = "fake";
+  }
+});
