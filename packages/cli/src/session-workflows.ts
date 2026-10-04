@@ -196,6 +196,27 @@ async function discoverDatabaseSessions(path: string, provider: string): Promise
   return [];
 }
 
+/** Read complete records, or only complete scalar root fields of a bounded partial record. */
+function inferenceRecord(line: string): Record<string, any> | undefined {
+  try {
+    const record = JSON.parse(line);
+    return record && typeof record === "object" && !Array.isArray(record) ? record : undefined;
+  } catch {
+    // Format headers precede nested message/payload bodies. This anchored prefix
+    // cannot mistake a nested tool payload or progress artifact for a header.
+    const prefix =
+      /^\s*\{\s*(?:"(?:[^"\\]|\\.)*"\s*:\s*(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)\s*,\s*)*/.exec(
+        line,
+      )?.[0];
+    if (!prefix) return undefined;
+    try {
+      return JSON.parse(`${prefix.replace(/,\s*$/, "")}}`);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 function looksLikeGrokTranscript(head: string): boolean {
   for (const line of head.split("\n")) {
     try {
@@ -278,25 +299,30 @@ async function inferProvider(path: string): Promise<string> {
     .split("\n")
     .filter((line) => {
       try {
-        return JSON.parse(line)?.type !== "progress";
+        return inferenceRecord(line)?.type !== "progress";
       } catch {
         return true;
       }
     })
     .join("\n");
-  if (/"type"\s*:\s*"session_meta"/.test(head)) return "codex";
-  if (/"type"\s*:\s*"session"/.test(head) && /"version"\s*:/.test(head)) return "pi";
+  const headers = head.split("\n").map(inferenceRecord).filter(Boolean);
+  if (headers.some((record) => record?.type === "session_meta")) return "codex";
+  if (headers.some((record) => record?.type === "session" && record.version !== undefined))
+    return "pi";
   if (
-    /"type"\s*:\s*"(?:user|assistant|system)"/.test(head) &&
-    /"(?:sessionId|uuid)"\s*:/.test(head)
+    headers.some(
+      (record) =>
+        ["user", "assistant", "system"].includes(record?.type) &&
+        (typeof record?.sessionId === "string" || typeof record?.uuid === "string"),
+    )
   )
     return "claude-code";
+  if (looksLikeGrokTranscript(head)) return "grok-bot";
   if (initialRecordIncomplete) {
     throw new Error(
       "A source record crosses the 1 MiB provider-inference limit. Specify --provider <name>.",
     );
   }
-  if (looksLikeGrokTranscript(head)) return "grok-bot";
   if (cursorPath) return "cursor";
   if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
   if (
