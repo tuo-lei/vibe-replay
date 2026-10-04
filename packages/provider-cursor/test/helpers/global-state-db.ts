@@ -1,5 +1,7 @@
 import initSqlJs from "sql.js";
 
+export const testSqlite = initSqlJs;
+
 export const GLOBAL_STATE_IDS = [
   "11111111-1111-4111-8111-111111111111",
   "22222222-2222-4222-8222-222222222222",

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, posix, win32 } from "node:path";
+import { basename, dirname, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type {
   ContextBreakdown,
@@ -516,8 +516,8 @@ async function loadComposerHeaders(
   return headers;
 }
 
-async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
-  const dbPath = await findGlobalStateDb();
+async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalStateDb | null> {
+  const dbPath = explicitPath || (await findGlobalStateDb());
   if (!dbPath) return null;
 
   const dbStat = await stat(dbPath).catch(() => null);
@@ -1716,9 +1716,10 @@ export async function discoverGlobalStateOnlySessions(
   knownSessionIds: Set<string>,
   decodedWorkspacePaths: string[] = [],
   options: ProviderDiscoveryOptions = {},
+  explicitPath?: string,
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
-  const globalStateDb = await openGlobalStateDb();
+  const globalStateDb = await openGlobalStateDb(explicitPath);
   if (!globalStateDb) return { sessions: [], sessionIds, allSessions: [] };
   const { dbPath } = globalStateDb;
   const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
@@ -2023,10 +2024,116 @@ function extractChildBlobIds(data: Uint8Array): string[] {
   return ids;
 }
 
+/** Enumerate an explicitly supplied SQLite copy without consulting native stores. */
+export async function discoverCursorDatabaseSessions(dbPath: string): Promise<SessionInfo[]> {
+  const handle = await openGlobalStateDb(dbPath);
+  if (!handle) throw new Error("Cannot read the supplied Cursor database");
+  const tables = new Set(
+    (await queryGlobalStateRows(handle, "SELECT name FROM sqlite_master WHERE type = 'table'")).map(
+      (row) => row.name,
+    ),
+  );
+  if (tables.has("cursorDiskKV")) {
+    const result = await discoverGlobalStateOnlySessions(new Set(), [], { readOnly: true }, dbPath);
+    return result.allSessions.map((session) => ({ ...session, sourceDatabasePath: dbPath }));
+  }
+  if (tables.has("meta") && tables.has("blobs")) {
+    const preview = await readStoreDbMeta(dbPath);
+    if (!preview?.hasReplayableRoot || !preview.meta.agentId) return [];
+    const id = preview.meta.agentId;
+    return [
+      {
+        provider: "cursor",
+        sessionId: id,
+        slug: id.slice(0, 8),
+        title: preview.meta.name,
+        project: "",
+        cwd: "",
+        version: "",
+        timestamp: toIsoTimestamp(preview.meta.createdAt) || new Date(handle.mtimeMs).toISOString(),
+        filePath: dbPath,
+        filePaths: [dbPath],
+        fileSize: handle.size,
+        lineCount: 0,
+        firstPrompt: preview.meta.name || "(sqlite-only session)",
+        hasSqlite: true,
+        sourceDatabasePath: dbPath,
+      },
+    ];
+  }
+  if (tables.has("agents") && tables.has("runs") && tables.has("run_events")) {
+    const agents = await queryGlobalStateRows(
+      handle,
+      "SELECT agent_id, workspace_ref, name, created_at, updated_at FROM agents",
+    );
+    const sessions: SessionInfo[] = [];
+    for (const row of agents) {
+      const id = typeof row.agent_id === "string" ? row.agent_id : "";
+      if (!id) continue;
+      const cwd = typeof row.workspace_ref === "string" ? row.workspace_ref : "";
+      const folder = dirname(dbPath);
+      const roots = [folder];
+      if (basename(dirname(folder)) === "sdk-agent-store") roots.push(dirname(dirname(folder)));
+      const candidates = /^[A-Za-z0-9_-]+$/.test(id)
+        ? roots.flatMap((root) => [
+            join(root, `${id}.jsonl`),
+            join(root, "agent-transcripts", id, `${id}.jsonl`),
+          ])
+        : [];
+      let transcript: string | undefined;
+      for (const candidate of candidates)
+        if ((await stat(candidate).catch(() => null))?.isFile()) {
+          transcript = candidate;
+          break;
+        }
+      const marker = `${dbPath}#session:${id}`;
+      sessions.push({
+        provider: "cursor",
+        sessionId: id,
+        slug: id.slice(0, 8),
+        title: typeof row.name === "string" ? row.name : undefined,
+        cwd,
+        project: shortenPath(cwd),
+        version: "",
+        timestamp:
+          typeof row.updated_at === "string"
+            ? row.updated_at
+            : new Date(handle.mtimeMs).toISOString(),
+        filePath: marker,
+        filePaths: transcript ? [transcript] : [marker],
+        fileSize: handle.size,
+        lineCount: 0,
+        firstPrompt: "",
+        hasSqlite: false,
+        hasSdk: true,
+        sourceDatabasePath: dbPath,
+        ...(transcript ? {} : { transcriptStatus: "no-prompts" as const }),
+      });
+    }
+    return sessions;
+  }
+  throw new Error("Unsupported explicit Cursor database schema");
+}
+
 export async function parseCursorSqlite(
   workspacePath: string,
   sessionId: string,
+  explicitPath?: string,
 ): Promise<ProviderParseResult | null> {
+  if (explicitPath) {
+    const handle = await openGlobalStateDb(explicitPath);
+    if (!handle) return null;
+    const tables = new Set(
+      (
+        await queryGlobalStateRows(handle, "SELECT name FROM sqlite_master WHERE type = 'table'")
+      ).map((row) => row.name),
+    );
+    if (tables.has("meta") && tables.has("blobs"))
+      return parseCursorStoreDb(sessionId, workspacePath, explicitPath);
+    if (tables.has("cursorDiskKV"))
+      return parseCursorGlobalStateDb(sessionId, handle, workspacePath);
+    throw new Error("Unsupported explicit Cursor database schema");
+  }
   const storeResult = await parseCursorStoreDb(sessionId, workspacePath);
   if (storeResult) {
     // sql.js needs the whole DB loaded into memory, so the first global-state probe is expensive.
@@ -2051,8 +2158,9 @@ export async function parseCursorSqlite(
 async function parseCursorStoreDb(
   sessionId: string,
   workspacePath = "",
+  explicitPath?: string,
 ): Promise<ProviderParseResult | null> {
-  const dbPath = await findStoreDb(sessionId);
+  const dbPath = explicitPath || (await findStoreDb(sessionId));
   if (!dbPath) return null;
 
   if (await canUseSqliteCli(dbPath)) {

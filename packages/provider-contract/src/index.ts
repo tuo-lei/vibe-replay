@@ -77,6 +77,8 @@ export interface SessionInfo {
   workspacePath?: string; // absolute workspace path for Cursor lookup
   hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
   hasSdk?: boolean; // true if a Cursor SDK agent record exists in sdk-agent-store/index.db
+  /** Explicit Cursor database input; parse/enrich only this source, never the configured stores. */
+  sourceDatabasePath?: string;
   /** Canonical project/workspace identity for dashboard aggregation. */
   projectIdentity?: ProjectIdentity;
   /** Provider-native group/room identity when a display title is not unique. */

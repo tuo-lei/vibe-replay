@@ -225,6 +225,10 @@ npx vibe-replay share ./replay --visibility unlisted --json
 References accept full IDs, unique prefixes of at least four characters, and source paths.
 Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
 selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+Copied SQLite databases use their own contents, with a session marker required
+when they contain multiple sessions. Cursor SDK database copies also need the
+agent's JSONL transcript beside the database (or its `agent-transcripts` folder)
+to supply user prompts.
 `doctor --json` reports provider coverage and compatibility failures. Search output
 marks partial discovery, and empty results include recovery suggestions.
 

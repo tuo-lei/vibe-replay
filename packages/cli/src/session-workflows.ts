@@ -168,7 +168,23 @@ async function inferSqliteProvider(path: string): Promise<string | undefined> {
   }
 }
 
+async function isSqliteFile(path: string): Promise<boolean> {
+  const file = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(16);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return bytesRead === 16 && buffer.toString("utf-8") === "SQLite format 3\0";
+  } finally {
+    await file.close();
+  }
+}
+
 async function discoverDatabaseSessions(path: string, provider: string): Promise<SessionInfo[]> {
+  if (provider === "cursor") {
+    const { discoverCursorDatabaseSessions } =
+      await import("@vibe-replay/provider-cursor/sqlite-reader");
+    return discoverCursorDatabaseSessions(path);
+  }
   if (provider === "hermes") {
     const { openHermesDb } = await import("@vibe-replay/provider-hermes/sqlite");
     const { listSessionsFromDb } = await import("@vibe-replay/provider-hermes/discover");
@@ -257,7 +273,9 @@ export async function resolveCliSource(
         .filter(Boolean)
         .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(base)),
     );
-    if (!matches.length && ["hermes", "opencode"].includes(provider)) {
+    const explicitDatabase =
+      ["hermes", "opencode", "cursor"].includes(provider) && (await isSqliteFile(base));
+    if (!matches.length && explicitDatabase) {
       matches.push(...(await discoverDatabaseSessions(resolve(base), provider)));
       if (!marker && !matches.length)
         throw new SessionReferenceError(
@@ -265,6 +283,9 @@ export async function resolveCliSource(
           "The supplied database has no replayable sessions. Use a #session:<id> marker for a specific session.",
         );
     }
+    if (provider === "cursor" && explicitDatabase)
+      for (let index = 0; index < matches.length; index++)
+        matches[index] = { ...matches[index], sourceDatabasePath: resolve(base) };
     const scoped = options.target
       ? matches.filter(
           (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === options.target,
@@ -315,13 +336,25 @@ export async function resolveCliSessionInfo(
   discovery?: Awaited<ReturnType<typeof discoverCliSessions>>,
 ): Promise<SessionInfo> {
   const source = await resolveCliSource(ref, options, discovery);
-  if (source.info) return source.info;
-  const parsed = await getProvider(source.provider)!.parse(source.paths);
+  if (source.info && !(source.info.sourceDatabasePath && !source.info.transcriptStatus))
+    return source.info;
+  const parsed = await getProvider(source.provider)!.parse(source.paths, source.info);
   const replay = transformToReplay(parsed, source.provider, shortenPath(parsed.cwd));
   if (!hasReplayableContent(replay)) throw new Error("This session has no replayable user prompts");
   const prompts = replay.scenes
     .filter((scene) => scene.type === "user-prompt")
     .map((scene) => scene.content);
+  if (source.info?.sourceDatabasePath && !source.info.hasSdk)
+    return {
+      ...source.info,
+      title: parsed.title || source.info.title,
+      firstPrompt: prompts[0] || "",
+      prompts,
+      promptCount: prompts.length,
+      toolCallCount: replay.meta.stats.toolCalls,
+      compactionCount: parsed.compactions?.length || 0,
+      model: parsed.model,
+    };
   const files = await Promise.all(
     source.paths.map(async (path) => ({
       metadata: await stat(path),
@@ -337,7 +370,7 @@ export async function resolveCliSessionInfo(
     cwd: parsed.cwd,
     version: "",
     timestamp: parsed.endTime || parsed.startTime || files[0].metadata.mtime.toISOString(),
-    filePath: source.paths[0],
+    filePath: source.info?.filePath || source.paths[0],
     filePaths: source.paths,
     lineCount: files.reduce(
       (count, file) => count + file.text.split("\n").filter((line) => line.trim()).length,
@@ -353,7 +386,9 @@ export async function resolveCliSessionInfo(
     model: parsed.model,
     gitBranch: parsed.gitBranch,
     gitRepo: parsed.gitRepo,
-    hasSqlite: false,
+    hasSqlite: source.info?.hasSqlite || false,
+    hasSdk: source.info?.hasSdk,
+    sourceDatabasePath: source.info?.sourceDatabasePath,
   };
 }
 
@@ -472,7 +507,11 @@ export async function loadCliSession(
     }
   }
   if (source.info?.transcriptStatus)
-    throw new Error(`Session transcript is ${source.info.transcriptStatus}`);
+    throw new Error(
+      source.info.hasSdk && source.info.sourceDatabasePath
+        ? "The SDK database has no companion transcript with user prompts. Copy the agent's JSONL transcript beside the supplied database."
+        : `Session transcript is ${source.info.transcriptStatus}`,
+    );
   if (source.info?.location?.kind === "ssh") await hydrateCachedRemoteHomes();
   const parsed = await getProvider(source.provider)!.parse(source.paths, source.info);
   const replay = transformToReplay(
