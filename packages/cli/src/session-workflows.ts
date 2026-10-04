@@ -219,6 +219,8 @@ function inferenceRecord(line: string): Record<string, any> | undefined {
 }
 
 function looksLikeGrokTranscript(head: string): boolean {
+  let hasMetaWake = false;
+  let hasMessageEnvelope = false;
   for (const line of head.split("\n")) {
     try {
       const record = JSON.parse(line);
@@ -231,16 +233,31 @@ function looksLikeGrokTranscript(head: string): boolean {
             block?.type === "text" &&
             typeof block.text === "string" &&
             (/^\s*\[SAND_HIDDEN_PROMPT\]/.test(block.text) ||
-              /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text) ||
-              parseGrokBotMetaWake(block.text) !== null),
+              /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text)),
         )
       )
         return true;
+      if (record.role === "user")
+        hasMetaWake ||= blocks.some(
+          (block) =>
+            block?.type === "text" &&
+            typeof block.text === "string" &&
+            parseGrokBotMetaWake(block.text) !== null,
+        );
+      if (record.role === "assistant")
+        hasMessageEnvelope ||= blocks.some(
+          (block) =>
+            block?.type === "tool_use" &&
+            block.name === "send_message" &&
+            typeof block.input?.text?.content === "string",
+        );
     } catch {
       /* The bounded header can end halfway through a record. */
     }
   }
-  return false;
+  // Generic wake tags and custom tool names can each occur in Cursor. A bare
+  // wake needs the characteristic Sand reply envelope as a second signal.
+  return hasMetaWake && hasMessageEnvelope;
 }
 
 async function inferProvider(path: string): Promise<string> {

@@ -1413,7 +1413,7 @@ program
               readOnly: opts.dryRun,
               provider: normalizeCommandProviderOption(opts.provider, command),
             });
-            shareSourceDir = loaded.outputDir;
+            shareSourceDir = loaded.publicationDir;
             outputDir = join(loaded.outputDir, "share");
             if (opts.dryRun) {
               printWorkflowResult(
