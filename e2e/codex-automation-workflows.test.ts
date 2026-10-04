@@ -60,6 +60,8 @@ it("accepts copied automation-only Codex sessions with zero human prompts", asyn
       (await run(["export", source, "--format", "json", "--stdout"])).stdout,
     );
     expect(exported.meta.stats).toMatchObject({ userPrompts: 0, automationTriggerCount: 1 });
+    const markdown = await run(["export", source, "--stdout"]);
+    expect(markdown.stdout).toContain("Automation: Check the current PR.");
     expect(JSON.parse((await run(["share", source, "--dry-run", "--json"])).stdout)).toMatchObject({
       sessionId: "automation-only",
       uploaded: false,

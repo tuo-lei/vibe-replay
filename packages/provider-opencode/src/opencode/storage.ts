@@ -1,22 +1,23 @@
 /// <reference path="../sql-js.d.ts" />
 import type { Database } from "sql.js";
 
-const prepared = new WeakSet<Database>();
+const prepared = new WeakMap<Database, { all: boolean; sessions: Set<string> }>();
 
 function object(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 /** Adapt the v2 store inside the WASM snapshot only; never write the source DB. */
-export function prepareOpencodeStorage(db: Database): void {
-  if (prepared.has(db)) return;
+export function prepareOpencodeStorage(db: Database, sessionId?: string): void {
+  const previous = prepared.get(db);
+  if (previous?.all || (sessionId && previous?.sessions.has(sessionId))) return;
   const tables = new Set(
     db.exec("SELECT name FROM sqlite_master WHERE type = 'table'")[0]?.values.map((r) => r[0]),
   );
   const hasV2 = tables.has("session_v2") && tables.has("session_message");
   const hasLegacy = tables.has("session") && tables.has("message") && tables.has("part");
   if (!hasV2 && hasLegacy) {
-    prepared.add(db);
+    prepared.set(db, { all: true, sessions: new Set() });
     return;
   }
   if (!hasV2) {
@@ -25,10 +26,6 @@ export function prepareOpencodeStorage(db: Database): void {
     );
   }
 
-  const rows =
-    db.exec(
-      "SELECT id, session_id, type, seq, time_created, data FROM session_message ORDER BY session_id, seq",
-    )[0]?.values || [];
   const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
   const v2Columns = db
     .exec("PRAGMA main.table_info(session_v2)")[0]
@@ -41,18 +38,31 @@ export function prepareOpencodeStorage(db: Database): void {
        FROM main.session s WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = s.id)`
     : "";
   db.run(`
-    CREATE TEMP VIEW session AS SELECT * FROM main.session_v2 ${legacySessions};
-    CREATE TEMP TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, seq INTEGER, data TEXT);
-    CREATE TEMP TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+    CREATE TEMP VIEW IF NOT EXISTS session AS SELECT * FROM main.session_v2 ${legacySessions};
+    CREATE TEMP TABLE IF NOT EXISTS message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, seq INTEGER, data TEXT);
+    CREATE TEMP TABLE IF NOT EXISTS part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
   `);
   if (hasLegacy) {
     // Retain legacy-only sessions; a v2 session ID owns its complete trajectory.
-    db.run(`INSERT INTO temp.message
+    db.run(
+      `INSERT OR IGNORE INTO temp.message
       SELECT id, session_id, time_created, time_created, data FROM main.message m
-      WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = m.session_id);
-      INSERT INTO temp.part SELECT id, message_id, session_id, time_created, data FROM main.part p
-      WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = p.session_id);`);
+      WHERE ${sessionId ? "m.session_id = ? AND" : ""} NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = m.session_id)`,
+      sessionId ? [sessionId] : [],
+    );
+    db.run(
+      `INSERT OR IGNORE INTO temp.part SELECT id, message_id, session_id, time_created, data FROM main.part p
+      WHERE ${sessionId ? "p.session_id = ? AND" : ""} NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = p.session_id)`,
+      sessionId ? [sessionId] : [],
+    );
   }
+  const rows =
+    db.exec(
+      `SELECT id, session_id, type, seq, time_created, data FROM main.session_message m
+    WHERE ${sessionId ? "session_id = ? AND" : ""} NOT EXISTS (SELECT 1 FROM temp.message converted WHERE converted.id = m.id)
+    ORDER BY session_id, seq`,
+      sessionId ? [sessionId] : [],
+    )[0]?.values || [];
   const message = db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)");
   const part = db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?)");
   const insert = (statement: ReturnType<Database["prepare"]>, values: any[]) => {
@@ -196,7 +206,10 @@ export function prepareOpencodeStorage(db: Database): void {
         ]),
       );
     }
-    prepared.add(db);
+    const state = previous || { all: false, sessions: new Set<string>() };
+    if (sessionId) state.sessions.add(sessionId);
+    else state.all = true;
+    prepared.set(db, state);
   } finally {
     message.free();
     part.free();

@@ -251,9 +251,20 @@ export function extractPhases(scenes: Scene[], provider?: string): Phase[] {
   let current: { prompt: string; rawActions: RawAction[]; scenes: Scene[] } | null = null;
 
   for (const scene of scenes) {
-    if (scene.type === "user-prompt") {
+    const automation =
+      provider === "codex" &&
+      scene.type === "context-injection" &&
+      scene.injectionType === "automation";
+    if (scene.type === "user-prompt" || automation) {
       // Skip system-generated messages (e.g. <bash-stdout>, <task-notification>)
-      const prompt = provider === "codex" ? codexStripTwoPass(scene.content) : scene.content;
+      const cleaned = provider === "codex" ? codexStripTwoPass(scene.content) : scene.content;
+      const instruction = automation
+        ? cleaned.match(/<instructions>([\s\S]*?)<\/instructions>/)?.[1]?.trim() || cleaned
+        : cleaned;
+      const prompt =
+        automation && !instruction.startsWith("Automation:")
+          ? `Automation: ${instruction}`
+          : instruction;
       if (!prompt || isSystemGeneratedMessage(prompt)) continue;
       if (current) {
         phases.push({

@@ -48,6 +48,69 @@ function add(
 }
 
 describe("OpenCode v2 storage compatibility", () => {
+  it("adapts only the selected session and attached child, then expands discovery without duplicates", async () => {
+    const db = await v2Db();
+    try {
+      db.run(
+        "INSERT INTO session_v2 VALUES ('ses_history', NULL, 'history', 'History', '/repo', '2.0.22', NULL, 0, 1, 2)",
+      );
+      add(db, "parent-user", "user", 0, { text: "Run selected task" });
+      add(db, "parent-task", "assistant", 1, {
+        content: [
+          {
+            type: "tool",
+            id: "task-call",
+            name: "task",
+            state: {
+              status: "completed",
+              input: { prompt: "Check child" },
+              metadata: { sessionId: "ses_child" },
+              content: [{ type: "text", text: "Done" }],
+            },
+          },
+        ],
+      });
+      add(
+        db,
+        "child-answer",
+        "assistant",
+        0,
+        { content: [{ type: "text", text: "Child completed" }] },
+        "ses_child",
+      );
+      for (let index = 0; index < 200; index++)
+        add(
+          db,
+          `history-${index}`,
+          "user",
+          index,
+          { text: `Unrelated history ${index} ${"x".repeat(1000)}` },
+          "ses_history",
+        );
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.turns[1].blocks[0]).toMatchObject({
+        type: "tool_use",
+        _subAgent: { agentId: "ses_child", textResponses: 1 },
+      });
+      expect(
+        db.exec("SELECT DISTINCT session_id FROM temp.message ORDER BY session_id")[0].values,
+      ).toEqual([["ses_child"], ["ses_parent"]]);
+      expect(db.exec("SELECT COUNT(*) FROM temp.message")[0].values).toEqual([[3]]);
+      parseSessionFromDb(db, "ses_parent");
+      expect(db.exec("SELECT COUNT(*) FROM temp.message")[0].values).toEqual([[3]]);
+      expect(
+        listSessionsFromDb(db)
+          .map((session) => session.sessionId)
+          .sort(),
+      ).toEqual(["ses_history", "ses_parent"]);
+      expect(db.exec("SELECT COUNT(*) FROM temp.message")[0].values).toEqual([[203]]);
+      expect(db.exec("SELECT COUNT(*) FROM main.session_message")[0].values).toEqual([[203]]);
+      expect(parseSessionFromDb(db, "ses_history").turns).toHaveLength(200);
+    } finally {
+      db.close();
+    }
+  });
+
   it("discovers real prompts, counts tools/compactions, and keeps system/synthetic messages and children out of the picker", async () => {
     const db = await v2Db();
     try {

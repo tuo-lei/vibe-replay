@@ -193,7 +193,7 @@ export function parseSessionFromDb(
   sessionInfo?: SessionInfo,
   dbPath?: string,
 ): ProviderParseResult {
-  prepareOpencodeStorage(db);
+  prepareOpencodeStorage(db, sessionId);
   const session = firstValue(db, `SELECT * FROM session WHERE id = ?`, {
     sid: sessionId,
   }) as SessionMetaRow | null;
@@ -651,6 +651,7 @@ function buildSubAgentFromChildSession(
   block: Extract<ContentBlock, { type: "tool_use" }>,
   warnings: NonNullable<ProviderParseResult["parseWarnings"]>,
 ): SubAgent | undefined {
+  prepareOpencodeStorage(db, call.sessionId);
   const childMessages = rowValues(
     db,
     `
