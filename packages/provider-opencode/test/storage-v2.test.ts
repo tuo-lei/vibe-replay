@@ -1,5 +1,6 @@
 import initSqlJs, { type Database } from "sql.js";
 import { describe, expect, it } from "vitest";
+import type { ContentBlock } from "@vibe-replay/provider-contract";
 import { listSessionsFromDb } from "../src/opencode/discover.js";
 import { parseSessionFromDb } from "../src/opencode/parser.js";
 
@@ -266,6 +267,109 @@ describe("OpenCode v2 storage compatibility", () => {
       ]);
       expect(parsed.startTime).toBe("2027-01-15T08:00:01.000Z");
       expect(parsed.endTime).toBe("2027-01-15T08:00:09.000Z");
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    ["exited", 0, false, true],
+    ["exited", 1, true, true],
+    ["timeout", undefined, true, true],
+    ["killed", undefined, true, true],
+    ["running", undefined, false, false],
+  ])(
+    "normalizes paged shell output and %s/exit=%s status",
+    async (status, exit, failed, hasResult) => {
+      const db = await v2Db();
+      try {
+        add(db, "u", "user", 0, { text: "Run tests" });
+        add(db, "shell", "shell", 1, {
+          shellID: "sh-test",
+          command: "pnpm test",
+          status,
+          exit,
+          output: { output: "shell result", cursor: 12, size: 12, truncated: false },
+        });
+        const parsed = parseSessionFromDb(db, "ses_parent");
+        const block = parsed.turns[1].blocks[0] as Extract<ContentBlock, { type: "tool_use" }>;
+        expect(block).toMatchObject({
+          type: "tool_use",
+          id: "sh-test",
+          name: "Bash",
+          _hasResult: hasResult,
+        });
+        expect(block._result).toBe(hasResult ? "shell result" : undefined);
+        expect(block._isError).toBe(failed ? true : undefined);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("keeps legacy shell strings and distinct invocation IDs", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, { text: "Run" });
+      add(db, "old-shell", "shell", 1, { callID: "legacy-call", command: "pwd", output: "/repo" });
+      add(db, "new-shell", "shell", 2, {
+        shellID: "sh-new",
+        command: "pwd",
+        status: "exited",
+        exit: 0,
+        output: { output: "/repo", cursor: 5, size: 5, truncated: false },
+      });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.turns.slice(1).map((t) => t.blocks[0])).toMatchObject([
+        { id: "legacy-call", _result: "/repo" },
+        { id: "sh-new", _result: "/repo" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("counts completed compactions only and retains failure evidence and separate usage", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, { text: "Inspect" });
+      add(db, "a", "assistant", 1, {
+        model: { id: "model-v2" },
+        content: [{ type: "text", text: "Inspecting" }],
+        tokens: { input: 10, output: 20 },
+      });
+      add(db, "complete", "compaction", 2, {
+        status: "completed",
+        reason: "manual",
+        model: { id: "model-v2" },
+        summary: "Summary",
+        tokens: { input: 5, output: 7 },
+        cost: 0.1,
+      });
+      add(db, "failed", "compaction", 3, {
+        status: "failed",
+        reason: "auto",
+        error: { type: "APIError", message: "SECRET COMPACTION ERROR" },
+        tokens: { input: 2, output: 3 },
+      });
+      add(db, "running", "compaction", 4, {
+        status: "running",
+        reason: "auto",
+        summary: "Pending",
+      });
+      expect(listSessionsFromDb(db)[0].compactionCount).toBe(1);
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.compactions).toHaveLength(1);
+      expect(parsed.turns).toHaveLength(2);
+      expect(parsed.diagnostics).toMatchObject([
+        { kind: "compaction", outcome: "succeeded", trigger: "manual" },
+        { kind: "compaction", outcome: "failed", errorType: "APIError" },
+      ]);
+      expect(JSON.stringify(parsed.diagnostics)).not.toContain("SECRET COMPACTION ERROR");
+      expect(parsed.diagnosticNotes?.[0]).toContain("still running");
+      expect(parsed.tokenUsage).toMatchObject({ inputTokens: 17, outputTokens: 30 });
+      expect(parsed.apiErrors).toBeUndefined();
+      expect(parsed.turnStats?.[0].tokenUsage).toMatchObject({ inputTokens: 10, outputTokens: 20 });
     } finally {
       db.close();
     }

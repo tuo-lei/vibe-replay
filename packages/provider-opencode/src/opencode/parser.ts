@@ -8,7 +8,7 @@ import type {
   ProviderParseResult,
   TokenUsage,
 } from "@vibe-replay/provider-contract";
-import type { SubAgent, UsageEvent } from "@vibe-replay/types";
+import type { SessionDiagnostic, SubAgent, UsageEvent } from "@vibe-replay/types";
 import { normalizeSubAgentType } from "@vibe-replay/provider-contract";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
 import { prepareOpencodeStorage, opencodeMessageOrder } from "./storage.js";
@@ -95,6 +95,10 @@ interface MessageMeta {
     cache?: { read?: number; write?: number };
   };
   finish?: string;
+  /** Transient v2 adapter fields; old status-less compactions remain compatible. */
+  _v2Compaction?: boolean;
+  _compactionStatus?: string;
+  _compactionReason?: string;
   /** opencode persists the message's own cost estimate on assistant messages. */
   cost?: number;
   /** Structured failure record present when `finish === "error"`. */
@@ -208,6 +212,8 @@ export function parseSessionFromDb(
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
   const compactions: Compaction[] = [];
+  const diagnostics: SessionDiagnostic[] = [];
+  let runningCompactions = 0;
   const tokenByModel = new Map<string, TokenUsage>();
   const skillsUsed = new Set<string>();
   const skillActivations: string[] = [];
@@ -275,8 +281,26 @@ export function parseSessionFromDb(
       }
     }
 
-    // Per-model token aggregation (opencode records usage on assistant messages).
-    if (meta.role === "assistant") {
+    if (meta._v2Compaction) {
+      if (meta._compactionStatus === "running") runningCompactions++;
+      if (
+        timestamp &&
+        (meta._compactionStatus === "completed" || meta._compactionStatus === "failed")
+      )
+        diagnostics.push({
+          kind: "compaction",
+          outcome: meta._compactionStatus === "failed" ? "failed" : "succeeded",
+          timestamp,
+          confidence: "exact",
+          trigger: meta._compactionReason === "manual" ? "manual" : "unknown",
+          entryId: message.id,
+          provider: "opencode",
+          ...(meta.modelID ? { model: meta.modelID } : {}),
+          ...(meta._compactionStatus === "failed" ? errorTypeFromMeta(meta.error) : {}),
+        });
+    }
+    // Compaction request usage is separate from the context size and human turns.
+    if (meta.role === "assistant" || meta._v2Compaction) {
       const usage = usageFromMeta(meta.tokens);
       if (usage) {
         if (meta.modelID) {
@@ -287,15 +311,16 @@ export function parseSessionFromDb(
         const completed = meta.time?.completed;
         const durationMs =
           created && completed && completed > created ? completed - created : undefined;
-        usageByMessageId.set(message.id, {
-          usage,
-          ...(meta.modelID ? { model: meta.modelID } : {}),
-          contextTokens:
-            (meta.tokens?.input || 0) +
-            (meta.tokens?.cache?.read || 0) +
-            (meta.tokens?.cache?.write || 0),
-          ...(durationMs ? { durationMs } : {}),
-        });
+        if (meta.role === "assistant")
+          usageByMessageId.set(message.id, {
+            usage,
+            ...(meta.modelID ? { model: meta.modelID } : {}),
+            contextTokens:
+              (meta.tokens?.input || 0) +
+              (meta.tokens?.cache?.read || 0) +
+              (meta.tokens?.cache?.write || 0),
+            ...(durationMs ? { durationMs } : {}),
+          });
       }
       if (typeof meta.cost === "number" && Number.isFinite(meta.cost)) {
         messageCostSum += meta.cost;
@@ -428,6 +453,14 @@ export function parseSessionFromDb(
     ...(mcpServersUsed.size > 0 ? { mcpServersUsed: [...mcpServersUsed].sort() } : {}),
     ...(subAgentSummary.length > 0 ? { subAgentSummary } : {}),
     ...(apiErrors.length > 0 ? { apiErrors } : {}),
+    ...(diagnostics.length > 0 ? { diagnostics } : {}),
+    ...(runningCompactions
+      ? {
+          diagnosticNotes: [
+            `${runningCompactions} OpenCode compaction record(s) are still running; they are not counted as completed compactions.`,
+          ],
+        }
+      : {}),
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),
   };

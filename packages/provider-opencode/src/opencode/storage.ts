@@ -73,12 +73,19 @@ export function prepareOpencodeStorage(db: Database): void {
       const meta = {
         ...data,
         role:
-          type === "compaction" || type === "synthetic"
-            ? "user"
-            : type === "shell"
-              ? "assistant"
-              : type,
+          type === "compaction"
+            ? data.status === "running" || data.status === "failed"
+              ? "compaction"
+              : "user"
+            : type === "synthetic"
+              ? "user"
+              : type === "shell"
+                ? "assistant"
+                : type,
         time,
+        _v2Compaction: type === "compaction",
+        _compactionStatus: type === "compaction" ? data.status : undefined,
+        _compactionReason: type === "compaction" ? data.reason : undefined,
         modelID: object(data.model).id,
         error: data.error ? { name: object(data.error).type } : undefined,
       };
@@ -95,17 +102,32 @@ export function prepareOpencodeStorage(db: Database): void {
           });
         }
       } else if (type === "compaction") {
-        parts = [{ type: "compaction", auto: data.reason !== "manual" }];
+        // Earlier v2 records had no lifecycle status and represent completed snapshots.
+        if (data.status === undefined || data.status === "completed")
+          parts = [{ type: "compaction", auto: data.reason !== "manual" }];
       } else if (type === "shell") {
         parts = [
           {
             type: "tool",
             tool: "bash",
-            callID: data.callID,
+            callID: data.shellID || data.callID || String(id),
             state: {
-              status: "completed",
+              status:
+                data.status === "running"
+                  ? "running"
+                  : data.status === "timeout" ||
+                      data.status === "killed" ||
+                      (typeof data.exit === "number" && data.exit !== 0)
+                    ? "error"
+                    : "completed",
               input: { command: data.command },
-              output: data.output,
+              output:
+                typeof data.output === "string"
+                  ? data.output
+                  : typeof object(data.output).output === "string"
+                    ? object(data.output).output
+                    : "",
+              metadata: { exitCode: data.exit, shellStatus: data.status },
               time: { start: time.created, end: time.completed },
             },
           },
