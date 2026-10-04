@@ -395,4 +395,74 @@ describe("OpenCode v2 storage compatibility", () => {
       db.close();
     }
   });
+
+  it("preserves release-schema user attachments and tool image files", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, {
+        text: "Inspect these images",
+        files: [
+          { data: "YWJjZA==", mime: "image/png", source: { type: "inline" }, name: "inline.png" },
+          {
+            data: "",
+            mime: "image/png",
+            source: { type: "uri", uri: "https://example.com/image.png" },
+          },
+        ],
+      });
+      add(db, "a", "assistant", 1, {
+        model: { id: "model-v2" },
+        content: [
+          {
+            type: "tool",
+            id: "image-call",
+            name: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "/repo/image.png" },
+              content: [
+                { type: "text", text: "Read image" },
+                { type: "file", uri: "data:image/png;base64,YWJjZA==", mime: "image/png" },
+              ],
+            },
+          },
+        ],
+      });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.turns[0].blocks).toContainEqual({
+        type: "_user_images",
+        images: ["data:image/png;base64,YWJjZA==", "https://example.com/image.png"],
+      });
+      expect(parsed.turns[1].blocks[0]).toMatchObject({
+        type: "tool_use",
+        _result: "Read image",
+        _images: ["data:image/png;base64,YWJjZA=="],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("includes v2 reasoning in aggregate and per-turn output totals", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, { text: "Inspect" });
+      add(db, "a", "assistant", 1, {
+        model: { id: "model-v2" },
+        content: [{ type: "text", text: "Done" }],
+        tokens: { input: 10, output: 2, reasoning: 8, cache: { read: 3, write: 4 } },
+      });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadTokens: 3,
+        cacheCreationTokens: 4,
+      });
+      expect(parsed.tokenUsageByModel?.["model-v2"]).toEqual(parsed.tokenUsage);
+      expect(parsed.turnStats?.[0].tokenUsage?.outputTokens).toBe(10);
+    } finally {
+      db.close();
+    }
+  });
 });

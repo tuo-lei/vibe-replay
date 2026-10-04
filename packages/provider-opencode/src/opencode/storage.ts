@@ -83,6 +83,12 @@ export function prepareOpencodeStorage(db: Database): void {
                 ? "assistant"
                 : type,
         time,
+        tokens: data.tokens
+          ? {
+              ...object(data.tokens),
+              output: (object(data.tokens).output || 0) + (object(data.tokens).reasoning || 0),
+            }
+          : undefined,
         _v2Message: true,
         _v2Compaction: type === "compaction",
         _compactionStatus: type === "compaction" ? data.status : undefined,
@@ -97,7 +103,10 @@ export function prepareOpencodeStorage(db: Database): void {
           const f = object(file);
           parts.push({
             type: "file",
-            url: f.uri || f.url,
+            url:
+              typeof f.data === "string" && f.data && typeof f.mime === "string"
+                ? `data:${f.mime};base64,${f.data}`
+                : f.uri || f.url || object(f.source).uri,
             mime: f.mime,
             filename: f.name || f.filename,
           });
@@ -152,6 +161,16 @@ export function prepareOpencodeStorage(db: Database): void {
               ...state,
               status: metadata.error === true ? "error" : state.status,
               output: output || object(state.error).message || "",
+              images: (Array.isArray(state.content) ? state.content : [])
+                .map(object)
+                .filter(
+                  (item) =>
+                    item.type === "file" &&
+                    typeof item.uri === "string" &&
+                    typeof item.mime === "string" &&
+                    item.mime.startsWith("image/"),
+                )
+                .map((item) => item.uri),
               metadata: { ...metadata, sessionId: metadata.sessionId || metadata.sessionID },
               time: { start: toolTime.ran || toolTime.created, end: toolTime.completed },
             },

@@ -39,6 +39,7 @@ interface OpencodePart {
     status?: string;
     input?: unknown;
     output?: string;
+    images?: string[];
     metadata?: {
       diff?: string;
       /** `task` parts record the spawned child session here. */
@@ -568,6 +569,7 @@ function assistantBlocksFromParts(
           name: mapOpencodeToolName(toolName),
           input,
           ...(hasResult ? { _hasResult: true, _result: result } : { _hasResult: false }),
+          ...(hasResult && state.images?.length ? { _images: state.images } : {}),
           ...(isError ? { _isError: true } : {}),
           ...(isPending ? { _isPendingMarker: true } : {}),
           ...(durationMs ? { _durationMs: durationMs } : {}),

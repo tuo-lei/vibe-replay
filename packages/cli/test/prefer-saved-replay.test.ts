@@ -23,6 +23,7 @@ vi.mock("../src/cache.js", () => ({
 }));
 const { loadCliSession } = await import("../src/session-workflows.js");
 const { getProvider } = await import("../src/providers/index.js");
+const { replayOutputSlug } = await import("../src/server-core.js");
 afterEach(async () => {
   vi.restoreAllMocks();
   await rm(mockHome, { recursive: true, force: true });
@@ -90,4 +91,49 @@ describe("saved replay before live parsing", () => {
       expect(await readFile(join(outputDir, "replay.json"), "utf-8")).toBe(raw);
     },
   );
+
+  it("finds a resumed SSH snapshot under an older native ID without reparsing", async () => {
+    const location = { kind: "ssh" as const, id: "remote-dev", label: "Remote dev" };
+    const savedSlug = replayOutputSlug("resume", location, {
+      provider: "claude-code",
+      sessionId: "old-native-id",
+    });
+    const outputDir = join(mockHome, ".vibe-replay", savedSlug);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      join(outputDir, "replay.json"),
+      JSON.stringify({
+        meta: { sessionId: "old-native-id", slug: "resume", provider: "claude-code", location },
+        scenes: [{ type: "user-prompt", content: "Saved resumed request" }],
+      }),
+    );
+    sourceInfo = {
+      provider: "claude-code",
+      sessionId: "new-native-id",
+      sessionIds: ["new-native-id", "old-native-id"],
+      slug: "resume",
+      location,
+      project: "~/repo",
+      cwd: "~/repo",
+      version: "",
+      timestamp: "2026-10-04T00:00:00Z",
+      lineCount: 1,
+      fileSize: 1,
+      filePath: join(mockHome, "missing-resume.jsonl"),
+      filePaths: [join(mockHome, "missing-resume.jsonl")],
+      firstPrompt: "Resume",
+      transcriptStatus: "unreadable",
+    };
+    const parse = vi
+      .spyOn(getProvider("claude-code")!, "parse")
+      .mockRejectedValue(new Error("Unreadable resumed source"));
+    const loaded = await loadCliSession("new-native-id", {
+      provider: "claude-code",
+      target: "remote-dev",
+      preferReplay: true,
+    });
+    expect(loaded.outputDir).toBe(outputDir);
+    expect(loaded.replay.scenes[0]).toMatchObject({ content: "Saved resumed request" });
+    expect(parse).not.toHaveBeenCalled();
+  });
 });

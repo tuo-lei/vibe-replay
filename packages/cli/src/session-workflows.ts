@@ -251,12 +251,25 @@ export async function loadCliSession(
   }
   if (options.preferReplay && !pathExists(ref) && source.info) {
     const info = source.info;
-    const savedSlug = replayOutputSlug(info.slug || info.sessionId.slice(0, 8), info.location, {
-      provider: source.provider,
-      sessionId: info.sessionId,
-    });
-    const savedDir = join(homedir(), ".vibe-replay", savedSlug);
-    if (existsSync(join(savedDir, "replay.json"))) {
+    const ids = [...new Set([info.sessionId, ...(info.sessionIds || [])])];
+    const exactId = ids.find((id) => id === ref);
+    const prefixIds = ref.length >= 4 ? ids.filter((id) => id.startsWith(ref)) : [];
+    const requestedId = exactId || (prefixIds.length === 1 ? prefixIds[0] : undefined);
+    const candidates = [...new Set([...(requestedId ? [requestedId] : []), ...ids])];
+    const savedDirs = new Set(
+      candidates.map((sessionId) =>
+        join(
+          homedir(),
+          ".vibe-replay",
+          replayOutputSlug(info.slug || sessionId.slice(0, 8), info.location, {
+            provider: source.provider,
+            sessionId,
+          }),
+        ),
+      ),
+    );
+    for (const savedDir of savedDirs) {
+      if (!existsSync(join(savedDir, "replay.json"))) continue;
       const existing = await readEffectiveReplay(savedDir);
       const savedTarget =
         existing.meta.location?.kind === "ssh" ? existing.meta.location.id : "local";
