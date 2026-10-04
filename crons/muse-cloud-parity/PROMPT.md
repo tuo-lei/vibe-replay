@@ -51,8 +51,9 @@ so in your report.
    on the `packageManager` pin, delete that line from `package.json` for the
    pnpm commands, then `git checkout -- package.json` to restore it — never
    commit the pin removal. Ensure `pnpm` is on PATH (`command -v pnpm`) and
-   commit normally per step 7 so the lefthook pre-commit hook runs; never
-   use `--no-verify` to bypass it.
+   run `pnpm lint:check` (fix all errors) before committing; then commit
+   normally so the lefthook pre-commit hook also runs on the staged files.
+   Never use `--no-verify` to bypass it.
 3. **Discover.** Run `packages/provider-muse`'s own discovery
    (`src/muse/discover.ts` — do not reimplement it) against this machine's
    Muse sessions (`~/agents/<agent-id>/sessions/<agent-id>.jsonl`) and
@@ -76,7 +77,12 @@ so in your report.
    `message_parts.parts[].type` values with their nested key/type
    signatures (the parser's `textFromItem` only accepts `{type: "text",
    text}` parts, so a new part type with unchanged outer keys would
-   otherwise slip past the census), from recent
+   otherwise slip past the census), the tool names actually invoked with
+   their privacy-safe decoded argument-key sets, and the `record.source`
+   provenance-label set (the parser's `isRuntimeInjectionSource` branches
+   on exact labels like `scheduler.cron` and the `runtime.*` prefix, so a
+   new scheduler/background label with an unchanged record shape would
+   otherwise go undetected), from recent
    sessions; compare with `src/muse/parser.ts` and
    `src/muse/tool-mapping.ts`. A new user-facing Muse feature the parser
    ignores → extend the parser. A new built-in tool name or a changed
@@ -106,8 +112,9 @@ so in your report.
    (`git checkout -b <task-branch>`) before editing or committing — never
    commit fixes on local `main`, or the local checkout diverges from the
    squash-merged remote `main` and breaks the next run's pull. Implement
-   the fixes. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`)
-   and commit normally so the lefthook pre-commit hook runs — it applies
+   the fixes. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`),
+   run `pnpm lint:check` and fix all errors, then commit normally so the
+   lefthook pre-commit hook runs — it applies
    and stages oxlint/oxfmt fixes, which `pnpm lint:check` alone does not.
    If the hook fails for an environment reason despite pnpm being on PATH,
    report blocked rather than committing with `--no-verify`. Also do a
