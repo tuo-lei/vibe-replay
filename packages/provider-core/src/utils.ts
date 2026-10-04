@@ -1,7 +1,7 @@
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants, existsSync, realpathSync } from "node:fs";
-import { copyFile, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -236,7 +236,12 @@ async function stageSqliteSnapshot(path: string): Promise<{ source: string; dire
 
 /** WASM snapshots stay in memory but still reject concurrent source changes. */
 export async function readSqliteSnapshot(path: string): Promise<Buffer> {
-  if (!sqliteNoWrites.getStore()) return readFile(path);
+  if (!sqliteNoWrites.getStore()) {
+    await assertSqliteRollbackReadable(path);
+    const bytes = await readFile(path);
+    await assertSqliteRollbackReadable(path);
+    return bytes;
+  }
   await assertSqliteWalReadable(path);
   const before = await stat(path, { bigint: true });
   const bytes = await readFile(path);
@@ -289,10 +294,41 @@ export async function withSqliteReadSource<T>(
   }
 }
 
-/** SQLite's readonly mode can create a missing WAL shared-memory sidecar. */
+/** Pending rollback pages cannot be recovered from a main-file-only snapshot. */
+async function assertSqliteRollbackReadable(path: string): Promise<void> {
+  path = existsSync(path) ? realpathSync(path) : path;
+  if (!existsSync(`${path}-journal`)) return;
+  const journal = await open(`${path}-journal`, "r").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw new SqliteSnapshotRequiredError(
+      "Cannot verify the SQLite rollback journal. Finish the source transaction or recovery, or use an already saved replay.",
+    );
+  });
+  if (!journal) return;
+  try {
+    // SQLite PERSIST commits by zeroing the 28-byte header while retaining
+    // old page bytes. A nonempty file alone is therefore not an active journal.
+    const header = Buffer.alloc(28);
+    const { bytesRead } = await journal.read(header, 0, header.length, 0);
+    if (header.subarray(0, bytesRead).some((byte) => byte !== 0))
+      throw new SqliteSnapshotRequiredError(
+        "The database has a pending rollback journal. Finish the transaction or let the source application recover it, or use an already saved replay.",
+      );
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    throw new SqliteSnapshotRequiredError(
+      "Cannot verify the SQLite rollback journal. Finish the source transaction or recovery, or use an already saved replay.",
+    );
+  } finally {
+    await journal.close();
+  }
+}
+
+/** SQLite's readonly queries may need journal recovery or a WAL sidecar write. */
 export async function assertSqliteWalReadable(path: string): Promise<void> {
   // SQLite resolves file symlinks before selecting the WAL/SHM filenames.
   path = existsSync(path) ? realpathSync(path) : path;
+  await assertSqliteRollbackReadable(path);
   if (!existsSync(`${path}-wal`)) return;
   const wal = await stat(`${path}-wal`);
   if (wal.size === 0) return;
@@ -320,5 +356,6 @@ export async function sqliteReadOnlyLocation(path: string): Promise<string> {
 
 /** WASM readers cannot apply WAL frames; zero-write flows require a current snapshot. */
 export async function assertSqliteSnapshotCurrent(path: string): Promise<void> {
+  await assertSqliteRollbackReadable(path);
   if (sqliteNoWrites.getStore()) await assertSqliteWalReadable(path);
 }

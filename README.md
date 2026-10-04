@@ -238,6 +238,8 @@ must be checkpointed in the source application before stdout export or sharing
 preflight: even readonly SQLite can change an existing shared-memory sidecar.
 Native queries use a private temporary copy, validate source stability before querying,
 and delete the copy afterward. An immutable URI never points at the live database.
+Pending rollback journals also require the source transaction or recovery to finish.
+Committed PERSIST journals with zeroed headers remain readable.
 Healthy Hermes profiles remain available when another profile needs a checkpoint;
 coverage reports the incomplete discovery.
 `doctor --json` reports provider coverage and compatibility failures. Search output
