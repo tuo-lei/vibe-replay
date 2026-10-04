@@ -234,6 +234,15 @@ async function stageSqliteSnapshot(path: string): Promise<{ source: string; dire
   }
 }
 
+/** Checkpoint/close may remove a sidecar between its existence probe and stat. */
+async function sqliteSidecarStat(path: string) {
+  if (!existsSync(path)) return null;
+  return stat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+}
+
 /** WASM snapshots stay in memory but still reject concurrent source changes. */
 export async function readSqliteSnapshot(path: string): Promise<Buffer> {
   const validate = sqliteNoWrites.getStore()
@@ -269,8 +278,7 @@ export async function withSqliteReadSource<T>(
   if (
     !readOnlyScope &&
     !scope?.snapshots.has(path) &&
-    existsSync(`${path}-wal`) &&
-    (await stat(`${path}-wal`)).size > 0
+    ((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) > 0
   ) {
     await assertSqliteWalReadable(path);
     return action(path);
@@ -326,17 +334,19 @@ export async function assertSqliteWalReadable(path: string): Promise<void> {
   // SQLite resolves file symlinks before selecting the WAL/SHM filenames.
   path = existsSync(path) ? realpathSync(path) : path;
   await assertSqliteRollbackReadable(path);
-  if (!existsSync(`${path}-wal`)) return;
-  const wal = await stat(`${path}-wal`);
-  if (wal.size === 0) return;
+  const wal = await sqliteSidecarStat(`${path}-wal`);
+  if (!wal || wal.size === 0) return;
   if (sqliteNoWrites.getStore())
     throw new SqliteSnapshotRequiredError(
       "Read-only export and preflight cannot query an active WAL because SQLite may change its shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay.",
     );
-  if (!existsSync(`${path}-shm`) || !(await stat(`${path}-shm`)).isFile())
+  if (!(await sqliteSidecarStat(`${path}-shm`))?.isFile()) {
+    // A completed checkpoint may remove both sidecars after the first WAL stat.
+    if (((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) === 0) return;
     throw new Error(
       "The database has an active WAL but no shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay; a read-only query could otherwise create a -shm file.",
     );
+  }
 }
 
 /** URI formatting for frozen snapshots; native live-source readers use withSqliteReadSource. */
@@ -344,7 +354,7 @@ export async function sqliteReadOnlyLocation(path: string): Promise<string> {
   await assertSqliteWalReadable(path);
   if (!existsSync(path)) return path;
   path = realpathSync(path);
-  if (existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) {
+  if (((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) > 0) {
     await assertSqliteWalReadable(path);
     if (!sqliteNoWrites.getStore()) return path;
   }
