@@ -226,10 +226,29 @@ async function inferProvider(path: string): Promise<string> {
   if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
   const file = await open(base, "r");
   let head: string;
+  let initialRecordIncomplete = false;
   try {
     const buffer = Buffer.alloc(64_000);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     head = buffer.subarray(0, bytesRead).toString("utf-8");
+    // Grok and Cursor share role/message envelopes. Never infer from a truncated
+    // first record; bootstrap instructions routinely exceed the short probe.
+    if (
+      bytesRead === buffer.length &&
+      !head.includes("\n") &&
+      !head.startsWith("SQLite format 3\0")
+    ) {
+      const complete = Buffer.alloc(1024 * 1024);
+      const extended = await file.read(complete, 0, complete.length, 0);
+      head = complete.subarray(0, extended.bytesRead).toString("utf-8");
+      if (extended.bytesRead === complete.length && !head.includes("\n")) {
+        try {
+          JSON.parse(head);
+        } catch {
+          initialRecordIncomplete = true;
+        }
+      }
+    }
   } finally {
     await file.close();
   }
@@ -251,6 +270,11 @@ async function inferProvider(path: string): Promise<string> {
     /"(?:sessionId|uuid)"\s*:/.test(head)
   )
     return "claude-code";
+  if (initialRecordIncomplete) {
+    throw new Error(
+      "The initial source record exceeds the 1 MiB provider-inference limit. Specify --provider <name>.",
+    );
+  }
   if (looksLikeGrokTranscript(head)) return "grok-bot";
   if (cursorPath) return "cursor";
   if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
