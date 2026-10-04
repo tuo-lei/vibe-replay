@@ -66,36 +66,40 @@ so in your report.
    (`src/muse/discover.ts` — do not reimplement it) against this machine's
    Muse sessions (`~/agents/<agent-id>/sessions/<agent-id>.jsonl`) and
    confirm sessions from the last 14 days are found.
-4. **Integrity.** Stream (never fully load) recent session files, skipping
-   files with activity in the last ~60s — this run itself is a Muse agent
-   whose actively appended JSONL is among the recent files, and a partial
-   final record at EOF during an append would otherwise be falsely flagged
-   corrupt. Flag corrupt/truncated JSONL lines (only after confirming the
-   file's size and mtime are stable), sessions that fail to parse, and
+4. **Integrity.** Stream (never fully load) every stable session file from
+   the 14-day window — not just a recent sample; a malformed or
+   parse-failing transcript outside the sample would otherwise go unseen
+   while the run reports clean. Skip files with activity in the last ~60s
+   (this run itself is a Muse agent whose actively appended JSONL is among
+   the recent files, and a partial final record at EOF during an append
+   would otherwise be falsely flagged corrupt). Flag corrupt/truncated
+   JSONL lines (only after confirming the file's size and mtime are
+   stable), sessions that fail to parse, and
    any zero-prompt-but-tool-calls session as a discovery/generation
    mismatch: discovery lists it as replayable, but `hasReplayableContent`
    (`packages/cli/src/server-core.ts`) requires at least one `user-prompt`
    scene, so generation would reject it — that gap is a parity failure
    until the CLI actually supports tool-only replays. Shapes and type names
    only — never raw prompts, tool arguments, or tool outputs.
-5. **Drift.** Collect top-level record types, item `type` values, the
-   shallow field-name set per type, the tool names actually invoked, and the
-   privacy-safe decoded argument-key sets per tool (the `arguments` field is
-   a JSON string — collect key names only, never values), and the nested
+5. **Drift.** Collect from every stable session file in the 14-day window
+   (same coverage rule as step 4 — a new record shape outside a sample
+   would otherwise go unseen): top-level record types, item `type` values,
+   the shallow field-name set per type, the nested
    `message_parts.parts[].type` values with their nested key/type
    signatures (the parser's `textFromItem` only accepts `{type: "text",
    text}` parts, so a new part type with unchanged outer keys would
    otherwise slip past the census), the tool names actually invoked with
-   their privacy-safe decoded argument-key sets, and the `record.source`
-   provenance-label set (the parser's `isRuntimeInjectionSource` branches
-   on exact labels like `scheduler.cron` and the `runtime.*` prefix, so a
-   new scheduler/background label with an unchanged record shape would
+   their privacy-safe decoded argument-key sets (the `arguments` field is
+   a JSON string — collect key names only, never values), the
+   `record.source` provenance-label set (the parser's
+   `isRuntimeInjectionSource` branches on exact labels like
+   `scheduler.cron` and the `runtime.*` prefix, so a new
+   scheduler/background label with an unchanged record shape would
    otherwise go undetected), and privacy-safe key/type signatures for
    ordinary record and item fields (e.g. `text: string`,
    `output: string|object` — the parser's string checks silently drop
-   content when a relied-on field changes type without changing keys),
-   from recent
-   sessions; compare with `src/muse/parser.ts` and
+   content when a relied-on field changes type without changing keys).
+   Compare with `src/muse/parser.ts` and
    `src/muse/tool-mapping.ts`. A new user-facing Muse feature the parser
    ignores → extend the parser. A new built-in tool name or a changed
    argument shape → mapping-coverage candidate (terminal output/diff
