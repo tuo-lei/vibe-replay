@@ -228,6 +228,14 @@ async function inferProvider(path: string): Promise<string> {
   )
     return "claude-code";
   if (
+    /[/\\](?:grok-bot|agent-data|sand-data)[/\\]/i.test(base) ||
+    (/"role"\s*:\s*"(?:user|assistant)"/.test(head) &&
+      /\[SAND_HIDDEN_PROMPT\]|\[t\d+u\]|"name"\s*:\s*"(?:send_message|communicate_update)"/.test(
+        head,
+      ))
+  )
+    return "grok-bot";
+  if (
     cursorPath ||
     /\[user\]/.test(head) ||
     (/"role"\s*:\s*"(?:user|assistant)"/.test(head) && /"message"\s*:/.test(head))

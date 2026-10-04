@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -107,6 +108,7 @@ async function parseCursorSessionWithDependencies(
           )
         : await deps.parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
     } catch (err) {
+      if (err instanceof SqliteSnapshotRequiredError) throw err;
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
       sqliteError = compactErrorMessage(err);
       sqliteFallbackNote = `cursor SQLite parse failed (${sqliteError}); fell back to JSONL transcript`;
@@ -296,7 +298,8 @@ async function tryLoadSdkEnrichment(
         : await findSdkAgentById(sessionId);
     if (!agent) return null;
     return await loadSdkAgentEnrichment(agent);
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }

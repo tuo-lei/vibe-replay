@@ -2,7 +2,11 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ProviderDiscoveryOptions, SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import {
+  readGitRepo,
+  shortenPath,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
   discoverGlobalStateOnlySessions,
@@ -43,7 +47,11 @@ async function discoverCursorSessionsOnce(
   const sessions: SessionInfo[] = [];
   // SDK databases are independent from IDE transcript/store discovery. Start
   // their machine-wide index in parallel instead of paying both costs serially.
-  const sdkAgentsPromise = discoverSdkAgents().catch(() => [] as SdkAgent[]);
+  let sdkSnapshotError: SqliteSnapshotRequiredError | undefined;
+  const sdkAgentsPromise = discoverSdkAgents().catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) sdkSnapshotError = error;
+    return [] as SdkAgent[];
+  });
 
   let projectDirs: string[];
   try {
@@ -109,6 +117,7 @@ async function discoverCursorSessionsOnce(
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  if (sdkSnapshotError) throw new SqliteSnapshotRequiredError(sdkSnapshotError.message, sessions);
   return sessions;
 }
 

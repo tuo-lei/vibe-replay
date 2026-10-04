@@ -4,7 +4,11 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
+import {
+  assertSqliteSnapshotCurrent,
+  sqliteReadOnlyLocation,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, TokenUsage } from "@vibe-replay/provider-contract";
 import type { TurnStat } from "@vibe-replay/types";
@@ -173,7 +177,8 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
           dbPath,
         });
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) throw error;
       // SDK schema differs across Cursor versions; skip databases we can't read.
     } finally {
       closeIndexDb(handle);
@@ -257,7 +262,8 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
     const toolCallsByRun = collectToolCalls(eventRows);
 
     return finalizeEnrichment(agent, runs, toolCallsByRun);
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   } finally {
     closeIndexDb(handle);
@@ -301,7 +307,8 @@ async function tableColumns(handle: IndexDbHandle, table: string): Promise<Set<s
   try {
     const rows = await queryIndexDb(handle, `PRAGMA table_info(${table})`);
     return new Set(rows.map((row) => stringOrEmpty(row.name)).filter(Boolean));
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return new Set();
   }
 }
@@ -689,6 +696,7 @@ async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
   }
   if (st.size > MAX_SQLJS_DB_BYTES) return null;
   const buffer = await readFile(dbPath).catch(() => null);
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!buffer) return null;
   const db = new SQL.Database(buffer);
   return { dbPath, backend: "sqljs", db };
@@ -704,6 +712,7 @@ function closeIndexDb(handle: IndexDbHandle | null): void {
 }
 
 async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<string, any>[]> {
+  await assertSqliteSnapshotCurrent(handle.dbPath);
   if (handle.backend === "sqlite-cli") {
     const source = await sqliteReadOnlyLocation(handle.dbPath);
     const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {

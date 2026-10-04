@@ -14,7 +14,11 @@ import type {
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
-import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
+import {
+  assertSqliteSnapshotCurrent,
+  sqliteReadOnlyLocation,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   buildTurnDurationIntervals,
@@ -392,6 +396,7 @@ async function queryGlobalStateRows(
   globalStateDb: CachedGlobalStateDb,
   sql: string,
 ): Promise<Record<string, any>[]> {
+  await assertSqliteSnapshotCurrent(globalStateDb.dbPath);
   if (globalStateDb.backend === "sqlite-cli") {
     return querySqliteCli(globalStateDb.dbPath, sql);
   }
@@ -523,6 +528,7 @@ async function loadComposerHeaders(
 async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalStateDb | null> {
   const dbPath = explicitPath || (await findGlobalStateDb());
   if (!dbPath) return null;
+  await assertSqliteSnapshotCurrent(dbPath);
 
   const dbStat = await stat(dbPath).catch(() => null);
   if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) return null;
@@ -559,6 +565,7 @@ async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalSta
   }
 
   const dbBuffer = await readFile(dbPath).catch(() => null);
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
 
   const db = new SQL.Database(dbBuffer);
@@ -1476,6 +1483,7 @@ function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, str
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
 async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | null> {
+  await assertSqliteSnapshotCurrent(dbPath);
   let SQL: SqlJsStatic;
   try {
     SQL = await getSqlJs();
@@ -1483,6 +1491,7 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
     return null;
   }
   const dbBuffer = await readFile(dbPath).catch(() => null);
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
   const db = new SQL.Database(dbBuffer);
   try {
@@ -1830,7 +1839,8 @@ export async function discoverGlobalStateOnlySessions(
       };
       discoveredSessions.push(sessionInfo);
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     // no-op: ignore malformed db rows and return what we have
   }
 
@@ -2170,7 +2180,8 @@ async function parseCursorStoreDb(
   if (await canUseSqliteCli(dbPath)) {
     try {
       return await parseCursorStoreDbWithSqliteCli(dbPath, sessionId, workspacePath);
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) throw error;
       // Fall through to sql.js. Some machines may have sqlite3 installed but
       // unable to read this specific DB/WAL state in readonly mode.
     }
@@ -2184,6 +2195,7 @@ async function parseCursorStoreDb(
   }
 
   const dbBuffer = await readFile(dbPath);
+  await assertSqliteSnapshotCurrent(dbPath);
   const db = new SQL.Database(dbBuffer);
 
   try {
@@ -2320,7 +2332,8 @@ async function parseCursorStoreDbWithSqliteCli(
           .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
           .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) throw error;
       // Older or session-scoped store.db files may not have cursorDiskKV.
     }
   }
@@ -3769,7 +3782,8 @@ async function parseCursorGlobalStateDb(
         notes,
       },
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }
