@@ -1396,10 +1396,10 @@ program
         try {
           const candidate = expandUserPath(pathArg);
           const { existsSync } = await import("node:fs");
-          const { dirname } = await import("node:path");
+          const { basename } = await import("node:path");
           const isReplay =
             existsSync(join(candidate, "replay.json")) ||
-            (existsSync(candidate) && existsSync(join(dirname(candidate), "replay.json")));
+            (basename(candidate) === "replay.json" && existsSync(candidate));
           if (isReplay) {
             outputDir = requireReplayDir(candidate);
             await loadCliSession(outputDir, {
