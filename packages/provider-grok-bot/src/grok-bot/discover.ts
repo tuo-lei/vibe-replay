@@ -9,9 +9,14 @@ import {
   getGrokBotTranscriptRoots,
 } from "./config.js";
 import { mergeDiscoveredGroupSessions } from "./group-merge.js";
-import { countGrokBotDiscoveryStats, parseGrokBotSession } from "./parser.js";
+import { countGrokBotDiscoveryStats, parseGrokBotLines, parseGrokBotSession } from "./parser.js";
 import { readAgentGroup, readAgentProfile } from "./profiles.js";
-import { agentIdFromReplicaFilename, summarizeReplicaDocument } from "./replica.js";
+import {
+  agentIdFromReplicaFilename,
+  replicaDocumentToLines,
+  replicaSideTurns,
+  summarizeReplicaDocument,
+} from "./replica.js";
 import { isSandSubagentSessionId } from "./subagent.js";
 
 export { readAgentGroup, readAgentProfile } from "./profiles.js";
@@ -121,6 +126,10 @@ async function attachClientReplicas(
       }
       const summary = summarizeReplicaDocument(raw);
       if (!summary) continue;
+      const hasReplayableActivity =
+        parseGrokBotLines(replicaDocumentToLines(raw)).turns.length > 0 ||
+        replicaSideTurns(raw).length > 0;
+      if (!hasReplayableActivity) continue;
       const prompts = summary.prompts.filter(Boolean);
 
       const existing = sessions.find(
