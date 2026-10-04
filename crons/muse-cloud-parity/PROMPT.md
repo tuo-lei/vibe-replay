@@ -36,8 +36,11 @@ so in your report.
    the latest pull is unresolved — the install's EPERM chown of
    `.modules.yaml` is non-fatal here, exit 0; verify with `pnpm build`
    rather than re-running), then `pnpm build`.
-   Environment quirks: if `pnpm` is missing, reinstall with
-   `/opt/hatch-image/bin/npm install -g pnpm@10`. If pnpm fails with EPERM
+   Environment quirks: if `pnpm` is missing, install the exact version from
+   `package.json`'s `packageManager` pin (e.g.
+   `/opt/hatch-image/bin/npm install -g pnpm@<pinned-major>`), never an
+   arbitrary latest; the pnpm-only rule governs project commands, not
+   bootstrapping the package manager itself. If pnpm fails with EPERM
    on the `packageManager` pin, delete that line from `package.json` for the
    pnpm commands, then `git checkout -- package.json` to restore it — never
    commit the pin removal. Commit with `git commit --no-verify` (the
@@ -68,9 +71,12 @@ so in your report.
    (whitespace-only blocks are dropped by shared `replay-core/transform.ts`
    logic, by design). Also verify the embedded
    `window.__VIBE_REPLAY_DATA__` JSON parses and matches the generated
-   `replay.json` with no unescaped `</script>`. A green unit suite alone
-   does not pass this step — this is the "Lei can actually use Replay on
-   Muse sessions" test.
+   `replay.json` with no unescaped `</script>`. When the run changed the
+   Muse parser or any replay-affecting code, validate both required replay
+   sizes: a ~30-scene and a ~500-scene representative session, not just the
+   single most recent one. A green unit suite alone does not
+   pass this step — this is the "Lei can actually use Replay on Muse
+   sessions" test.
 7. **Fix, test, PR.** Implement the fixes. Before commit: `pnpm lint:check`
    (fix all errors) and a security review of the diff (no secrets, keys,
    tokens, credentials). Before PR: `pnpm verify` with sequential stages.
@@ -80,9 +86,11 @@ so in your report.
 8. **Review → merge.** Wait for the Codex auto-review (usually ~10 min; poll
    for up to 30 min). Read every comment and address each one — fix, or push
    back with a reasoned reply — pushing follow-ups to the same branch.
-   Squash merge only when the review is addressed and CI is green, then
-   delete the remote branch. (If the review never appears, see Standing
-   authorization.)
+   After every follow-up push, wait for a fresh Codex review of the new head
+   before merging: fixes pushed after a review must themselves be reviewed.
+   Squash merge only when the latest head has a Codex review with no
+   unaddressed comments and CI is green, then delete the remote branch.
+   (If the review never appears, see Standing authorization.)
 9. **Improve this prompt.** If the run taught you something durable — a new
    quirk, a better check, a sharper judgment rule — update this PROMPT.md
    and ship it in the same PR (or its own PR when the run is otherwise
