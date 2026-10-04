@@ -1127,14 +1127,14 @@ workflowCommand("export", "Export a session as Markdown, replay JSON, or standal
       throw new Error(
         "--stdout supports markdown/json and cannot be combined with --json or --output",
       );
-    const { replay, outputDir } = await loadCliSession(ref, {
+    const { replay, outputDir, publicationDir } = await loadCliSession(ref, {
       ...opts,
       preferReplay: true,
       readOnly: opts.stdout,
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
     if (opts.stdout) {
-      const text = await exportText(replay, outputDir, opts.format!);
+      const text = await exportText(replay, publicationDir, opts.format!);
       const findings = scanForSecrets(text);
       if (findings.length)
         process.stderr.write(`Review output: ${findings.length} potential secret(s) detected.\n`);
@@ -1148,7 +1148,7 @@ workflowCommand("export", "Export a session as Markdown, replay JSON, or standal
           ? expandUserPath(opts.output)
           : (await import("node:path")).join(outputDir, "exports"),
         opts.format!,
-        outputDir,
+        publicationDir,
       ),
       opts.json,
     );

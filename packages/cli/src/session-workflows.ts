@@ -20,6 +20,7 @@ import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
 import { assertSqliteWalReadable, withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
 import { inferSqliteProvider } from "./sqlite-schema.js";
+import { parseGrokBotMetaWake } from "@vibe-replay/provider-grok-bot/parser";
 import { CLI_VERSION } from "./version.js";
 
 export interface SessionReferenceOptions {
@@ -230,7 +231,8 @@ function looksLikeGrokTranscript(head: string): boolean {
             block?.type === "text" &&
             typeof block.text === "string" &&
             (/^\s*\[SAND_HIDDEN_PROMPT\]/.test(block.text) ||
-              /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text)),
+              /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text) ||
+              parseGrokBotMetaWake(block.text) !== null),
         )
       )
         return true;
@@ -526,7 +528,7 @@ export async function loadCliSession(
     const target = replay.meta.location?.kind === "ssh" ? replay.meta.location.id : "local";
     if (options.target && target !== options.target)
       throw new Error(`Replay belongs to target '${target}', not '${options.target}'`);
-    return { replay, outputDir: replayDir };
+    return { replay, outputDir: replayDir, publicationDir: replayDir };
   }
   let source: Awaited<ReturnType<typeof resolveCliSource>>;
   try {
@@ -534,7 +536,7 @@ export async function loadCliSession(
   } catch (error) {
     if (!(error instanceof SessionReferenceError) || error.code !== "not-found") throw error;
     const base = join(homedir(), ".vibe-replay");
-    const matches: { replay: ReplaySession; outputDir: string }[] = [];
+    const matches: { replay: ReplaySession; outputDir: string; publicationDir: string }[] = [];
     for (const slug of await readdir(base).catch(() => [] as string[])) {
       try {
         const replay = await readEffectiveReplay(join(base, slug));
@@ -550,7 +552,7 @@ export async function loadCliSession(
             (id) => id === ref || (ref.length >= 4 && id.startsWith(ref)),
           )
         )
-          matches.push({ replay, outputDir: join(base, slug) });
+          matches.push({ replay, outputDir: join(base, slug), publicationDir: join(base, slug) });
       } catch {
         /* Unrelated files are not replay references. */
       }
@@ -595,7 +597,12 @@ export async function loadCliSession(
       ) {
         if ((!existing.meta.title || existing.meta.title === existing.meta.slug) && info.title)
           existing.meta.title = info.title;
-        return { replay: existing, outputDir: savedDir, discovery: source.discovery };
+        return {
+          replay: existing,
+          outputDir: savedDir,
+          publicationDir: savedDir,
+          discovery: source.discovery,
+        };
       }
     }
   }
@@ -633,7 +640,7 @@ export async function loadCliSession(
     { provider: source.provider, sessionId: replay.meta.sessionId },
   );
   const outputDir = join(homedir(), ".vibe-replay", slug);
-  return { replay, outputDir, discovery: source.discovery };
+  return { replay, outputDir, publicationDir: undefined, discovery: source.discovery };
 }
 
 function excerpt(text: string, max: number, query?: string): string {
@@ -778,14 +785,16 @@ export function sharePreflight(replay: ReplaySession, visibility: string, logged
 
 export async function exportText(
   replay: ReplaySession,
-  outputDir: string,
+  publicationDir: string | undefined,
   format: string,
 ): Promise<string> {
   const shareable = sessionForExternalOutput(replay);
   if (!["markdown", "json", "html"].includes(format))
     throw new Error("--format must be markdown, json, or html");
-  const savedCloud = await loadSavedCloudInfo(outputDir);
-  const savedGist = await loadSavedGistInfo(outputDir);
+  const savedCloud =
+    publicationDir && format === "markdown" ? await loadSavedCloudInfo(publicationDir) : undefined;
+  const savedGist =
+    publicationDir && format === "markdown" ? await loadSavedGistInfo(publicationDir) : undefined;
   const replayUrl =
     savedCloud && Date.parse(savedCloud.expiresAt) > Date.now()
       ? savedCloud.url
@@ -799,7 +808,7 @@ export async function exportSession(
   replay: ReplaySession,
   outputDir: string,
   format: string,
-  replayDirectory = outputDir,
+  replayDirectory?: string,
 ) {
   const shareable = sessionForExternalOutput(replay);
   const text = await exportText(shareable, replayDirectory, format);
