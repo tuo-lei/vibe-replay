@@ -218,10 +218,14 @@ function inferenceRecord(line: string): Record<string, any> | undefined {
   }
 }
 
-function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean): boolean {
+function grokTranscriptEvidence(
+  head: string,
+  allowMetaWakeInference: boolean,
+): "grok-bot" | "ambiguous" | undefined {
   let hasMetaWake = false;
   let hasMessageEnvelope = false;
   let hasCursorToolId = false;
+  let hasSandToolId = false;
   for (const line of head.split("\n")) {
     try {
       const record = JSON.parse(line);
@@ -237,7 +241,7 @@ function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean):
               /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text)),
         )
       )
-        return true;
+        return "grok-bot";
       if (record.role === "user")
         hasMetaWake ||= blocks.some(
           (block) =>
@@ -252,6 +256,13 @@ function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean):
             typeof block.id === "string" &&
             block.id.trim().length > 0,
         );
+        hasSandToolId ||= blocks.some(
+          (block) =>
+            block?.type === "tool_use" &&
+            [block.toolCallId, block.tool_call_id].some(
+              (id) => typeof id === "string" && id.trim().length > 0,
+            ),
+        );
         hasMessageEnvelope ||= blocks.some(
           (block) =>
             block?.type === "tool_use" &&
@@ -263,10 +274,11 @@ function looksLikeGrokTranscript(head: string, allowMetaWakeInference: boolean):
       /* The bounded header can end halfway through a record. */
     }
   }
-  // Cursor's native inline calls use `id`; Sand uses toolCallId or no ID.
-  // That source-format signal and known Cursor paths take precedence over
-  // generic wake tags plus arbitrary custom-tool payloads.
-  return allowMetaWakeInference && !hasCursorToolId && hasMetaWake && hasMessageEnvelope;
+  // Missing tool IDs are supported by both parsers. Never treat their absence
+  // as provider identity; a shared wake/reply shape needs an explicit choice.
+  if (allowMetaWakeInference && !hasCursorToolId && hasMetaWake && hasMessageEnvelope)
+    return hasSandToolId ? "grok-bot" : "ambiguous";
+  return undefined;
 }
 
 async function inferProvider(path: string): Promise<string> {
@@ -345,9 +357,14 @@ async function inferProvider(path: string): Promise<string> {
     )
   )
     return "claude-code";
-  if (looksLikeGrokTranscript(head, !cursorPath)) return "grok-bot";
+  const grokEvidence = grokTranscriptEvidence(head, !cursorPath);
+  if (grokEvidence === "grok-bot") return "grok-bot";
   if (cursorPath) return "cursor";
   if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base)) return "grok-bot";
+  if (grokEvidence === "ambiguous")
+    throw new Error(
+      "Ambiguous Cursor/Grok Bot source. Specify --provider cursor or --provider grok-bot.",
+    );
   if (initialRecordIncomplete) {
     throw new Error(
       "A source record crosses the 1 MiB provider-inference limit. Specify --provider <name>.",

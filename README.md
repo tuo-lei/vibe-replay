@@ -225,6 +225,9 @@ npx vibe-replay share ./replay --visibility unlisted --json
 References accept full IDs, unique prefixes of at least four characters, and source paths.
 Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
 selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+Copied Cursor/Grok JSONL can share generic wake tags and custom tool payloads.
+When the source lacks provider-specific identity, pass `--provider cursor` or
+`--provider grok-bot`; missing tool IDs are not a reliable identity signal.
 Copied SQLite databases use their own contents, with a session marker required
 when they contain multiple sessions. Cursor SDK database copies also need the
 agent's JSONL transcript beside the database (or its `agent-transcripts` folder)
