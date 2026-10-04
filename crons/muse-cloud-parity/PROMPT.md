@@ -31,9 +31,14 @@ so in your report.
 
 ## Procedure
 
-1. **Sync.** `git checkout main` first (a reused checkout may still sit on a
-   deleted PR branch — a bare `git pull` would follow the stale upstream),
-   then `git pull` latest `main`. Note the HEAD SHA as the run's base, but
+1. **Sync.** First check GitHub for an open PR from this task (its
+   `chore/muse-cloud-parity-*` branch): a previous run may have left one
+   open because review or CI was blocked — resuming it is your first job,
+   so check out and continue that branch instead of starting a new audit.
+   With no open task PR, `git checkout main` (a reused checkout may still
+   sit on a deleted PR branch — a bare `git pull` would follow the stale
+   upstream), then `git pull` latest `main`. Note the HEAD SHA as the run's
+   base, but
    do not write it to `last_verified_commit` yet — that field is only
    updated after every check below passes, and then to the SHA that
    actually passed them: the base SHA for a clean run, or the merged PR's
@@ -144,8 +149,13 @@ so in your report.
    back with a reasoned reply — pushing follow-ups to the same branch.
    After every follow-up push, wait for a fresh Codex review of the new head
    before merging: fixes pushed after a review must themselves be reviewed.
-   Squash merge only when the latest head has a Codex review with no
-   unaddressed comments and CI is green, then delete the remote branch.
+   Before merging, also confirm the branch is current with `main` — if
+   `main` advanced during the audit/review window, update the branch from
+   `main` and re-run the affected parity checks, CI, and a fresh
+   current-head review, or the squash merge produces a tree this run never
+   exercised. Squash merge only when the latest head has a Codex review
+   with no unaddressed comments and CI is green, then delete the remote
+   branch.
    (If the review never appears, see Standing authorization.)
 9. **Improve this prompt.** If the run taught you something durable — a new
    quirk, a better check, a sharper judgment rule — update this PROMPT.md
