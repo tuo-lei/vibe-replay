@@ -8,6 +8,9 @@ dist/
 vibe-replay/*/
 packages/cli/vibe-replay/
 
+# Cron task-local run state (untracked by design)
+crons/muse-cloud-parity/watermark.json
+
 # Temp files
 _tmp_*
 
