@@ -74,6 +74,7 @@ import {
   readEffectiveReplay,
   resolveCliSource,
   resolveSessionReference,
+  resolveCliSessionInfo,
   SessionReferenceError,
   sharePreflight,
 } from "./session-workflows.js";
@@ -945,9 +946,7 @@ program
           sessions = [resolveSessionReference(sessions, ref, queryOptions)];
         } catch (error) {
           if (!(error instanceof SessionReferenceError) || error.code !== "not-found") throw error;
-          const source = await resolveCliSource(ref, queryOptions, discovery);
-          if (!source.info) throw error;
-          sessions = [source.info];
+          sessions = [await resolveCliSessionInfo(ref, queryOptions, discovery)];
         }
       }
       if (queryOptions.target)

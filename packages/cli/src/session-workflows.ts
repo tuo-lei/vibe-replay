@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ReplaySession, Scene, SessionInfo } from "./types.js";
@@ -229,7 +229,12 @@ async function inferProvider(path: string): Promise<string> {
     /"(?:sessionId|uuid)"\s*:/.test(head)
   )
     return "claude-code";
-  if (cursorPath || /\[user\]/.test(head)) return "cursor";
+  if (
+    cursorPath ||
+    /\[user\]/.test(head) ||
+    (/"role"\s*:\s*"(?:user|assistant)"/.test(head) && /"message"\s*:/.test(head))
+  )
+    return "cursor";
   throw new Error("Could not infer the provider from this source. Specify --provider <name>.");
 }
 
@@ -301,6 +306,53 @@ export async function resolveCliSource(
     info,
     paths: [...info.filePaths, ...(info.toolPaths || [])],
     discovery,
+  };
+}
+
+export async function resolveCliSessionInfo(
+  ref: string,
+  options: SessionReferenceOptions = {},
+  discovery?: Awaited<ReturnType<typeof discoverCliSessions>>,
+): Promise<SessionInfo> {
+  const source = await resolveCliSource(ref, options, discovery);
+  if (source.info) return source.info;
+  const parsed = await getProvider(source.provider)!.parse(source.paths);
+  const replay = transformToReplay(parsed, source.provider, shortenPath(parsed.cwd));
+  if (!hasReplayableContent(replay)) throw new Error("This session has no replayable user prompts");
+  const prompts = replay.scenes
+    .filter((scene) => scene.type === "user-prompt")
+    .map((scene) => scene.content);
+  const files = await Promise.all(
+    source.paths.map(async (path) => ({
+      metadata: await stat(path),
+      text: await readFile(path, "utf-8"),
+    })),
+  );
+  return {
+    provider: source.provider,
+    sessionId: parsed.sessionId,
+    slug: parsed.slug,
+    title: parsed.title,
+    project: shortenPath(parsed.cwd),
+    cwd: parsed.cwd,
+    version: "",
+    timestamp: parsed.endTime || parsed.startTime || files[0].metadata.mtime.toISOString(),
+    filePath: source.paths[0],
+    filePaths: source.paths,
+    lineCount: files.reduce(
+      (count, file) => count + file.text.split("\n").filter((line) => line.trim()).length,
+      0,
+    ),
+    fileSize: files.reduce((bytes, file) => bytes + file.metadata.size, 0),
+    firstPrompt: prompts[0],
+    prompts,
+    promptCount: prompts.length,
+    toolCallCount: replay.meta.stats.toolCalls,
+    compactionCount: parsed.compactions?.length || 0,
+    model: parsed.model,
+    gitBranch: parsed.gitBranch,
+    gitRepo: parsed.gitRepo,
+    hasSqlite: false,
   };
 }
 
