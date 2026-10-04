@@ -1,9 +1,9 @@
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, realpathSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { constants, existsSync, realpathSync } from "node:fs";
+import { copyFile, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 /** UTF-8 byte size without retaining or exposing the underlying content. */
@@ -170,11 +170,100 @@ export class SqliteSnapshotRequiredError extends Error {
   }
 }
 
-const sqliteNoWrites = new AsyncLocalStorage<boolean>();
+interface SqliteReadScope {
+  snapshots: Map<string, Promise<{ source: string; directory: string }>>;
+}
+const sqliteNoWrites = new AsyncLocalStorage<SqliteReadScope>();
 
 /** Carry the zero-write contract through async provider discovery and parsing. */
 export function withReadOnlySqlite<T>(readOnly: boolean, action: () => Promise<T>): Promise<T> {
-  return readOnly ? sqliteNoWrites.run(true, action) : action();
+  if (!readOnly || sqliteNoWrites.getStore()) return action();
+  const scope: SqliteReadScope = { snapshots: new Map() };
+  return sqliteNoWrites.run(scope, async () => {
+    try {
+      return await action();
+    } finally {
+      for (const pending of scope.snapshots.values()) {
+        const snapshot = await pending.catch(() => null);
+        if (snapshot) await rm(snapshot.directory, { recursive: true, force: true });
+      }
+    }
+  });
+}
+
+async function stageSqliteSnapshot(path: string): Promise<{ source: string; directory: string }> {
+  if (!sqliteNoWrites.getStore()) return withReadOnlySqlite(true, () => stageSqliteSnapshot(path));
+  await assertSqliteWalReadable(path);
+  const before = await stat(path, { bigint: true });
+  const directory = await mkdtemp(join(tmpdir(), "vibe-sqlite-snapshot-"));
+  try {
+    const snapshot = join(directory, "source.db");
+    await copyFile(path, snapshot, constants.COPYFILE_FICLONE);
+    await assertSqliteWalReadable(path);
+    const after = await stat(path, { bigint: true });
+    if (
+      before.size !== after.size ||
+      before.ino !== after.ino ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs
+    )
+      throw new SqliteSnapshotRequiredError(
+        "The database changed while acquiring a snapshot. Retry after the source application is idle or checkpointed, or use an already saved replay.",
+      );
+    return { source: `${pathToFileURL(snapshot).href}?immutable=1`, directory };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** WASM snapshots stay in memory but still reject concurrent source changes. */
+export async function readSqliteSnapshot(path: string): Promise<Buffer> {
+  if (!sqliteNoWrites.getStore()) return readFile(path);
+  await assertSqliteWalReadable(path);
+  const before = await stat(path, { bigint: true });
+  const bytes = await readFile(path);
+  await assertSqliteWalReadable(path);
+  const after = await stat(path, { bigint: true });
+  if (
+    before.size !== after.size ||
+    before.ino !== after.ino ||
+    before.mtimeNs !== after.mtimeNs ||
+    before.ctimeNs !== after.ctimeNs
+  )
+    throw new SqliteSnapshotRequiredError(
+      "The database changed while acquiring a snapshot. Retry after the source application is idle or checkpointed, or use an already saved replay.",
+    );
+  return bytes;
+}
+
+/** Native queries use a validated private copy; immutable never names a live DB. */
+export async function withSqliteReadSource<T>(
+  path: string,
+  action: (source: string) => Promise<T>,
+): Promise<T> {
+  await assertSqliteWalReadable(path);
+  if (!existsSync(path)) return action(path);
+  path = realpathSync(path);
+  const scope = sqliteNoWrites.getStore();
+  if (!scope && existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) {
+    await assertSqliteWalReadable(path);
+    return action(path);
+  }
+  if (scope) {
+    let pending = scope.snapshots.get(path);
+    if (!pending) {
+      pending = stageSqliteSnapshot(path);
+      scope.snapshots.set(path, pending);
+    }
+    return action((await pending).source);
+  }
+  const snapshot = await stageSqliteSnapshot(path);
+  try {
+    return await action(snapshot.source);
+  } finally {
+    await rm(snapshot.directory, { recursive: true, force: true });
+  }
 }
 
 /** SQLite's readonly mode can create a missing WAL shared-memory sidecar. */
@@ -194,7 +283,7 @@ export async function assertSqliteWalReadable(path: string): Promise<void> {
     );
 }
 
-/** Checkpointed snapshots need no WAL coordination and can be opened immutably. */
+/** URI formatting for frozen snapshots; native live-source readers use withSqliteReadSource. */
 export async function sqliteReadOnlyLocation(path: string): Promise<string> {
   await assertSqliteWalReadable(path);
   if (!existsSync(path)) return path;

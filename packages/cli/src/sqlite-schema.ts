@@ -1,7 +1,11 @@
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 
-import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
+import {
+  withSqliteReadSource,
+  assertSqliteSnapshotCurrent,
+  readSqliteSnapshot,
+} from "@vibe-replay/provider-core/utils";
 
 const TABLE_QUERY = "SELECT name FROM sqlite_master WHERE type = 'table'";
 const MAX_WASM_PROBE_BYTES = 32 * 1024 * 1024;
@@ -9,25 +13,28 @@ const MAX_WASM_PROBE_BYTES = 32 * 1024 * 1024;
 export async function inferSqliteProvider(path: string): Promise<string | undefined> {
   const size = (await stat(path)).size;
   if (size < 1024) return undefined;
-  const source = await sqliteReadOnlyLocation(path);
   let names: unknown[];
   try {
-    names = await new Promise<unknown[]>((resolve, reject) => {
-      execFile(
-        "sqlite3",
-        ["-readonly", "-json", source, TABLE_QUERY],
-        { timeout: 5_000, maxBuffer: 64 * 1024 },
-        (error, stdout) => {
-          if (error) return reject(error);
-          try {
-            const rows: { name: string }[] = JSON.parse(stdout || "[]");
-            resolve(rows.map((row) => row.name));
-          } catch (parseError) {
-            reject(parseError);
-          }
-        },
-      );
-    });
+    names = await withSqliteReadSource(
+      path,
+      (source) =>
+        new Promise<unknown[]>((resolve, reject) => {
+          execFile(
+            "sqlite3",
+            ["-readonly", "-json", source, TABLE_QUERY],
+            { timeout: 5_000, maxBuffer: 64 * 1024 },
+            (error, stdout) => {
+              if (error) return reject(error);
+              try {
+                const rows: { name: string }[] = JSON.parse(stdout || "[]");
+                resolve(rows.map((row) => row.name));
+              } catch (parseError) {
+                reject(parseError);
+              }
+            },
+          );
+        }),
+    );
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string };
     const unsupportedJson = /(?:unknown|unrecognized)\s+option[^\r\n]*-json\b/i.test(
@@ -39,7 +46,8 @@ export async function inferSqliteProvider(path: string): Promise<string | undefi
         "Automatic provider detection for databases larger than 32 MiB requires sqlite3 with -json support. Install or update sqlite3 or specify --provider <name> to skip the probe.",
         { cause: error },
       );
-    const bytes = await readFile(path);
+    const bytes = await readSqliteSnapshot(path);
+    await assertSqliteSnapshotCurrent(path);
     const { default: initSqlJs } = await import("sql.js");
     const SQL = await initSqlJs();
     const db = new SQL.Database(bytes);

@@ -1119,7 +1119,7 @@ workflowCommand(
 workflowCommand("export", "Export a session in one format; previews are optional through --github")
   .option("--format <type>", "markdown, json, or html", "markdown")
   .option("--output <directory>", "Output directory (default: ~/.vibe-replay/<slug>/exports)")
-  .option("--stdout", "Write only Markdown or replay JSON to stdout, without creating files")
+  .option("--stdout", "Write only Markdown or replay JSON to stdout, without saving output files")
   .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
     if (!["markdown", "json", "html"].includes(opts.format || ""))
       throw new Error("--format must be markdown, json, or html");
@@ -1351,7 +1351,7 @@ program
   .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
   .option(
     "--dry-run",
-    "Inspect sharing mode, size, visibility, and potential secrets without writing or uploading",
+    "Inspect sharing mode, size, visibility, and potential secrets without saving or uploading a replay",
   )
   .option("--json", "Print a structured result")
   .option("--target <id>", "Select an SSH target ID, or local")

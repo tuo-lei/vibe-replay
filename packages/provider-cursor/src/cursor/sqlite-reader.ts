@@ -16,7 +16,9 @@ import type {
 } from "@vibe-replay/types";
 import {
   assertSqliteSnapshotCurrent,
-  sqliteReadOnlyLocation,
+  readSqliteSnapshot,
+  assertSqliteWalReadable,
+  withSqliteReadSource,
   SqliteSnapshotRequiredError,
 } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
@@ -336,19 +338,17 @@ const SQLITE_CLI_NEGATIVE_CACHE_TTL_MS = 30_000;
 const sqliteCliUsabilityCache = new Map<string, SqliteCliUsabilityCacheEntry>();
 
 async function canUseSqliteCli(dbPath: string): Promise<boolean> {
-  const source = await sqliteReadOnlyLocation(dbPath);
+  await assertSqliteWalReadable(dbPath);
   const cached = sqliteCliUsabilityCache.get(dbPath);
   if (cached?.canUse) return true;
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_NEGATIVE_CACHE_TTL_MS) return false;
 
   let canUse = false;
   try {
-    const { stdout } = await execFileAsync(
-      "sqlite3",
-      ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"],
-      {
+    const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"], {
         maxBuffer: 1024 * 1024,
-      },
+      }),
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
@@ -360,22 +360,24 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
 }
 
 async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
-  const source = await sqliteReadOnlyLocation(dbPath);
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
-    maxBuffer: SQLITE_CLI_MAX_BUFFER,
-    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
-  });
+  const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+    execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
+      maxBuffer: SQLITE_CLI_MAX_BUFFER,
+      timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+    }),
+  );
   const trimmed = stdout.trim();
   if (!trimmed) return [];
   return JSON.parse(trimmed) as Record<string, any>[];
 }
 
 async function querySqliteCliText(dbPath: string, sql: string): Promise<string> {
-  const source = await sqliteReadOnlyLocation(dbPath);
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", source, sql], {
-    maxBuffer: SQLITE_CLI_MAX_BUFFER,
-    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
-  });
+  const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+    execFileAsync("sqlite3", ["-readonly", source, sql], {
+      maxBuffer: SQLITE_CLI_MAX_BUFFER,
+      timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+    }),
+  );
   return stdout.replace(/\r?\n$/, "");
 }
 
@@ -564,7 +566,7 @@ async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalSta
     return null;
   }
 
-  const dbBuffer = await readFile(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch(() => null);
   await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
 
@@ -1490,7 +1492,7 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
   } catch {
     return null;
   }
-  const dbBuffer = await readFile(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch(() => null);
   await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
   const db = new SQL.Database(dbBuffer);
@@ -2194,7 +2196,7 @@ async function parseCursorStoreDb(
     return null;
   }
 
-  const dbBuffer = await readFile(dbPath);
+  const dbBuffer = await readSqliteSnapshot(dbPath);
   await assertSqliteSnapshotCurrent(dbPath);
   const db = new SQL.Database(dbBuffer);
 

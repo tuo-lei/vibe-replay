@@ -233,6 +233,8 @@ when available; without it, databases above 32 MiB require `--provider` to skip
 loading another WASM snapshot solely for detection. Checkpointed WAL-mode copies work without sidecar files. Copies with pending WAL
 must be checkpointed in the source application before stdout export or sharing
 preflight: even readonly SQLite can change an existing shared-memory sidecar.
+Native queries use a private temporary copy, validate source stability before querying,
+and delete the copy afterward. An immutable URI never points at the live database.
 Healthy Hermes profiles remain available when another profile needs a checkpoint;
 coverage reports the incomplete discovery.
 `doctor --json` reports provider coverage and compatibility failures. Search output

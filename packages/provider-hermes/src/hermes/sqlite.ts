@@ -1,8 +1,8 @@
 /// <reference path="../sql-js.d.ts" />
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import {
   assertSqliteSnapshotCurrent,
+  readSqliteSnapshot,
   SqliteSnapshotRequiredError,
 } from "@vibe-replay/provider-core/utils";
 import { homedir } from "node:os";
@@ -124,7 +124,7 @@ export async function openHermesDb(
   let db: Database | null = null;
   try {
     const SQL = await getSqlJs();
-    const buffer = await readFile(dbPath);
+    const buffer = await readSqliteSnapshot(dbPath);
     await assertSqliteSnapshotCurrent(dbPath);
     if (buffer.length < 1024) return null;
     db = new SQL.Database(buffer);

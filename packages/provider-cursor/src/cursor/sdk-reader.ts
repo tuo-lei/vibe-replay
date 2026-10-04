@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   assertSqliteSnapshotCurrent,
-  sqliteReadOnlyLocation,
+  readSqliteSnapshot,
+  assertSqliteWalReadable,
+  withSqliteReadSource,
   SqliteSnapshotRequiredError,
 } from "@vibe-replay/provider-core/utils";
 import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
@@ -695,7 +697,7 @@ async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
     return null;
   }
   if (st.size > MAX_SQLJS_DB_BYTES) return null;
-  const buffer = await readFile(dbPath).catch(() => null);
+  const buffer = await readSqliteSnapshot(dbPath).catch(() => null);
   await assertSqliteSnapshotCurrent(dbPath);
   if (!buffer) return null;
   const db = new SQL.Database(buffer);
@@ -714,11 +716,12 @@ function closeIndexDb(handle: IndexDbHandle | null): void {
 async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<string, any>[]> {
   await assertSqliteSnapshotCurrent(handle.dbPath);
   if (handle.backend === "sqlite-cli") {
-    const source = await sqliteReadOnlyLocation(handle.dbPath);
-    const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: 60_000,
-    });
+    const { stdout } = await withSqliteReadSource(handle.dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 60_000,
+      }),
+    );
     const trimmed = stdout.trim();
     if (!trimmed) return [];
     const parsed = JSON.parse(trimmed);
@@ -731,16 +734,16 @@ const sqliteCliCheckCache = new Map<string, { canUse: boolean; checkedAt: number
 const SQLITE_CLI_CHECK_TTL_MS = 30_000;
 
 async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
-  const source = await sqliteReadOnlyLocation(dbPath);
+  await assertSqliteWalReadable(dbPath);
   const cached = sqliteCliCheckCache.get(dbPath);
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_CHECK_TTL_MS) return cached.canUse;
 
   let canUse = false;
   try {
-    const { stdout } = await execFileAsync(
-      "sqlite3",
-      ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"],
-      { maxBuffer: 1024 * 1024 },
+    const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"], {
+        maxBuffer: 1024 * 1024,
+      }),
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
