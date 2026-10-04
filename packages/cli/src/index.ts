@@ -1116,7 +1116,7 @@ workflowCommand(
     printWorkflowResult(diagnoseSession(replay, opts.query, opts.limit), opts.json);
   });
 
-workflowCommand("export", "Export a session in one format; previews are optional through --github")
+workflowCommand("export", "Export a session as Markdown, replay JSON, or standalone HTML")
   .option("--format <type>", "markdown, json, or html", "markdown")
   .option("--output <directory>", "Output directory (default: ~/.vibe-replay/<slug>/exports)")
   .option("--stdout", "Write only Markdown or replay JSON to stdout, without saving output files")

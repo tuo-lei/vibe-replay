@@ -70,6 +70,16 @@ export interface SdkAgent {
   dbPath: string;
 }
 
+/** Healthy agents remain usable when another independent SDK index is blocked. */
+export class SdkIndexSnapshotRequiredError extends SqliteSnapshotRequiredError {
+  constructor(
+    message: string,
+    readonly agents: SdkAgent[],
+  ) {
+    super(message);
+  }
+}
+
 export interface SdkRun {
   runId: string;
   agentId: string;
@@ -147,8 +157,16 @@ export async function discoverSdkAgents(): Promise<SdkAgent[]> {
 
 export async function findSdkAgentById(agentId: string): Promise<SdkAgent | null> {
   if (!agentId) return null;
-  const index = await getSdkAgentIndex();
-  return index.get(agentId) || null;
+  try {
+    const index = await getSdkAgentIndex();
+    return index.get(agentId) || null;
+  } catch (error) {
+    if (error instanceof SdkIndexSnapshotRequiredError) {
+      const agent = error.agents.find((candidate) => candidate.agentId === agentId);
+      if (agent) return agent;
+    }
+    throw error;
+  }
 }
 
 async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
@@ -157,6 +175,7 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
   }
   const dbPaths = await listSdkIndexDbPaths(CURSOR_PROJECTS_ROOT);
   const index = new Map<string, SdkAgent>();
+  const blocked: SqliteSnapshotRequiredError[] = [];
   for (const dbPath of dbPaths) {
     let handle: IndexDbHandle | null = null;
     try {
@@ -180,11 +199,15 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
         });
       }
     } catch (error) {
-      if (error instanceof SqliteSnapshotRequiredError) throw error;
+      if (error instanceof SqliteSnapshotRequiredError) blocked.push(error);
       // SDK schema differs across Cursor versions; skip databases we can't read.
     } finally {
       closeIndexDb(handle);
     }
+  }
+  // Do not cache partial coverage as a successful full index.
+  if (blocked.length) {
+    throw new SdkIndexSnapshotRequiredError(blocked[0].message, [...index.values()]);
   }
   cachedAgentIndex = index;
   cachedAgentIndexAt = Date.now();

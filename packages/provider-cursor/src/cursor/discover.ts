@@ -14,7 +14,7 @@ import {
   getCursorSessionFingerprints,
   listStoreDbSessionIds,
 } from "./sqlite-reader.js";
-import { discoverSdkAgents, type SdkAgent } from "./sdk-reader.js";
+import { discoverSdkAgents, SdkIndexSnapshotRequiredError, type SdkAgent } from "./sdk-reader.js";
 import { sanitizeCursorUserText } from "./sanitize.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
@@ -51,7 +51,7 @@ async function discoverCursorSessionsOnce(
   let sdkSnapshotError: SqliteSnapshotRequiredError | undefined;
   const sdkAgentsPromise = discoverSdkAgents().catch((error) => {
     if (error instanceof SqliteSnapshotRequiredError) sdkSnapshotError = error;
-    return [] as SdkAgent[];
+    return error instanceof SdkIndexSnapshotRequiredError ? error.agents : ([] as SdkAgent[]);
   });
 
   try {
