@@ -33,7 +33,9 @@ so in your report.
 
 1. **Sync.** `git checkout main` first (a reused checkout may still sit on a
    deleted PR branch — a bare `git pull` would follow the stale upstream),
-   then `git pull` latest `main`. Record the HEAD SHA in the watermark.
+   then `git pull` latest `main`. Note the HEAD SHA as the run's base, but
+   do not write it to `last_verified_commit` yet — that field is only
+   updated after every check below passes.
 2. **Build.** After every sync, run `pnpm install` (a reused checkout's
    `node_modules` can be stale even when present — a pull that only bumps
    an installed dep would otherwise test the old tree), then `pnpm build`.
@@ -48,16 +50,19 @@ so in your report.
    itself. If pnpm fails with EPERM
    on the `packageManager` pin, delete that line from `package.json` for the
    pnpm commands, then `git checkout -- package.json` to restore it — never
-   commit the pin removal. Commit with `git commit --no-verify` (the
-   lefthook hook fails when pnpm is not on PATH); run `pnpm lint:check`
-   yourself instead.
+   commit the pin removal. Ensure `pnpm` is on PATH (`command -v pnpm`) and
+   commit normally per step 7 so the lefthook pre-commit hook runs; never
+   use `--no-verify` to bypass it.
 3. **Discover.** Run `packages/provider-muse`'s own discovery
    (`src/muse/discover.ts` — do not reimplement it) against this machine's
    Muse sessions (`~/agents/<agent-id>/sessions/<agent-id>.jsonl`) and
    confirm sessions from the last 14 days are found.
-4. **Integrity.** Stream (never fully load) recent session files. Flag
-   corrupt/truncated JSONL lines, sessions that fail to parse, and sessions
-   that are truly empty (neither prompts nor tool calls). Separately, flag
+4. **Integrity.** Stream (never fully load) recent session files, skipping
+   files with activity in the last ~60s — this run itself is a Muse agent
+   whose actively appended JSONL is among the recent files, and a partial
+   final record at EOF during an append would otherwise be falsely flagged
+   corrupt. Flag corrupt/truncated JSONL lines (only after confirming the
+   file's size and mtime are stable), sessions that fail to parse, and
    any zero-prompt-but-tool-calls session as a discovery/generation
    mismatch: discovery lists it as replayable, but `hasReplayableContent`
    (`packages/cli/src/server-core.ts`) requires at least one `user-prompt`
@@ -67,7 +72,11 @@ so in your report.
 5. **Drift.** Collect top-level record types, item `type` values, the
    shallow field-name set per type, the tool names actually invoked, and the
    privacy-safe decoded argument-key sets per tool (the `arguments` field is
-   a JSON string — collect key names only, never values) from recent
+   a JSON string — collect key names only, never values), and the nested
+   `message_parts.parts[].type` values with their nested key/type
+   signatures (the parser's `textFromItem` only accepts `{type: "text",
+   text}` parts, so a new part type with unchanged outer keys would
+   otherwise slip past the census), from recent
    sessions; compare with `src/muse/parser.ts` and
    `src/muse/tool-mapping.ts`. A new user-facing Muse feature the parser
    ignores → extend the parser. A new built-in tool name or a changed
