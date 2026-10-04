@@ -697,7 +697,10 @@ async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
     return null;
   }
   if (st.size > MAX_SQLJS_DB_BYTES) return null;
-  const buffer = await readSqliteSnapshot(dbPath).catch(() => null);
+  const buffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
   await assertSqliteSnapshotCurrent(dbPath);
   if (!buffer) return null;
   const db = new SQL.Database(buffer);

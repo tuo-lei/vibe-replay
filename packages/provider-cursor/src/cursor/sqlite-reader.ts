@@ -566,7 +566,10 @@ async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalSta
     return null;
   }
 
-  const dbBuffer = await readSqliteSnapshot(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
   await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
 
@@ -1492,7 +1495,10 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
   } catch {
     return null;
   }
-  const dbBuffer = await readSqliteSnapshot(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
   await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
   const db = new SQL.Database(dbBuffer);
