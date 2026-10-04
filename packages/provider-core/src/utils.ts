@@ -236,16 +236,13 @@ async function stageSqliteSnapshot(path: string): Promise<{ source: string; dire
 
 /** WASM snapshots stay in memory but still reject concurrent source changes. */
 export async function readSqliteSnapshot(path: string): Promise<Buffer> {
-  if (!sqliteNoWrites.getStore()) {
-    await assertSqliteRollbackReadable(path);
-    const bytes = await readFile(path);
-    await assertSqliteRollbackReadable(path);
-    return bytes;
-  }
-  await assertSqliteWalReadable(path);
+  const validate = sqliteNoWrites.getStore()
+    ? assertSqliteWalReadable
+    : assertSqliteRollbackReadable;
+  await validate(path);
   const before = await stat(path, { bigint: true });
   const bytes = await readFile(path);
-  await assertSqliteWalReadable(path);
+  await validate(path);
   const after = await stat(path, { bigint: true });
   if (
     before.size !== after.size ||
