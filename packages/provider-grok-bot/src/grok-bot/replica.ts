@@ -220,7 +220,7 @@ export function replicaSideTurns(raw: unknown): ParsedTurn[] {
 
 export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): ParsedTurn[] {
   const basePool = base
-    .map((turn) => ({ key: turnKey(turn), used: false }))
+    .map((turn) => ({ key: turnKey(turn), timestamp: turn.timestamp, used: false }))
     .filter((item) => !item.key.endsWith(":"));
   const seenExtra = new Set<string>();
   const added: ParsedTurn[] = [];
@@ -230,8 +230,20 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
     const identity = `${key}\0${turn.timestamp || ""}`;
     if (seenExtra.has(identity)) continue;
     seenExtra.add(identity);
-    // JSONL tool-result clocks and UI-entry clocks can differ for the same message.
-    const match = basePool.find((item) => !item.used && item.key === key);
+    // Allow small tool-result/UI clock skew, never match old and recent activity
+    // solely by text. Missing clocks retain legacy one-to-one content matching.
+    const stamp = turn.timestamp ? Date.parse(turn.timestamp) : NaN;
+    const match =
+      basePool.find(
+        (item) =>
+          !item.used &&
+          item.key === key &&
+          item.timestamp &&
+          Math.abs(Date.parse(item.timestamp) - stamp) <= 5_000,
+      ) ||
+      basePool.find(
+        (item) => !item.used && item.key === key && (!item.timestamp || !turn.timestamp),
+      );
     if (match) {
       match.used = true;
       continue;

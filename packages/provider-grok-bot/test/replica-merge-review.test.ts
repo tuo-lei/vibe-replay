@@ -150,6 +150,36 @@ describe("JSONL and Mac replica review regressions", () => {
     );
   });
 
+  it("keeps a newer identical reply when the recent replica no longer has the old copy", async () => {
+    await writeSources(
+      [
+        prompt("finish the task", "2026-10-03T01:00:00.000Z"),
+        {
+          timestamp: "2026-10-03T01:00:01.000Z",
+          role: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "send_message", input: { text: { content: "done" } } },
+            ],
+          },
+        },
+      ],
+      [
+        {
+          kind: "send-message",
+          timestampMs: Date.parse("2026-10-03T04:00:01.000Z"),
+          message: { text: { content: "done" } },
+        },
+      ],
+    );
+    const sessions = await discoverGrokBotSessions([transcripts], false);
+    const parsed = await parseGrokBotSession(sessions[0]!.filePaths);
+    expect(body(parsed)).toEqual(["finish the task", "done", "done"]);
+    expect(
+      parsed.turns.filter((turn) => turn.role === "assistant").map((turn) => turn.timestamp),
+    ).toEqual(["2026-10-03T01:00:01.000Z", "2026-10-03T04:00:01.000Z"]);
+  });
+
   it("keeps incomplete answering-question prose as one multiline prompt", () => {
     const text = "Intro\n[Answering your question generally] here is an explanation.";
     const record = JSON.stringify(prompt(text, "2026-10-03T01:00:00.000Z"));
