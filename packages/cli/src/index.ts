@@ -74,6 +74,7 @@ import {
   readEffectiveReplay,
   resolveCliSource,
   resolveSessionReference,
+  SessionReferenceError,
   sharePreflight,
 } from "./session-workflows.js";
 
@@ -938,10 +939,17 @@ program
       const queryOptions = normalizeSessionsCommandOptions(opts, command);
       const discovery = await discoverCliSessions(queryOptions);
       let sessions = discovery.sessions;
-      if (queryOptions.session)
-        sessions = [
-          resolveSessionReference(sessions, expandUserPath(queryOptions.session), queryOptions),
-        ];
+      if (queryOptions.session) {
+        const ref = expandUserPath(queryOptions.session);
+        try {
+          sessions = [resolveSessionReference(sessions, ref, queryOptions)];
+        } catch (error) {
+          if (!(error instanceof SessionReferenceError) || error.code !== "not-found") throw error;
+          const source = await resolveCliSource(ref, queryOptions, discovery);
+          if (!source.info) throw error;
+          sessions = [source.info];
+        }
+      }
       if (queryOptions.target)
         sessions = sessions.filter(
           (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === queryOptions.target,

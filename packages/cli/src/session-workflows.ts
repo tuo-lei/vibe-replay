@@ -233,7 +233,11 @@ async function inferProvider(path: string): Promise<string> {
   throw new Error("Could not infer the provider from this source. Specify --provider <name>.");
 }
 
-export async function resolveCliSource(ref: string, options: SessionReferenceOptions = {}) {
+export async function resolveCliSource(
+  ref: string,
+  options: SessionReferenceOptions = {},
+  suppliedDiscovery?: Awaited<ReturnType<typeof discoverCliSessions>>,
+) {
   const expanded = expandUserPath(ref);
   const { base, marker, suffix } = splitStorageReference(expanded);
   if (suffix && !marker) throw new Error("Session marker must contain an ID");
@@ -242,7 +246,7 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
     const provider = options.provider || (await inferProvider(path));
     if (!getProvider(provider)) throw new Error(`Unknown provider: ${provider}`);
     // Provider-scoped metadata preserves discovered titles and enriches DB/sidecar sources.
-    const discovery = await discoverCliSessions({ ...options, provider });
+    const discovery = suppliedDiscovery ?? (await discoverCliSessions({ ...options, provider }));
     const matches = discovery.sessions.filter((s) =>
       [s.filePath, ...s.filePaths]
         .filter(Boolean)
@@ -283,7 +287,7 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
       discovery,
     };
   }
-  const discovery = await discoverCliSessions(options);
+  const discovery = suppliedDiscovery ?? (await discoverCliSessions(options));
   let info: SessionInfo;
   try {
     info = resolveSessionReference(discovery.sessions, ref, options);

@@ -58,6 +58,10 @@ it.each(["hermes", "opencode"])(
       for (const scope of [[], ["--provider", provider]]) {
         const { stdout } = await run(["inspect", source, ...scope, "--json"]);
         expect(JSON.parse(stdout)).toMatchObject({ provider, sessionId: "copy-first" });
+        const listed = await run(["sessions", "--session", source, ...scope, "--json"]);
+        expect(JSON.parse(listed.stdout).sessions).toMatchObject([
+          { provider, sessionId: "copy-first" },
+        ]);
       }
       expect((await run(["export", source, "--stdout"])).stdout).toContain(
         "Copied task copy-first",
@@ -72,8 +76,22 @@ it.each(["hermes", "opencode"])(
         code: 1,
         stderr: expect.stringContaining("Ambiguous"),
       });
+      await expect(
+        run(["sessions", "--session", source, "--provider", provider, "--json"]),
+      ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("Ambiguous") });
       const { stdout } = await run(["inspect", `${source}#session:copy-second`, "--json"]);
       expect(JSON.parse(stdout)).toMatchObject({ provider, sessionId: "copy-second" });
+      const listed = await run([
+        "sessions",
+        "--session",
+        `${source}#session:copy-second`,
+        "--provider",
+        provider,
+        "--json",
+      ]);
+      expect(JSON.parse(listed.stdout).sessions).toMatchObject([
+        { provider, sessionId: "copy-second" },
+      ]);
       expect(await readFile(source)).toEqual(multi);
     } finally {
       await rm(root, { recursive: true, force: true });
