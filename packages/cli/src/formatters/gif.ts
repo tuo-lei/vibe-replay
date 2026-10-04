@@ -59,7 +59,7 @@ export async function generateGitHubGif(
   const { frameDelay = 5000, replayUrl } = opts;
   const ghOpts: GitHubFormatOptions = { replayUrl };
 
-  const phases = extractPhases(session.scenes);
+  const phases = extractPhases(session.scenes, session.meta.provider);
   const frames = buildSvgFrames(session, phases, ghOpts);
 
   if (frames.length === 0) {

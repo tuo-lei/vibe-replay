@@ -29,7 +29,7 @@ export function generateGitHubMarkdown(
   opts: GitHubFormatOptions = {},
 ): string {
   const { meta } = session;
-  const phases = extractPhases(session.scenes);
+  const phases = extractPhases(session.scenes, meta.provider);
   const filesChanged = collectFilesChanged(session.scenes);
   const toolStats = computeToolStats(session.scenes);
   const duration = formatDuration(meta.stats.durationMs);
@@ -136,7 +136,7 @@ export function generateGitHubMarkdown(
  * Renders natively on GitHub (CSS @keyframes animation).
  */
 export function generateGitHubSvg(session: ReplaySession, opts: GitHubFormatOptions = {}): string {
-  const phases = extractPhases(session.scenes);
+  const phases = extractPhases(session.scenes, session.meta.provider);
   const frames = buildSvgFrames(session, phases, opts);
   return renderSvg(frames, session, opts);
 }
@@ -246,14 +246,14 @@ type GroupedAction =
   | { kind: "search"; description: string }
   | { kind: "text"; summary: string };
 
-export function extractPhases(scenes: Scene[]): Phase[] {
+export function extractPhases(scenes: Scene[], provider?: string): Phase[] {
   const phases: Phase[] = [];
   let current: { prompt: string; rawActions: RawAction[]; scenes: Scene[] } | null = null;
 
   for (const scene of scenes) {
     if (scene.type === "user-prompt") {
       // Skip system-generated messages (e.g. <bash-stdout>, <task-notification>)
-      const prompt = codexStripTwoPass(scene.content);
+      const prompt = provider === "codex" ? codexStripTwoPass(scene.content) : scene.content;
       if (!prompt || isSystemGeneratedMessage(prompt)) continue;
       if (current) {
         phases.push({

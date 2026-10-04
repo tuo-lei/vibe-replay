@@ -1,5 +1,3 @@
-import { codexStripTwoPass } from "@vibe-replay/provider-codex/constants";
-
 /**
  * Detect system-generated user messages that aren't real human prompts.
  * These should be skipped entirely when looking for meaningful prompts.
@@ -29,7 +27,7 @@ export function previewPrompt(text: string): string {
 export function cleanPromptText(text: unknown): string {
   if (typeof text !== "string") return "";
 
-  let cleaned = codexStripTwoPass(text).trim();
+  let cleaned = text.trim();
   if (!cleaned) return "";
   if (looksLikeConversationSummary(cleaned)) return "";
 
