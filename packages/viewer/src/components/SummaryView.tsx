@@ -459,10 +459,14 @@ export default function SummaryView({ session }: Props) {
           <div className="ui-section-title mb-3">Overview</div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-user" />
-            <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-tool" />
+            <StatCard
+              label="Tool Calls"
+              value={meta.provider === "dot" ? "unavailable" : stats.toolCalls}
+              color="text-terminal-tool"
+            />
             <StatCard
               label="Files Modified"
-              value={stats.editedFiles.length}
+              value={meta.provider === "dot" ? "unavailable" : stats.editedFiles.length}
               color="text-terminal-response"
             />
             <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
@@ -722,7 +726,11 @@ export default function SummaryView({ session }: Props) {
 
         {/* Per-Turn Breakdown Table */}
         {stats.turns.length > 0 && (
-          <TurnTable turns={stats.turns} turnStats={meta.stats.turnStats} />
+          <TurnTable
+            turns={stats.turns}
+            turnStats={meta.stats.turnStats}
+            toolCountsAvailable={meta.provider !== "dot"}
+          />
         )}
 
         {/* File Activity Heatmap */}
@@ -1709,7 +1717,15 @@ function FileActivityHeatmap({
 
 const TURN_TABLE_COLLAPSE = 20;
 
-function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
+function TurnTable({
+  turns,
+  turnStats,
+  toolCountsAvailable = true,
+}: {
+  turns: TurnInfo[];
+  turnStats?: TurnStat[];
+  toolCountsAvailable?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   const { rows, contextDropAfter } = useMemo(() => {
@@ -1776,6 +1792,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
                 hasTokens={!!hasTokens}
                 colCount={colCount}
                 showContextDrop={contextDropAfter.has(r.index)}
+                toolCountsAvailable={toolCountsAvailable}
               />
             ))}
           </tbody>
@@ -1809,6 +1826,7 @@ function TurnRow({
   hasTokens,
   colCount,
   showContextDrop,
+  toolCountsAvailable,
 }: {
   row: {
     index: number;
@@ -1829,6 +1847,7 @@ function TurnRow({
   hasTokens: boolean;
   colCount: number;
   showContextDrop: boolean;
+  toolCountsAvailable: boolean;
 }) {
   return (
     <>
@@ -1845,7 +1864,11 @@ function TurnRow({
           </div>
         </td>
         <td className="px-2 py-1 text-right tabular-nums">
-          <HeatCell value={r.toolCount} ratio={r.toolRatio} color="--orange" />
+          {toolCountsAvailable ? (
+            <HeatCell value={r.toolCount} ratio={r.toolRatio} color="--orange" />
+          ) : (
+            "unavailable"
+          )}
         </td>
         {hasDuration && (
           <td className="px-2 py-1 text-right tabular-nums">

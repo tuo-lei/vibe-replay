@@ -466,8 +466,6 @@ it.each(["dot", "codex"])(
     fireEvent.click(await screen.findByText("Synthetic source snapshot"));
     await screen.findByRole("region", { name: "Session details" });
     expect(screen.queryByRole("button", { name: "Watch live" }) !== null).toBe(provider !== "dot");
-    expect(screen.queryByRole("button", { name: "Live", exact: true }) !== null).toBe(
-      provider !== "dot",
-    );
+    expect(screen.queryByRole("button", { name: "Live" }) !== null).toBe(provider !== "dot");
   },
 );
