@@ -80,7 +80,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v38: retain compact per-turn duration/tool/token metrics for distributions.
 // v39: keep short CJK Grok Bot prompts as Explore firstPrompt instead of skipping
 // them for the 10-character English-oriented threshold.
-export const SCANNER_VERSION = 39;
+// v40: dot conversation imports have no observed per-turn execution metrics.
+export const SCANNER_VERSION = 40;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -845,11 +846,16 @@ interface SubAgentLine {
 export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
   if (input.provider === "dot") {
     const parsed = await parseDotSession(input.filePaths);
+    if (input.sourceFingerprint && input.sourceFingerprint !== parsed.sessionId)
+      throw new Error(
+        "The dot export changed since discovery. Refresh the session list and retry.",
+      );
     return {
       ...buildScanResultFromParsed(input, parsed),
       usageIndexed: false,
       usageSummary: undefined,
       usageEvents: undefined,
+      turnMetrics: undefined,
       startTime: parsed.startTime,
       endTime: parsed.endTime,
       durationMs: undefined,

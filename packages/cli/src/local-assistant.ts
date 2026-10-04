@@ -1266,7 +1266,7 @@ function buildSessionMetricDistributions(
   };
   for (const scan of scans) {
     if (scan.durationMs !== undefined) values.durationMs.push(scan.durationMs);
-    values.toolCalls.push(scan.toolCallCount);
+    if (scan.provider !== "dot") values.toolCalls.push(scan.toolCallCount);
     values.turns.push(scan.promptCount);
     if (scan.tokenUsage) {
       values.tokens.push(
@@ -1290,6 +1290,7 @@ function buildPerTurnDistributions(
 ): AssistantPerTurnDistributions | undefined {
   const values = { durationMs: [] as number[], toolCalls: [] as number[], tokens: [] as number[] };
   for (const scan of scans) {
+    if (scan.provider === "dot") continue;
     for (const turn of scan.turnMetrics || []) {
       if (turn.durationMs !== undefined) values.durationMs.push(turn.durationMs);
       values.toolCalls.push(turn.toolCalls);

@@ -20,6 +20,8 @@ node packages/cli/dist/index.js --provider dot --session export.json --open
 
 `-p dot` is the short form of `--provider dot`. The explicit provider selects the
 dot importer for the JSON input. `--open` opens the generated replay locally.
+Imports use the neutral title “dot conversation” to keep prompt contents out of
+metadata titles; set `--title` explicitly if you want a custom title.
 Importing a file does not require discovery to be configured.
 
 Import one JSON file containing one saved conversation window at a time. The
@@ -99,6 +101,8 @@ of a SHA-256 hash of message IDs, room order, deletion state, visible content,
 timestamps, and partial status. It identifies a supplied snapshot, not a native
 dot session. Corrections and deletions produce distinct snapshots rather than
 silently competing with an older file during provider deduplication.
+If a file changes after discovery, generation rejects stale session metadata;
+refresh the session list before generating the changed snapshot.
 
 A room response can include messages and replies mirrored from Slack as well as
 the current dot conversation. The importer preserves their supplied order; it
@@ -139,8 +143,9 @@ the assistant's execution:
   computation occurred.
 - Attachment contents are not imported or fetched. A message containing only an
   attachment does not provide a text scene.
-- Message timestamps describe the supplied messages, not tool durations or model
-  latency. If no valid timestamp exists, the conversation start and end remain
+- Message timestamps are retained only as conversation start/end metadata in
+  generated replays. They are omitted from scene timing so gaps between chat
+  messages cannot appear as LLM wait or represented agent time. If no valid timestamp exists, the conversation start and end remain
   unavailable rather than being replaced by the import date.
 - Reply metadata in the input does not supply missing parent messages or a full
   conversation history.

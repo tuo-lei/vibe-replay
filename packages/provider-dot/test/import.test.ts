@@ -206,3 +206,53 @@ it("discovers assistant-only windows and edited snapshots independently", async 
   expect(new Set(sessions.map((session) => session.sessionId)).size).toBe(2);
   expect(sessions.map((session) => session.transcriptStatus)).toEqual([undefined, undefined]);
 });
+
+it("keeps chat gaps out of execution timing while preserving conversation bounds", () => {
+  const parsed = parseDotExport(
+    page([message("gap-user")], {
+      ...message("gap-assistant", "aeon"),
+      sent_at: "2026-10-07T01:00:00Z",
+    }),
+  );
+  const replay = transformToReplay(parsed, "dot", "dot conversations");
+  expect(replay.meta.startTime).toBe("2026-10-04T01:00:00.000Z");
+  expect(replay.meta.endTime).toBe("2026-10-07T01:00:00.000Z");
+  expect(replay.scenes.map((scene) => scene.timestamp)).toEqual([undefined, undefined]);
+  const nativeReplay = transformToReplay(parsed, "codex", "test project");
+  expect(nativeReplay.scenes.map((scene) => scene.timestamp)).toEqual([
+    "2026-10-04T01:00:00.000Z",
+    "2026-10-07T01:00:00.000Z",
+  ]);
+});
+
+it("uses a neutral metadata title instead of copying private prompt text", () => {
+  const parsed = parseDotExport(
+    page([message("private-title", "user", "Private synthetic project details")]),
+  );
+  expect(parsed.title).toBe("dot conversation");
+  expect(transformToReplay(parsed, "dot", "dot conversations").meta.title).toBe("dot conversation");
+});
+
+it("adds dot context to malformed JSON while preserving read and shape errors", async () => {
+  const dir = await directory();
+  const path = join(dir, "bad.json");
+  await writeFile(path, "{");
+  await expect(parseDotSession(path)).rejects.toThrow("The dot export is not valid JSON:");
+  await writeFile(path, "{}");
+  await expect(parseDotSession(path)).rejects.toThrow("Expected a dot conversation read response");
+  await expect(parseDotSession(join(dir, "missing.json"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("rejects generation when an export changed after discovery", async () => {
+  const dir = await directory();
+  const path = join(dir, "export.json");
+  vi.stubEnv("DOT_EXPORTS_DIR", dir);
+  await writeFile(path, JSON.stringify(page([message("original")])));
+  const [discovered] = await discoverDotSessions();
+  await writeFile(path, JSON.stringify(page([message("original", "user", "Changed message.")])));
+  await expect(parseDotSession(path, discovered)).rejects.toThrow("changed since discovery");
+  const [refreshed] = await discoverDotSessions();
+  expect((await parseDotSession(path, refreshed)).sessionId).toBe(refreshed.sessionId);
+});

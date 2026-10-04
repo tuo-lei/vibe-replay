@@ -9,6 +9,7 @@ import type {
 } from "@vibe-replay/provider-contract";
 
 type RecordValue = Record<string, unknown>;
+/** Narrow an untrusted JSON value to a non-array object. */
 function record(value: unknown): value is RecordValue {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -86,9 +87,6 @@ export function parseDotExport(value: unknown): ProviderParseResult {
     )
     .digest("hex")
     .slice(0, 20);
-  const title = turns
-    .find((turn) => turn.role === "user")
-    ?.blocks.find((block) => block.type === "text");
   const notes = [...DOT_IMPORT_NOTES];
   if (!times.length)
     notes.push(
@@ -103,7 +101,7 @@ export function parseDotExport(value: unknown): ProviderParseResult {
   return {
     sessionId: `dot-${identity}`,
     slug: `dot-${identity}`,
-    title: title?.type === "text" ? title.text.slice(0, 80) : "dot conversation",
+    title: "dot conversation",
     cwd: "",
     turns,
     startTime: times[0],
@@ -113,6 +111,7 @@ export function parseDotExport(value: unknown): ProviderParseResult {
   };
 }
 
+/** Import one saved response and reject stale discovery metadata. */
 export async function parseDotSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -122,14 +121,21 @@ export async function parseDotSession(
     throw new Error(
       "Import one dot conversation window per JSON file; multi-file merging is not supported.",
     );
-  const result = parseDotExport(JSON.parse(await readFile(paths[0], "utf8")));
+  const text = await readFile(paths[0], "utf8");
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new Error(`The dot export is not valid JSON: ${error.message}`, { cause: error });
+    throw error;
+  }
+  const result = parseDotExport(raw);
   if (!result.turns.length)
     throw new Error("The dot export contains no replayable conversation text.");
-  return {
-    ...result,
-    sessionId: sessionInfo?.sessionId || result.sessionId,
-    slug: sessionInfo?.slug || result.slug,
-  };
+  if (sessionInfo && sessionInfo.sessionId !== result.sessionId)
+    throw new Error("The dot export changed since discovery. Refresh the session list and retry.");
+  return result;
 }
 
 /** Optional, explicit flat export directory. There is deliberately no default raw-log scan. */
@@ -157,6 +163,7 @@ export async function discoverDotSessions(): Promise<SessionInfo[]> {
       sessions.push({
         provider: "dot",
         sessionId: parsed.sessionId,
+        sourceFingerprint: parsed.sessionId,
         slug: parsed.slug,
         title: parsed.title,
         project: "dot conversations",
