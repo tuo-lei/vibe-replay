@@ -53,72 +53,88 @@ async function discoverCursorSessionsOnce(
     return [] as SdkAgent[];
   });
 
-  let projectDirs: string[];
   try {
-    projectDirs = await readdir(CURSOR_DIR);
-  } catch {
-    projectDirs = [];
-  }
-
-  const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
-    discoverProjectSessions(projDir),
-  );
-  for (const projectSessionList of projectSessions) {
-    sessions.push(...projectSessionList);
-  }
-  const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
-  const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
-  sessions.length = 0;
-  sessions.push(
-    ...mergedTranscriptSessions.filter(
-      (session) => !hiddenTranscriptSessionIds.has(session.sessionId),
-    ),
-  );
-
-  // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
-  const transcriptSessions = mergedTranscriptSessions;
-  const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
-  const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-  const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
-  sessions.push(...sqliteOnly);
-  for (const s of sqliteOnly) knownIds.add(s.sessionId);
-
-  // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
-  const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths, options);
-  sessions.push(...globalState.sessions);
-  const globalStateById = new Map(
-    globalState.allSessions.map((session) => [session.sessionId, session]),
-  );
-
-  // Mark transcript-discovered sessions that have any SQLite-backed rich data.
-  const storeDbSessionIds = await listStoreDbSessionIds();
-  for (const session of transcriptSessions) {
-    const hasStoreDb = storeDbSessionIds.has(session.sessionId);
-    session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
-    const globalStateSession = globalStateById.get(session.sessionId);
-    if (globalStateSession?.compactionCount) {
-      session.compactionCount = Math.max(
-        session.compactionCount || 0,
-        globalStateSession.compactionCount,
-      );
+    let projectDirs: string[];
+    try {
+      projectDirs = await readdir(CURSOR_DIR);
+    } catch {
+      projectDirs = [];
     }
-  }
 
-  // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
-  // store. Mark transcripts that also have an SDK record so the parser can enrich
-  // them with structured tool results, run timing, and per-turn model.
-  await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
-  const fingerprints = await getCursorSessionFingerprints(
-    sessions.map((session) => session.sessionId),
-  );
-  for (const session of sessions) {
-    const fingerprint = fingerprints.get(session.sessionId);
-    if (fingerprint) session.sourceFingerprint = fingerprint;
-  }
+    const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
+      discoverProjectSessions(projDir),
+    );
+    for (const projectSessionList of projectSessions) {
+      sessions.push(...projectSessionList);
+    }
+    const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
+    const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
+    sessions.length = 0;
+    sessions.push(
+      ...mergedTranscriptSessions.filter(
+        (session) => !hiddenTranscriptSessionIds.has(session.sessionId),
+      ),
+    );
 
-  sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  if (sdkSnapshotError) throw new SqliteSnapshotRequiredError(sdkSnapshotError.message, sessions);
-  return sessions;
+    // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
+    const transcriptSessions = mergedTranscriptSessions;
+    const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
+    const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+    const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
+    sessions.push(...sqliteOnly);
+    for (const s of sqliteOnly) knownIds.add(s.sessionId);
+
+    // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
+    const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths, options);
+    sessions.push(...globalState.sessions);
+    const globalStateById = new Map(
+      globalState.allSessions.map((session) => [session.sessionId, session]),
+    );
+
+    // Mark transcript-discovered sessions that have any SQLite-backed rich data.
+    const storeDbSessionIds = await listStoreDbSessionIds();
+    for (const session of transcriptSessions) {
+      const hasStoreDb = storeDbSessionIds.has(session.sessionId);
+      session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
+      const globalStateSession = globalStateById.get(session.sessionId);
+      if (globalStateSession?.compactionCount) {
+        session.compactionCount = Math.max(
+          session.compactionCount || 0,
+          globalStateSession.compactionCount,
+        );
+      }
+    }
+
+    // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
+    // store. Mark transcripts that also have an SDK record so the parser can enrich
+    // them with structured tool results, run timing, and per-turn model.
+    await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
+    const fingerprints = await getCursorSessionFingerprints(
+      sessions.map((session) => session.sessionId),
+    );
+    for (const session of sessions) {
+      const fingerprint = fingerprints.get(session.sessionId);
+      if (fingerprint) session.sourceFingerprint = fingerprint;
+    }
+
+    sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    if (sdkSnapshotError) throw new SqliteSnapshotRequiredError(sdkSnapshotError.message, sessions);
+    return sessions;
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) {
+      const partial = new Map(
+        [...sessions, ...error.sessions].map((session) => [
+          `${session.sessionId}::${session.filePath}`,
+          session,
+        ]),
+      );
+      throw new SqliteSnapshotRequiredError(error.message, [...partial.values()]);
+    }
+    throw error;
+  } finally {
+    // Finish the parallel index before the readonly scope cleans up its snapshots.
+    await sdkAgentsPromise;
+  }
 }
 
 /**

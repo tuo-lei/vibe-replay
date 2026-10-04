@@ -750,7 +750,8 @@ async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     canUse = false;
   }
   sqliteCliCheckCache.set(dbPath, { canUse, checkedAt: Date.now() });

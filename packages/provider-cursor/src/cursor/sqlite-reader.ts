@@ -352,7 +352,8 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     canUse = false;
   }
   sqliteCliUsabilityCache.set(dbPath, { canUse, checkedAt: Date.now() });
@@ -1539,16 +1540,25 @@ export async function discoverSqliteOnlySessions(
     (entry) => !knownSessionIds.has(entry.sessionId),
   );
   const metadataConcurrency = 8;
+  const blocked: SqliteSnapshotRequiredError[] = [];
 
   for (let offset = 0; offset < candidates.length; offset += metadataConcurrency) {
     const batch = candidates.slice(offset, offset + metadataConcurrency);
-    const previews = await Promise.all(
+    const previews = await Promise.allSettled(
       batch.map(async (entry) => ({
         entry,
         metaPreview: await readStoreDbMeta(entry.dbPath),
       })),
     );
-    for (const { entry, metaPreview } of previews) {
+    for (const preview of previews) {
+      if (preview.status === "rejected") {
+        if (preview.reason instanceof SqliteSnapshotRequiredError) {
+          blocked.push(preview.reason);
+          continue;
+        }
+        throw preview.reason;
+      }
+      const { entry, metaPreview } = preview.value;
       if (!metaPreview?.hasReplayableRoot) continue;
       const meta = metaPreview.meta;
 
@@ -1577,6 +1587,7 @@ export async function discoverSqliteOnlySessions(
     }
   }
 
+  if (blocked.length) throw new SqliteSnapshotRequiredError(blocked[0].message, sessions);
   return sessions;
 }
 
