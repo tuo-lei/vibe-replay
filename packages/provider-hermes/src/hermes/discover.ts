@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Database } from "sql.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { shortenPath } from "@vibe-replay/provider-core/utils";
+import { shortenPath, SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import { hermesDataDir, hermesDbPath, hermesProfileDir, openAllHermesDbs } from "./sqlite.js";
 
 export const HERMES_PROVIDER = "hermes";
@@ -47,8 +47,12 @@ function rowValues(db: Database, sql: string, params: Record<string, any> = {}):
 }
 
 export async function discoverHermesSessions(): Promise<SessionInfo[]> {
-  const all = await openAllHermesDbs();
-  if (all.length === 0) return [];
+  const blocked: SqliteSnapshotRequiredError[] = [];
+  const all = await openAllHermesDbs((error) => blocked.push(error));
+  if (all.length === 0) {
+    if (blocked.length) throw blocked[0];
+    return [];
+  }
   const sessions: SessionInfo[] = [];
   const seen = new Set<string>();
   try {
@@ -71,6 +75,7 @@ export async function discoverHermesSessions(): Promise<SessionInfo[]> {
   }
   // Deterministic ordering: newest last_activity first across profiles.
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  if (blocked.length) throw new SqliteSnapshotRequiredError(blocked[0].message, sessions);
   return sessions;
 }
 

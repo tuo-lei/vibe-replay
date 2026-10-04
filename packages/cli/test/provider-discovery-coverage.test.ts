@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import { discoverProvidersSafely } from "../src/provider-discovery.js";
-import type { Provider } from "../src/types.js";
+import type { Provider, SessionInfo } from "../src/types.js";
 
 vi.mock("../src/remote.js", () => ({
   discoverConfiguredRemoteSessions: async () => ({ sessions: [], failedTargets: [] }),
@@ -58,4 +58,29 @@ it("reports checkpoint-required coverage without exposing a source error's priva
     },
   ]);
   expect(JSON.stringify(result)).not.toContain("PRIVATE SOURCE");
+});
+
+it("retains healthy sessions while exposing partial checkpoint-required coverage", async () => {
+  const healthy = {
+    provider: "hermes",
+    sessionId: "healthy-profile",
+    filePath: "/healthy/state.db#session:healthy-profile",
+    filePaths: ["/healthy/state.db#session:healthy-profile"],
+  } as SessionInfo;
+  const provider = {
+    name: "hermes",
+    displayName: "Hermes",
+    discover: async () => {
+      throw new SqliteSnapshotRequiredError("A profile requires checkpointing", [healthy]);
+    },
+    parse: vi.fn(),
+  } as Provider;
+  const onSession = vi.fn();
+  const result = await discoverProvidersSafely([provider], onSession, { readOnly: true });
+  expect(result.sessions).toEqual([healthy]);
+  expect(result.failedProviders).toEqual(["hermes"]);
+  expect(result.coverage).toMatchObject([
+    { provider: "hermes", status: "failed", sessionCount: 1, errorCode: "checkpoint-required" },
+  ]);
+  expect(onSession).toHaveBeenCalledExactlyOnceWith(healthy);
 });

@@ -1,3 +1,4 @@
+import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -160,7 +161,10 @@ export function normalizeGitUrl(url: string): string | undefined {
 }
 
 export class SqliteSnapshotRequiredError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly sessions: SessionInfo[] = [],
+  ) {
     super(message);
     this.name = "SqliteSnapshotRequiredError";
   }

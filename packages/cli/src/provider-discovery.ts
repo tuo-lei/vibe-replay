@@ -44,20 +44,23 @@ export async function discoverProvidersSafely(
 
   for (const provider of providers) {
     let sessions: SessionInfo[];
+    let failed = false;
     try {
       sessions = options?.readOnly
         ? await provider.discover({ readOnly: true })
         : await provider.discover();
     } catch (error) {
+      failed = true;
       failedProviders.push(provider.name);
       const checkpointError = error instanceof SqliteSnapshotRequiredError;
       const schemaError =
         error instanceof Error &&
         /no such (?:table|column)|unsupported.*schema/i.test(error.message);
+      sessions = checkpointError ? error.sessions : [];
       coverage.push({
         provider: provider.name,
         status: "failed",
-        sessionCount: 0,
+        sessionCount: sessions.length,
         errorCode: checkpointError
           ? "checkpoint-required"
           : schemaError
@@ -72,13 +75,13 @@ export async function discoverProvidersSafely(
       if (process.env.VIBE_REPLAY_DEBUG) {
         console.error(`[vibe-replay] ${provider.name} discovery failed:`, error);
       }
-      continue;
     }
-    coverage.push({
-      provider: provider.name,
-      status: sessions.length ? "ready" : "empty",
-      sessionCount: sessions.length,
-    });
+    if (!failed)
+      coverage.push({
+        provider: provider.name,
+        status: sessions.length ? "ready" : "empty",
+        sessionCount: sessions.length,
+      });
     for (const session of sessions) {
       allSessions.push(session);
       await onSession?.(session);

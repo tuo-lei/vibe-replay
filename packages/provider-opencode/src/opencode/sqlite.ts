@@ -1,6 +1,9 @@
 /// <reference path="../sql-js.d.ts" />
 import { readFile } from "node:fs/promises";
-import { assertSqliteSnapshotCurrent } from "@vibe-replay/provider-core/utils";
+import {
+  assertSqliteSnapshotCurrent,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
@@ -57,10 +60,12 @@ export async function openOpencodeDb(
   try {
     const SQL = await getSqlJs();
     const buffer = await readFile(dbPath);
+    await assertSqliteSnapshotCurrent(dbPath);
     if (buffer.length < 1024) return null;
     const db = new SQL.Database(buffer);
     return { db, dbPath };
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }
