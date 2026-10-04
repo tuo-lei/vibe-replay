@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
+import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
 import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, TokenUsage } from "@vibe-replay/provider-contract";
 import type { TurnStat } from "@vibe-replay/types";
@@ -705,8 +705,8 @@ function closeIndexDb(handle: IndexDbHandle | null): void {
 
 async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<string, any>[]> {
   if (handle.backend === "sqlite-cli") {
-    await assertSqliteWalReadable(handle.dbPath);
-    const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", handle.dbPath, sql], {
+    const source = await sqliteReadOnlyLocation(handle.dbPath);
+    const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
       maxBuffer: 64 * 1024 * 1024,
       timeout: 60_000,
     });
@@ -722,7 +722,7 @@ const sqliteCliCheckCache = new Map<string, { canUse: boolean; checkedAt: number
 const SQLITE_CLI_CHECK_TTL_MS = 30_000;
 
 async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
-  await assertSqliteWalReadable(dbPath);
+  const source = await sqliteReadOnlyLocation(dbPath);
   const cached = sqliteCliCheckCache.get(dbPath);
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_CHECK_TTL_MS) return cached.canUse;
 
@@ -730,7 +730,7 @@ async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(
       "sqlite3",
-      ["-readonly", "-json", dbPath, "SELECT json_valid('{}') AS ok;"],
+      ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"],
       { maxBuffer: 1024 * 1024 },
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;

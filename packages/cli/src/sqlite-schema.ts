@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 
-import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
+import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
 
 const TABLE_QUERY = "SELECT name FROM sqlite_master WHERE type = 'table'";
 const MAX_WASM_PROBE_BYTES = 32 * 1024 * 1024;
@@ -9,13 +9,13 @@ const MAX_WASM_PROBE_BYTES = 32 * 1024 * 1024;
 export async function inferSqliteProvider(path: string): Promise<string | undefined> {
   const size = (await stat(path)).size;
   if (size < 1024) return undefined;
-  await assertSqliteWalReadable(path);
+  const source = await sqliteReadOnlyLocation(path);
   let names: unknown[];
   try {
     names = await new Promise<unknown[]>((resolve, reject) => {
       execFile(
         "sqlite3",
-        ["-readonly", "-json", path, TABLE_QUERY],
+        ["-readonly", "-json", source, TABLE_QUERY],
         { timeout: 5_000, maxBuffer: 64 * 1024 },
         (error, stdout) => {
           if (error) return reject(error);

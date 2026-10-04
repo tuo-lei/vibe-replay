@@ -577,3 +577,50 @@ describe("OpenCode v2 storage compatibility", () => {
     }
   });
 });
+
+it("preserves inline v2 tool images with recorded bytes preferred over URI fallback", async () => {
+  const db = await v2Db();
+  try {
+    add(db, "u-inline", "user", 0, { text: "Read these screenshots" });
+    add(db, "a-inline", "assistant", 1, {
+      content: [
+        {
+          type: "tool",
+          id: "inline-images",
+          name: "read",
+          state: {
+            status: "completed",
+            input: { filePath: "/repo/screenshot.png" },
+            content: [
+              { type: "file", data: "YWJjZA==", mime: "image/png" },
+              {
+                type: "file",
+                data: "eHl6",
+                uri: "https://example.com/unused.webp",
+                mime: "image/webp",
+              },
+              {
+                type: "file",
+                data: "",
+                uri: "https://example.com/fallback.png",
+                mime: "image/png",
+              },
+              { type: "file", data: "eHl6", mime: "text/plain" },
+              { type: "file", mime: "image/png" },
+            ],
+          },
+        },
+      ],
+    });
+    expect(parseSessionFromDb(db, "ses_parent").turns[1].blocks[0]).toMatchObject({
+      type: "tool_use",
+      _images: [
+        "data:image/png;base64,YWJjZA==",
+        "data:image/webp;base64,eHl6",
+        "https://example.com/fallback.png",
+      ],
+    });
+  } finally {
+    db.close();
+  }
+});

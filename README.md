@@ -230,9 +230,9 @@ when they contain multiple sessions. Cursor SDK database copies also need the
 agent's JSONL transcript beside the database (or its `agent-transcripts` folder)
 to supply user prompts. Provider inference uses a bounded read-only `sqlite3` query
 when available; without it, databases above 32 MiB require `--provider` to skip
-loading another WASM snapshot solely for detection. WAL snapshots missing their
-shared-memory sidecar must be checkpointed in the source application before
-read-only queries, so SQLite cannot create a sidecar during export or preflight.
+loading another WASM snapshot solely for detection. Checkpointed WAL-mode copies work without sidecar files. Copies with pending WAL
+but no shared-memory sidecar must be checkpointed in the source application
+before read-only queries, so export or preflight cannot create SQLite sidecars.
 `doctor --json` reports provider coverage and compatibility failures. Search output
 marks partial discovery, and empty results include recovery suggestions.
 

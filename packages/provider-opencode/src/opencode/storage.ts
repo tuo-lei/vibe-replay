@@ -184,11 +184,16 @@ export function prepareOpencodeStorage(db: Database, sessionId?: string): void {
                   .filter(
                     (item) =>
                       item.type === "file" &&
-                      typeof item.uri === "string" &&
                       typeof item.mime === "string" &&
-                      item.mime.startsWith("image/"),
+                      item.mime.startsWith("image/") &&
+                      ((typeof item.data === "string" && !!item.data) ||
+                        typeof item.uri === "string"),
                   )
-                  .map((item) => item.uri),
+                  .map((item) =>
+                    typeof item.data === "string" && item.data
+                      ? `data:${item.mime};base64,${item.data}`
+                      : item.uri,
+                  ),
                 metadata: { ...metadata, sessionId: metadata.sessionId || metadata.sessionID },
                 time: { start: toolTime.ran || toolTime.created, end: toolTime.completed },
               },

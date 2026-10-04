@@ -14,7 +14,7 @@ import type {
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
-import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
+import { sqliteReadOnlyLocation } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   buildTurnDurationIntervals,
@@ -332,7 +332,7 @@ const SQLITE_CLI_NEGATIVE_CACHE_TTL_MS = 30_000;
 const sqliteCliUsabilityCache = new Map<string, SqliteCliUsabilityCacheEntry>();
 
 async function canUseSqliteCli(dbPath: string): Promise<boolean> {
-  await assertSqliteWalReadable(dbPath);
+  const source = await sqliteReadOnlyLocation(dbPath);
   const cached = sqliteCliUsabilityCache.get(dbPath);
   if (cached?.canUse) return true;
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_NEGATIVE_CACHE_TTL_MS) return false;
@@ -341,7 +341,7 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(
       "sqlite3",
-      ["-readonly", "-json", dbPath, "SELECT json_valid('{}') AS ok;"],
+      ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"],
       {
         maxBuffer: 1024 * 1024,
       },
@@ -356,8 +356,8 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
 }
 
 async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
-  await assertSqliteWalReadable(dbPath);
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", dbPath, sql], {
+  const source = await sqliteReadOnlyLocation(dbPath);
+  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
     maxBuffer: SQLITE_CLI_MAX_BUFFER,
     timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
   });
@@ -367,8 +367,8 @@ async function querySqliteCli(dbPath: string, sql: string): Promise<Record<strin
 }
 
 async function querySqliteCliText(dbPath: string, sql: string): Promise<string> {
-  await assertSqliteWalReadable(dbPath);
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", dbPath, sql], {
+  const source = await sqliteReadOnlyLocation(dbPath);
+  const { stdout } = await execFileAsync("sqlite3", ["-readonly", source, sql], {
     maxBuffer: SQLITE_CLI_MAX_BUFFER,
     timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
   });

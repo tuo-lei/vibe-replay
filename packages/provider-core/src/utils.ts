@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -159,6 +160,8 @@ export function normalizeGitUrl(url: string): string | undefined {
 
 /** SQLite's readonly mode can create a missing WAL shared-memory sidecar. */
 export async function assertSqliteWalReadable(path: string): Promise<void> {
+  // SQLite resolves file symlinks before selecting the WAL/SHM filenames.
+  path = existsSync(path) ? realpathSync(path) : path;
   if (!existsSync(`${path}-wal`)) return;
   const wal = await stat(`${path}-wal`);
   if (wal.size === 0) return;
@@ -166,4 +169,13 @@ export async function assertSqliteWalReadable(path: string): Promise<void> {
     throw new Error(
       "The database has an active WAL but no shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay; a read-only query could otherwise create a -shm file.",
     );
+}
+
+/** Checkpointed snapshots need no WAL coordination and can be opened immutably. */
+export async function sqliteReadOnlyLocation(path: string): Promise<string> {
+  await assertSqliteWalReadable(path);
+  if (!existsSync(path)) return path;
+  path = realpathSync(path);
+  if (existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) return path;
+  return `${pathToFileURL(path).href}?immutable=1`;
 }
