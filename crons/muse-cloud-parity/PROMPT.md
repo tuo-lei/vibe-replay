@@ -35,7 +35,10 @@ so in your report.
    deleted PR branch — a bare `git pull` would follow the stale upstream),
    then `git pull` latest `main`. Note the HEAD SHA as the run's base, but
    do not write it to `last_verified_commit` yet — that field is only
-   updated after every check below passes.
+   updated after every check below passes, and then to the SHA that
+   actually passed them: the base SHA for a clean run, or the merged PR's
+   merge-commit SHA for a run that shipped fixes (the pre-fix base failed
+   checks and must never be recorded as verified).
 2. **Build.** After every sync, run `pnpm install` (a reused checkout's
    `node_modules` can be stale even when present — a pull that only bumps
    an installed dep would otherwise test the old tree), then `pnpm build`.
@@ -82,7 +85,11 @@ so in your report.
    provenance-label set (the parser's `isRuntimeInjectionSource` branches
    on exact labels like `scheduler.cron` and the `runtime.*` prefix, so a
    new scheduler/background label with an unchanged record shape would
-   otherwise go undetected), from recent
+   otherwise go undetected), and privacy-safe key/type signatures for
+   ordinary record and item fields (e.g. `text: string`,
+   `output: string|object` — the parser's string checks silently drop
+   content when a relied-on field changes type without changing keys),
+   from recent
    sessions; compare with `src/muse/parser.ts` and
    `src/muse/tool-mapping.ts`. A new user-facing Muse feature the parser
    ignores → extend the parser. A new built-in tool name or a changed
