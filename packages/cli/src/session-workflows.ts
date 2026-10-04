@@ -105,16 +105,28 @@ export function resolveSessionReference(
   );
 }
 
+function splitStorageReference(ref: string) {
+  const match = /#(?:session|composerData):/.exec(ref);
+  return {
+    base: match ? ref.slice(0, match.index) : ref,
+    marker: match ? ref.slice(match.index + match[0].length) : undefined,
+    suffix: match ? ref.slice(match.index) : "",
+  };
+}
+
 function pathExists(ref: string): boolean {
-  return existsSync(expandUserPath(ref).split("#session:")[0]);
+  return existsSync(splitStorageReference(expandUserPath(ref)).base);
 }
 
 async function inferProvider(path: string): Promise<string> {
-  if (path.includes("#session:")) {
-    if (path.includes("opencode")) return "opencode";
-    if (path.includes("hermes")) return "hermes";
+  const { base, marker, suffix } = splitStorageReference(path);
+  const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
+  if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
+  if (marker) {
+    if (base.includes("opencode")) return "opencode";
+    if (base.includes("hermes")) return "hermes";
   }
-  const file = await open(path, "r");
+  const file = await open(base, "r");
   let head: string;
   try {
     const buffer = Buffer.alloc(64_000);
@@ -125,7 +137,7 @@ async function inferProvider(path: string): Promise<string> {
   }
   if (/"type"\s*:\s*"session_meta"/.test(head)) return "codex";
   if (/"type"\s*:\s*"session"/.test(head) && /"version"\s*:/.test(head)) return "pi";
-  if (path.includes(".cursor") || /\[user\]/.test(head)) return "cursor";
+  if (cursorPath || /\[user\]/.test(head)) return "cursor";
   if (
     /"type"\s*:\s*"(?:user|assistant|system)"/.test(head) &&
     /"(?:sessionId|uuid)"\s*:/.test(head)
@@ -136,8 +148,9 @@ async function inferProvider(path: string): Promise<string> {
 
 export async function resolveCliSource(ref: string, options: SessionReferenceOptions = {}) {
   const expanded = expandUserPath(ref);
-  const [base, marker] = expanded.split("#session:");
-  const path = resolve(base) + (marker ? `#session:${marker}` : "");
+  const { base, marker, suffix } = splitStorageReference(expanded);
+  if (suffix && !marker) throw new Error("Session marker must contain an ID");
+  const path = resolve(base) + suffix;
   if (pathExists(path)) {
     const provider = options.provider || (await inferProvider(path));
     if (!getProvider(provider)) throw new Error(`Unknown provider: ${provider}`);
@@ -146,8 +159,8 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
     const matches = discovery.sessions.filter((s) =>
       [s.filePath, ...s.filePaths].some((candidate) =>
         marker
-          ? candidate.split("#session:")[0] === resolve(base)
-          : candidate === path || candidate.split("#session:")[0] === path,
+          ? splitStorageReference(candidate).base === resolve(base)
+          : candidate === path || splitStorageReference(candidate).base === path,
       ),
     );
     const scoped = options.target
