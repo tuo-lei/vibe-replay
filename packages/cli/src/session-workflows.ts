@@ -196,6 +196,38 @@ async function discoverDatabaseSessions(path: string, provider: string): Promise
   return [];
 }
 
+function looksLikeGrokTranscript(head: string): boolean {
+  for (const line of head.split("\n")) {
+    try {
+      const record = JSON.parse(line);
+      const blocks = record?.message?.content;
+      if (!Array.isArray(blocks)) continue;
+      if (
+        record.role === "user" &&
+        blocks.some(
+          (block) =>
+            block?.type === "text" &&
+            typeof block.text === "string" &&
+            /^\s*\[(?:SAND_HIDDEN_PROMPT|t\d+u)\]/.test(block.text),
+        )
+      )
+        return true;
+      if (
+        record.role === "assistant" &&
+        blocks.some(
+          (block) =>
+            block?.type === "tool_use" &&
+            ["send_message", "communicate_update"].includes(block.name),
+        )
+      )
+        return true;
+    } catch {
+      /* The bounded header can end halfway through a record. */
+    }
+  }
+  return false;
+}
+
 async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
   const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
@@ -227,16 +259,10 @@ async function inferProvider(path: string): Promise<string> {
     /"(?:sessionId|uuid)"\s*:/.test(head)
   )
     return "claude-code";
-  if (
-    /[/\\](?:grok-bot|agent-data|sand-data)[/\\]/i.test(base) ||
-    (/"role"\s*:\s*"(?:user|assistant)"/.test(head) &&
-      /\[SAND_HIDDEN_PROMPT\]|\[t\d+u\]|"name"\s*:\s*"(?:send_message|communicate_update)"/.test(
-        head,
-      ))
-  )
+  if (cursorPath) return "cursor";
+  if (/[/\\](?:\.?grok-bot|agent-data|sand-data)[/\\]/i.test(base) || looksLikeGrokTranscript(head))
     return "grok-bot";
   if (
-    cursorPath ||
     /\[user\]/.test(head) ||
     (/"role"\s*:\s*"(?:user|assistant)"/.test(head) && /"message"\s*:/.test(head))
   )

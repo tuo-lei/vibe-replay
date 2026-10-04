@@ -45,6 +45,7 @@ async function discoverCursorSessionsOnce(
   options: ProviderDiscoveryOptions,
 ): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
+  const snapshotErrors: SqliteSnapshotRequiredError[] = [];
   // SDK databases are independent from IDE transcript/store discovery. Start
   // their machine-wide index in parallel instead of paying both costs serially.
   let sdkSnapshotError: SqliteSnapshotRequiredError | undefined;
@@ -80,12 +81,31 @@ async function discoverCursorSessionsOnce(
     const transcriptSessions = mergedTranscriptSessions;
     const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
     const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-    const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
+    // A blocked store must not hide healthy, independent global-state/SDK sources.
+    const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true).catch(
+      (error) => {
+        if (!(error instanceof SqliteSnapshotRequiredError)) throw error;
+        snapshotErrors.push(error);
+        return error.sessions;
+      },
+    );
     sessions.push(...sqliteOnly);
     for (const s of sqliteOnly) knownIds.add(s.sessionId);
 
     // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
-    const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths, options);
+    const globalState = await discoverGlobalStateOnlySessions(
+      knownIds,
+      decodedPaths,
+      options,
+    ).catch((error) => {
+      if (!(error instanceof SqliteSnapshotRequiredError)) throw error;
+      snapshotErrors.push(error);
+      return {
+        sessions: error.sessions,
+        allSessions: error.sessions,
+        sessionIds: new Set(error.sessions.map((session) => session.sessionId)),
+      };
+    });
     sessions.push(...globalState.sessions);
     const globalStateById = new Map(
       globalState.allSessions.map((session) => [session.sessionId, session]),
@@ -118,7 +138,10 @@ async function discoverCursorSessionsOnce(
     }
 
     sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    if (sdkSnapshotError) throw new SqliteSnapshotRequiredError(sdkSnapshotError.message, sessions);
+    if (sdkSnapshotError) snapshotErrors.push(sdkSnapshotError);
+    if (snapshotErrors.length) {
+      throw new SqliteSnapshotRequiredError(snapshotErrors[0].message, sessions);
+    }
     return sessions;
   } catch (error) {
     if (error instanceof SqliteSnapshotRequiredError) {
