@@ -180,4 +180,94 @@ describe("OpenCode v2 storage compatibility", () => {
       unknown.close();
     }
   });
+
+  it("prefers active v2 sessions while leaving coexisting legacy tables intact", async () => {
+    const db = await v2Db();
+    try {
+      db.run(`CREATE TABLE session (id TEXT PRIMARY KEY, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+        CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+        CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+        INSERT INTO session (id) VALUES ('frozen-legacy');`);
+      add(db, "v2-user", "user", 0, { text: "New v2 request" });
+      const sessions = listSessionsFromDb(db);
+      expect(sessions.map((s) => s.sessionId)).toEqual(["ses_parent"]);
+      expect(sessions[0].firstPrompt).toBe("New v2 request");
+      expect(parseSessionFromDb(db, "ses_parent").turns[0].blocks[0]).toEqual({
+        type: "text",
+        text: "New v2 request",
+      });
+      expect(db.exec("SELECT id FROM main.session")[0].values).toEqual([["frozen-legacy"]]);
+      expect(db.exec("SELECT count(*) FROM main.message")[0].values).toEqual([[0]]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("retains legacy-only sessions and uses v2 content for duplicate session IDs", async () => {
+    const db = await v2Db();
+    try {
+      db.run(`CREATE TABLE session (id TEXT PRIMARY KEY, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+        CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+        CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);`);
+      for (const id of ["legacy-only", "ses_parent"]) {
+        db.run(
+          "INSERT INTO main.session VALUES (?, ?, 'Legacy task', '/repo', 1800000000000, 1800000000000)",
+          [id, id],
+        );
+        db.run("INSERT INTO main.message VALUES (?, ?, 1800000000000, ?)", [
+          `old-${id}`,
+          id,
+          JSON.stringify({ role: "user", time: { created: 1800000000000 } }),
+        ]);
+        db.run("INSERT INTO main.part VALUES (?, ?, ?, 1800000000000, ?)", [
+          `part-${id}`,
+          `old-${id}`,
+          id,
+          JSON.stringify({ type: "text", text: `Legacy ${id}` }),
+        ]);
+      }
+      add(db, "new", "user", 0, { text: "Active v2 request" });
+      const sessions = listSessionsFromDb(db);
+      expect(sessions.map((s) => s.sessionId).sort()).toEqual(["legacy-only", "ses_parent"]);
+      expect(sessions.find((s) => s.sessionId === "ses_parent")?.firstPrompt).toBe(
+        "Active v2 request",
+      );
+      expect(sessions.find((s) => s.sessionId === "legacy-only")?.firstPrompt).toBe(
+        "Legacy legacy-only",
+      );
+      expect(parseSessionFromDb(db, "ses_parent").turns[0].blocks[0]).toEqual({
+        type: "text",
+        text: "Active v2 request",
+      });
+      expect(parseSessionFromDb(db, "legacy-only").turns[0].blocks[0]).toEqual({
+        type: "text",
+        text: "Legacy legacy-only",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps sequence chronology when clocks move backward while retaining valid time bounds", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "first", "user", 0, { text: "First in sequence", time: { created: 1800000009000 } });
+      add(db, "second", "user", 1, {
+        text: "Second in sequence",
+        time: { created: 1800000001000 },
+      });
+      db.run("UPDATE session_message SET time_created = 1800000009000 WHERE id = 'first'");
+      const sessions = listSessionsFromDb(db);
+      expect(sessions[0].firstPrompt).toBe("First in sequence");
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.turns.map((turn) => turn.blocks[0])).toEqual([
+        { type: "text", text: "First in sequence" },
+        { type: "text", text: "Second in sequence" },
+      ]);
+      expect(parsed.startTime).toBe("2027-01-15T08:00:01.000Z");
+      expect(parsed.endTime).toBe("2027-01-15T08:00:09.000Z");
+    } finally {
+      db.close();
+    }
+  });
 });

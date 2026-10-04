@@ -9,9 +9,16 @@ export function scopedSessionSlug(slug: string, targetId?: string): string {
   return slug.endsWith(suffix) || slug.includes(`${suffix}--id-`) ? slug : `${slug}${suffix}`;
 }
 
-function sessionDirs(baseDir: string, slug: string, targetId?: string): string[] {
+function sessionDirs(
+  baseDir: string,
+  slug: string,
+  targetId?: string,
+  allowLegacyFallback = true,
+): string[] {
   if (targetId) return [join(baseDir, scopedSessionSlug(slug, targetId))];
-  return [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  return allowLegacyFallback
+    ? [join(baseDir, slug), resolve("./vibe-replay", slug)]
+    : [join(baseDir, slug)];
 }
 
 /** Load annotations from disk for a given slug */
@@ -19,8 +26,9 @@ export async function loadAnnotations(
   baseDir: string,
   slug: string,
   targetId?: string,
+  allowLegacyFallback = true,
 ): Promise<Annotation[]> {
-  for (const dir of sessionDirs(baseDir, slug, targetId)) {
+  for (const dir of sessionDirs(baseDir, slug, targetId, allowLegacyFallback)) {
     try {
       const raw = await readFile(join(dir, "annotations.json"), "utf-8");
       const anns = JSON.parse(raw) as Annotation[];

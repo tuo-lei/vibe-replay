@@ -13,10 +13,13 @@ export async function loadOverlays(
   baseDir: string,
   slug: string,
   targetId?: string,
+  allowLegacyFallback = true,
 ): Promise<SessionOverlays> {
   const dirs = targetId
     ? [join(baseDir, scopedSessionSlug(slug, targetId))]
-    : [join(baseDir, slug), resolve("./vibe-replay", slug)];
+    : allowLegacyFallback
+      ? [join(baseDir, slug), resolve("./vibe-replay", slug)]
+      : [join(baseDir, slug)];
   for (const dir of dirs) {
     try {
       const raw = await readFile(join(dir, "overlays.json"), "utf-8");

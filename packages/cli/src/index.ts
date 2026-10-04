@@ -1514,7 +1514,6 @@ program
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         spinner?.fail(message);
-        if (opts.json) process.stderr.write(`${JSON.stringify({ error: message })}\n`);
         if (/not logged in|session expired/i.test(message)) {
           try {
             const fallback = await shareReplay(outputDir, { loggedIn: false, open: !opts.json });
@@ -1527,6 +1526,7 @@ program
             // Local fallback failed too — fall through to exit.
           }
         }
+        if (opts.json) process.stderr.write(`${JSON.stringify({ error: message })}\n`);
         process.exit(1);
       }
     },

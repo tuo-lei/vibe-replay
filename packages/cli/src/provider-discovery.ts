@@ -24,6 +24,7 @@ export interface SafeProviderDiscoveryResult {
 export async function discoverProvidersSafely(
   providers: Provider[],
   onSession?: (session: SessionInfo) => Promise<void> | void,
+  options?: { readOnly?: boolean },
 ): Promise<SafeProviderDiscoveryResult> {
   const allSessions: SessionInfo[] = [];
   const failedProviders: string[] = [];
@@ -32,6 +33,7 @@ export async function discoverProvidersSafely(
   // hides the connection latency behind Cursor/local filesystem discovery.
   const remotePromise = discoverConfiguredRemoteSessions(
     providers.map((provider) => provider.name),
+    { readOnly: options?.readOnly },
   ).catch((error) => {
     if (process.env.VIBE_REPLAY_DEBUG) {
       console.error("[vibe-replay] configured SSH discovery failed:", error);

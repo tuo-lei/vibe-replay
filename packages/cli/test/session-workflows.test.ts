@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   diagnoseSession,
@@ -202,5 +202,33 @@ describe("export and sharing", () => {
     await expect(loadCliSession(dir, { target: "remote" })).rejects.toThrow(
       "Replay belongs to target",
     );
+  });
+
+  it("never borrows unrelated edits or annotations from the working directory", async () => {
+    const dir = await root();
+    const legacy = join(process.cwd(), "vibe-replay", basename(dir));
+    roots.push(legacy);
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(dir, "replay.json"), JSON.stringify(replay));
+    await writeFile(
+      join(legacy, "overlays.json"),
+      JSON.stringify({
+        version: 1,
+        overlays: [
+          {
+            sceneIndex: 0,
+            modifiedValue: "Unrelated private content",
+            updatedAt: "2026-10-04T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    await writeFile(
+      join(legacy, "annotations.json"),
+      JSON.stringify([{ id: "unrelated", sceneIndex: 0, body: "Unrelated note" }]),
+    );
+    const loaded = await loadCliSession(dir);
+    expect(loaded.replay.scenes[0]).toEqual(replay.scenes[0]);
+    expect(loaded.replay.annotations).toBeUndefined();
   });
 });

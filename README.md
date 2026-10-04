@@ -243,7 +243,9 @@ replay with its editor overlays and annotations when available; an explicit sour
 path reparses the source, while an explicit `replay.json` uses that saved snapshot.
 
 Sharing preflight performs no upload and reports the effective payload's size,
-visibility, potential-secret count, and cloud/local mode. Check that report and
+visibility, potential-secret count, and cloud/local mode. SSH preflight reads only
+already staged sessions, without connecting or refreshing the remote cache; run
+`sessions --refresh` first if the requested remote session is not staged. Check that report and
 review the content before sharing. JSON share results include `uploaded` and `mode`
 so a local HTML fallback is distinguishable from a cloud URL.
 

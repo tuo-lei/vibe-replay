@@ -249,11 +249,11 @@ export async function publishCloudWithOverlays(
 ): Promise<CloudResult> {
   const slug = basename(outputDir);
   const baseDir = dirname(outputDir);
-  const overlays = await loadOverlays(baseDir, slug, opts?.targetId);
+  const overlays = await loadOverlays(baseDir, slug, opts?.targetId, false);
   const replayPath = join(outputDir, "replay.json");
   const originalContent = await readFile(replayPath, "utf-8");
   const session = JSON.parse(originalContent) as ReplaySession;
-  const annotations = await loadAnnotations(baseDir, slug, opts?.targetId);
+  const annotations = await loadAnnotations(baseDir, slug, opts?.targetId, false);
   if (annotations.length || existsSync(join(outputDir, "annotations.json")))
     session.annotations = annotations;
   const merged = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));

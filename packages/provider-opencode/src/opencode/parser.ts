@@ -267,8 +267,12 @@ export function parseSessionFromDb(
     const timestamp = toIsoMs(timestampMs);
     if (timestamp) {
       allTimestamps.push(timestamp);
-      if (!startTime) startTime = timestamp;
-      endTime = timestamp;
+      for (const bound of [meta.time?.created, meta.time?.completed]) {
+        const value = toIsoMs(bound);
+        if (!value) continue;
+        if (!startTime || value < startTime) startTime = value;
+        if (!endTime || value > endTime) endTime = value;
+      }
     }
 
     // Per-model token aggregation (opencode records usage on assistant messages).

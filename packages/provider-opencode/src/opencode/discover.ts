@@ -5,7 +5,7 @@ import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
-import { prepareOpencodeStorage } from "./storage.js";
+import { opencodeMessageOrder, prepareOpencodeStorage } from "./storage.js";
 
 export const OPENCODE_PROVIDER = "opencode";
 
@@ -257,7 +257,7 @@ function firstUserPrompts(db: Database): Map<string, string> {
               WHEN json_valid(compact.data) THEN json_extract(compact.data, '$.type')
             END = 'compaction'
         )
-      ORDER BY m.session_id ASC, m.time_created ASC, m.id ASC, p.id ASC
+      ORDER BY m.session_id ASC, m.${opencodeMessageOrder(db)}, m.id ASC, p.id ASC
     `,
   );
 

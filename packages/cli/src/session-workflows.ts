@@ -40,7 +40,11 @@ export async function discoverCliSessions(options: SessionReferenceOptions = {})
       updatedAt: cached.updatedAt,
     };
   }
-  const discovery = await discoverProvidersSafely(providers.filter((p) => p !== undefined));
+  const discovery = await discoverProvidersSafely(
+    providers.filter((p) => p !== undefined),
+    undefined,
+    { readOnly: options.readOnly },
+  );
   if (!options.readOnly) await writeFileCache(key, discovery);
   return {
     ...discovery,
@@ -173,8 +177,13 @@ export async function readEffectiveReplay(outputDir: string): Promise<ReplaySess
   ) as ReplaySession;
   if (!replay?.meta?.sessionId || !Array.isArray(replay.scenes))
     throw new Error("Invalid replay.json: expected session metadata and scenes");
-  const overlays = await loadOverlays(dirname(outputDir), basename(outputDir));
-  const annotations = await loadAnnotations(dirname(outputDir), basename(outputDir));
+  const overlays = await loadOverlays(dirname(outputDir), basename(outputDir), undefined, false);
+  const annotations = await loadAnnotations(
+    dirname(outputDir),
+    basename(outputDir),
+    undefined,
+    false,
+  );
   return sessionWithEffectiveContent(
     {
       ...replay,

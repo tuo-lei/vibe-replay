@@ -69,6 +69,8 @@ export interface RemoteDiscoveryOptions {
   configPath?: string;
   /** Override the persistent cache root, primarily for isolated callers/tests. */
   cacheRoot?: string;
+  /** Read staged sessions only: no SSH connection, cache lock, or writes. */
+  readOnly?: boolean;
 }
 
 interface RemoteFileEntry {
@@ -1894,7 +1896,13 @@ export async function discoverConfiguredRemoteSessions(
   const results = await Promise.all(
     targets.map(async (target) => ({
       target,
-      result: await discoverRemoteTarget(target, providerSet, options?.cacheRoot),
+      result: options?.readOnly
+        ? target.providers.some((provider) => providerSet.has(provider))
+          ? await discoverRemoteTargetFromCache(target, providerSet, options.cacheRoot).then(
+              (result) => ({ ...result, failed: result.sessions.length === 0 }),
+            )
+          : { sessions: [], failed: false }
+        : await discoverRemoteTarget(target, providerSet, options?.cacheRoot),
     })),
   );
 

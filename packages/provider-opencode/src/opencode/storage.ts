@@ -13,11 +13,13 @@ export function prepareOpencodeStorage(db: Database): void {
   const tables = new Set(
     db.exec("SELECT name FROM sqlite_master WHERE type = 'table'")[0]?.values.map((r) => r[0]),
   );
-  if (tables.has("session") && tables.has("message") && tables.has("part")) {
+  const hasV2 = tables.has("session_v2") && tables.has("session_message");
+  const hasLegacy = tables.has("session") && tables.has("message") && tables.has("part");
+  if (!hasV2 && hasLegacy) {
     prepared.add(db);
     return;
   }
-  if (!tables.has("session_v2") || !tables.has("session_message")) {
+  if (!hasV2) {
     throw new Error(
       "Unsupported OpenCode database schema: expected session/message/part or session_v2/session_message",
     );
@@ -27,11 +29,30 @@ export function prepareOpencodeStorage(db: Database): void {
     db.exec(
       "SELECT id, session_id, type, seq, time_created, data FROM session_message ORDER BY session_id, seq",
     )[0]?.values || [];
+  const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
+  const v2Columns = db
+    .exec("PRAGMA main.table_info(session_v2)")[0]
+    .values.map((r) => String(r[1]));
+  const legacyColumns = new Set(
+    db.exec("PRAGMA main.table_info(session)")[0]?.values.map((r) => String(r[1])),
+  );
+  const legacySessions = hasLegacy
+    ? `UNION ALL SELECT ${v2Columns.map((c) => (legacyColumns.has(c) ? `s.${quote(c)}` : "NULL")).join(", ")}
+       FROM main.session s WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = s.id)`
+    : "";
   db.run(`
-    CREATE TEMP VIEW session AS SELECT * FROM session_v2;
+    CREATE TEMP VIEW session AS SELECT * FROM main.session_v2 ${legacySessions};
     CREATE TEMP TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, seq INTEGER, data TEXT);
     CREATE TEMP TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
   `);
+  if (hasLegacy) {
+    // Retain legacy-only sessions; a v2 session ID owns its complete trajectory.
+    db.run(`INSERT INTO temp.message
+      SELECT id, session_id, time_created, time_created, data FROM main.message m
+      WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = m.session_id);
+      INSERT INTO temp.part SELECT id, message_id, session_id, time_created, data FROM main.part p
+      WHERE NOT EXISTS (SELECT 1 FROM main.session_v2 v WHERE v.id = p.session_id);`);
+  }
   const message = db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)");
   const part = db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?)");
   const insert = (statement: ReturnType<Database["prepare"]>, values: any[]) => {
