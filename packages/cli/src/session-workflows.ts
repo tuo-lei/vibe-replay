@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -80,10 +80,7 @@ export function resolveSessionReference(
   const storageMatches = scoped.filter((s) =>
     [s.filePath, ...s.filePaths]
       .filter(Boolean)
-      .some(
-        (candidate) =>
-          resolve(expandUserPath(splitStorageReference(candidate).base)) === resolve(storage.base),
-      ),
+      .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(storage.base)),
   );
   if (storage.marker && storageMatches.length)
     return resolveSessionReference(storageMatches, storage.marker, options);
@@ -128,19 +125,53 @@ function splitStorageReference(ref: string) {
   };
 }
 
+function canonicalStoragePath(ref: string): string {
+  const path = resolve(expandUserPath(splitStorageReference(ref).base));
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 function pathExists(ref: string): boolean {
   return existsSync(splitStorageReference(expandUserPath(ref)).base);
+}
+
+async function inferSqliteProvider(path: string): Promise<string | undefined> {
+  const bytes = await readFile(path);
+  if (bytes.length < 1024) return undefined;
+  const { default: initSqlJs } = await import("sql.js");
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(bytes);
+  try {
+    const tables = new Set(
+      db
+        .exec("SELECT name FROM sqlite_master WHERE type = 'table'")[0]
+        ?.values.map((row) => row[0]),
+    );
+    if (tables.has("sessions") && tables.has("messages")) return "hermes";
+    if (
+      (tables.has("session_v2") && tables.has("session_message")) ||
+      (tables.has("session") && tables.has("message") && tables.has("part"))
+    )
+      return "opencode";
+    if (
+      tables.has("cursorDiskKV") ||
+      (tables.has("meta") && tables.has("blobs")) ||
+      (tables.has("agents") && tables.has("runs") && tables.has("run_events"))
+    )
+      return "cursor";
+    return undefined;
+  } finally {
+    db.close();
+  }
 }
 
 async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
   const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
   if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
-  if (marker || /\.(?:db|sqlite|vscdb)$/i.test(base)) {
-    if (cursorPath) return "cursor";
-    if (base.includes("opencode")) return "opencode";
-    if (base.includes("hermes")) return "hermes";
-  }
   const file = await open(base, "r");
   let head: string;
   try {
@@ -150,6 +181,17 @@ async function inferProvider(path: string): Promise<string> {
   } finally {
     await file.close();
   }
+  const sqlite = head.startsWith("SQLite format 3\0");
+  if (sqlite) {
+    const provider = await inferSqliteProvider(base);
+    if (provider) return provider;
+  }
+  if (marker || /\.(?:db|sqlite|vscdb)$/i.test(base)) {
+    if (cursorPath) return "cursor";
+    if (base.includes("opencode")) return "opencode";
+    if (base.includes("hermes")) return "hermes";
+  }
+  if (sqlite) throw new Error("Could not infer the SQLite provider. Specify --provider <name>.");
   if (/"type"\s*:\s*"session_meta"/.test(head)) return "codex";
   if (/"type"\s*:\s*"session"/.test(head) && /"version"\s*:/.test(head)) return "pi";
   if (
@@ -172,11 +214,9 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
     // Provider-scoped metadata preserves discovered titles and enriches DB/sidecar sources.
     const discovery = await discoverCliSessions({ ...options, provider });
     const matches = discovery.sessions.filter((s) =>
-      [s.filePath, ...s.filePaths].some((candidate) =>
-        marker
-          ? splitStorageReference(candidate).base === resolve(base)
-          : candidate === path || splitStorageReference(candidate).base === path,
-      ),
+      [s.filePath, ...s.filePaths]
+        .filter(Boolean)
+        .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(base)),
     );
     const scoped = options.target
       ? matches.filter(
