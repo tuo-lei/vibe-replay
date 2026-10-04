@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
+import {
+  SqliteSnapshotRequiredError,
+  withSqliteSnapshotScope,
+} from "@vibe-replay/provider-core/utils";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -58,7 +61,9 @@ const defaultDependencies: CursorParserDependencies = {
 export function createCursorParser(deps: Partial<CursorParserDependencies> = {}) {
   const resolved: CursorParserDependencies = { ...defaultDependencies, ...deps };
   return (filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult> =>
-    parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved);
+    withSqliteSnapshotScope(() =>
+      parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved),
+    );
 }
 
 function toErrorMessage(err: unknown): string {

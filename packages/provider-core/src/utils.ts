@@ -174,6 +174,23 @@ interface SqliteReadScope {
   snapshots: Map<string, Promise<{ source: string; directory: string }>>;
 }
 const sqliteNoWrites = new AsyncLocalStorage<SqliteReadScope>();
+const sqliteOperationSnapshots = new AsyncLocalStorage<SqliteReadScope>();
+
+/** Reuse checkpointed copies during ordinary operations without rejecting coordinated live WAL. */
+export function withSqliteSnapshotScope<T>(action: () => Promise<T>): Promise<T> {
+  if (sqliteNoWrites.getStore() || sqliteOperationSnapshots.getStore()) return action();
+  const scope: SqliteReadScope = { snapshots: new Map() };
+  return sqliteOperationSnapshots.run(scope, async () => {
+    try {
+      return await action();
+    } finally {
+      for (const pending of scope.snapshots.values()) {
+        const snapshot = await pending.catch(() => null);
+        if (snapshot) await rm(snapshot.directory, { recursive: true, force: true });
+      }
+    }
+  });
+}
 
 /** Carry the zero-write contract through async provider discovery and parsing. */
 export function withReadOnlySqlite<T>(readOnly: boolean, action: () => Promise<T>): Promise<T> {
@@ -245,8 +262,14 @@ export async function withSqliteReadSource<T>(
   await assertSqliteWalReadable(path);
   if (!existsSync(path)) return action(path);
   path = realpathSync(path);
-  const scope = sqliteNoWrites.getStore();
-  if (!scope && existsSync(`${path}-wal`) && (await stat(`${path}-wal`)).size > 0) {
+  const readOnlyScope = sqliteNoWrites.getStore();
+  const scope = readOnlyScope || sqliteOperationSnapshots.getStore();
+  if (
+    !readOnlyScope &&
+    !scope?.snapshots.has(path) &&
+    existsSync(`${path}-wal`) &&
+    (await stat(`${path}-wal`)).size > 0
+  ) {
     await assertSqliteWalReadable(path);
     return action(path);
   }

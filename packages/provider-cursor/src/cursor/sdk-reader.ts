@@ -9,6 +9,7 @@ import {
   readSqliteSnapshot,
   assertSqliteWalReadable,
   withSqliteReadSource,
+  withSqliteSnapshotScope,
   SqliteSnapshotRequiredError,
 } from "@vibe-replay/provider-core/utils";
 import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
@@ -169,7 +170,11 @@ export async function findSdkAgentById(agentId: string): Promise<SdkAgent | null
   }
 }
 
-async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
+function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
+  return withSqliteSnapshotScope(getSdkAgentIndexOnce);
+}
+
+async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   if (cachedAgentIndex && Date.now() - cachedAgentIndexAt < AGENT_INDEX_TTL_MS) {
     return cachedAgentIndex;
   }
@@ -218,7 +223,11 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
  * Read a single agent's runs + stream events and assemble the structured
  * enrichment record used to augment the JSONL transcript.
  */
-export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
+export function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
+  return withSqliteSnapshotScope(() => loadSdkAgentEnrichmentOnce(agent));
+}
+
+async function loadSdkAgentEnrichmentOnce(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
   let handle: IndexDbHandle | null = null;
   try {
     handle = await openIndexDb(agent.dbPath);

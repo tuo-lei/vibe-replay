@@ -212,15 +212,6 @@ function looksLikeGrokTranscript(head: string): boolean {
         )
       )
         return true;
-      if (
-        record.role === "assistant" &&
-        blocks.some(
-          (block) =>
-            block?.type === "tool_use" &&
-            ["send_message", "communicate_update"].includes(block.name),
-        )
-      )
-        return true;
     } catch {
       /* The bounded header can end halfway through a record. */
     }

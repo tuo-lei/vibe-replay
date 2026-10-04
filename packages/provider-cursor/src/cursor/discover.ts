@@ -6,6 +6,7 @@ import {
   readGitRepo,
   shortenPath,
   SqliteSnapshotRequiredError,
+  withSqliteSnapshotScope,
 } from "@vibe-replay/provider-core/utils";
 import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
@@ -33,7 +34,7 @@ export function discoverCursorSessions(
   const readOnly = options.readOnly === true;
   const existing = cursorDiscoveryInFlight.get(readOnly);
   if (existing) return existing;
-  const current = discoverCursorSessionsOnce(options);
+  const current = withSqliteSnapshotScope(() => discoverCursorSessionsOnce(options));
   const tracked = current.finally(() => {
     if (cursorDiscoveryInFlight.get(readOnly) === tracked) cursorDiscoveryInFlight.delete(readOnly);
   });

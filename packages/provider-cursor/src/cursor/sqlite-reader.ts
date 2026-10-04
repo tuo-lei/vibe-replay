@@ -19,6 +19,7 @@ import {
   readSqliteSnapshot,
   assertSqliteWalReadable,
   withSqliteReadSource,
+  withSqliteSnapshotScope,
   SqliteSnapshotRequiredError,
 } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
@@ -2058,7 +2059,11 @@ function extractChildBlobIds(data: Uint8Array): string[] {
 }
 
 /** Enumerate an explicitly supplied SQLite copy without consulting native stores. */
-export async function discoverCursorDatabaseSessions(dbPath: string): Promise<SessionInfo[]> {
+export function discoverCursorDatabaseSessions(dbPath: string): Promise<SessionInfo[]> {
+  return withSqliteSnapshotScope(() => discoverCursorDatabaseSessionsOnce(dbPath));
+}
+
+async function discoverCursorDatabaseSessionsOnce(dbPath: string): Promise<SessionInfo[]> {
   const handle = await openGlobalStateDb(dbPath);
   if (!handle) throw new Error("Cannot read the supplied Cursor database");
   const tables = new Set(
@@ -2148,7 +2153,17 @@ export async function discoverCursorDatabaseSessions(dbPath: string): Promise<Se
   throw new Error("Unsupported explicit Cursor database schema");
 }
 
-export async function parseCursorSqlite(
+export function parseCursorSqlite(
+  workspacePath: string,
+  sessionId: string,
+  explicitPath?: string,
+): Promise<ProviderParseResult | null> {
+  return withSqliteSnapshotScope(() =>
+    parseCursorSqliteOnce(workspacePath, sessionId, explicitPath),
+  );
+}
+
+async function parseCursorSqliteOnce(
   workspacePath: string,
   sessionId: string,
   explicitPath?: string,
