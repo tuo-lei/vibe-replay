@@ -229,7 +229,6 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
     if (key.endsWith(":")) continue;
     const identity = `${key}\0${turn.timestamp || ""}`;
     if (seenExtra.has(identity)) continue;
-    seenExtra.add(identity);
     // Allow small tool-result/UI clock skew, never match old and recent activity
     // solely by text. Missing clocks retain legacy one-to-one content matching.
     const stamp = turn.timestamp ? Date.parse(turn.timestamp) : NaN;
@@ -248,6 +247,7 @@ export function mergeReplicaTurns(base: ParsedTurn[], extra: ParsedTurn[]): Pars
       match.used = true;
       continue;
     }
+    seenExtra.add(identity);
     added.push(turn);
   }
   added.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
