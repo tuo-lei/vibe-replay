@@ -18,6 +18,7 @@ import { loadSavedGistInfo } from "./publishers/gist.js";
 import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
 import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
+import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
 import { inferSqliteProvider } from "./sqlite-schema.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -78,11 +79,17 @@ export function resolveSessionReference(
   const expanded = expandUserPath(ref);
   const storage = splitStorageReference(expanded);
   if (storage.suffix && !storage.marker) throw new Error("Session marker must contain an ID");
-  const storageMatches = scoped.filter((s) =>
-    [s.filePath, ...s.filePaths]
-      .filter(Boolean)
-      .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(storage.base)),
-  );
+  const referencePath =
+    storage.suffix || /[/\\]/.test(storage.base) || pathExists(storage.base)
+      ? canonicalStoragePath(storage.base)
+      : undefined;
+  const storageMatches = referencePath
+    ? scoped.filter((s) =>
+        [s.filePath, ...s.filePaths]
+          .filter(Boolean)
+          .some((candidate) => canonicalStoragePath(candidate) === referencePath),
+      )
+    : [];
   if (storage.marker && storageMatches.length)
     return resolveSessionReference(storageMatches, storage.marker, options);
   const exact = scoped.filter(
@@ -235,14 +242,16 @@ export async function resolveCliSource(
   if (suffix && !marker) throw new Error("Session marker must contain an ID");
   const path = resolve(base) + suffix;
   if (pathExists(path)) {
+    if (options.readOnly && (await isSqliteFile(base))) await assertSqliteWalReadable(base);
     const provider = options.provider || (await inferProvider(path));
     if (!getProvider(provider)) throw new Error(`Unknown provider: ${provider}`);
     // Provider-scoped metadata preserves discovered titles and enriches DB/sidecar sources.
     const discovery = suppliedDiscovery ?? (await discoverCliSessions({ ...options, provider }));
+    const referencePath = canonicalStoragePath(base);
     const matches = discovery.sessions.filter((s) =>
       [s.filePath, ...s.filePaths]
         .filter(Boolean)
-        .some((candidate) => canonicalStoragePath(candidate) === canonicalStoragePath(base)),
+        .some((candidate) => canonicalStoragePath(candidate) === referencePath),
     );
     const explicitDatabase =
       ["hermes", "opencode", "cursor"].includes(provider) && (await isSqliteFile(base));

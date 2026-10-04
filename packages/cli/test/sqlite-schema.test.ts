@@ -54,3 +54,18 @@ it("does not load an unbounded fallback or hide a readonly probe failure", async
   await expect(inferSqliteProvider("/copy.db")).rejects.toThrow("database locked");
   expect(mocks.readFile).not.toHaveBeenCalled();
 });
+
+it("uses the bounded portable fallback when an older sqlite3 rejects -json", async () => {
+  const SQL = await initSqlJs(),
+    db = new SQL.Database();
+  db.run("CREATE TABLE sessions (id TEXT); CREATE TABLE messages (id TEXT)");
+  const bytes = db.export();
+  db.close();
+  mocks.execFile.mockImplementation((_command, _args, _options, callback) =>
+    callback(Object.assign(new Error("sqlite3: Error: unknown option: -json"), { code: 1 })),
+  );
+  mocks.stat.mockResolvedValue({ size: bytes.length });
+  mocks.readFile.mockResolvedValue(bytes);
+  expect(await inferSqliteProvider("/copy.db")).toBe("hermes");
+  expect(mocks.readFile).toHaveBeenCalledExactlyOnceWith("/copy.db");
+});

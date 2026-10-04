@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 
+import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
+
 const TABLE_QUERY = "SELECT name FROM sqlite_master WHERE type = 'table'";
 const MAX_WASM_PROBE_BYTES = 32 * 1024 * 1024;
 
 export async function inferSqliteProvider(path: string): Promise<string | undefined> {
   const size = (await stat(path)).size;
   if (size < 1024) return undefined;
+  await assertSqliteWalReadable(path);
   let names: unknown[];
   try {
     names = await new Promise<unknown[]>((resolve, reject) => {
@@ -26,10 +29,14 @@ export async function inferSqliteProvider(path: string): Promise<string | undefi
       );
     });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const failure = error as NodeJS.ErrnoException & { stderr?: string };
+    const unsupportedJson = /(?:unknown|unrecognized)\s+option[^\r\n]*-json\b/i.test(
+      failure.stderr || failure.message,
+    );
+    if (failure.code !== "ENOENT" && !unsupportedJson) throw error;
     if (size > MAX_WASM_PROBE_BYTES)
       throw new Error(
-        "Automatic provider detection for databases larger than 32 MiB requires sqlite3. Install sqlite3 or specify --provider <name> to skip the probe.",
+        "Automatic provider detection for databases larger than 32 MiB requires sqlite3 with -json support. Install or update sqlite3 or specify --provider <name> to skip the probe.",
         { cause: error },
       );
     const bytes = await readFile(path);

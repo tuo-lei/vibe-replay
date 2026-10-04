@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -154,4 +155,15 @@ export function normalizeGitUrl(url: string): string | undefined {
     // not a valid URL
   }
   return undefined;
+}
+
+/** SQLite's readonly mode can create a missing WAL shared-memory sidecar. */
+export async function assertSqliteWalReadable(path: string): Promise<void> {
+  if (!existsSync(`${path}-wal`)) return;
+  const wal = await stat(`${path}-wal`);
+  if (wal.size === 0) return;
+  if (!existsSync(`${path}-shm`) || !(await stat(`${path}-shm`)).isFile())
+    throw new Error(
+      "The database has an active WAL but no shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay; a read-only query could otherwise create a -shm file.",
+    );
 }
