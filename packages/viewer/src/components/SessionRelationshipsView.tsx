@@ -52,6 +52,7 @@ function sessionTitle(s: ScanResultSession): string {
 }
 
 function sessionHasEstimatedTime(s: ScanResultSession): boolean {
+  if (s.provider === "dot") return false;
   if (s.durationMs == null) return true;
   return (s.dataQualityNotes || []).some((note) =>
     /duration is inferred|duration.*estimated|missing duration/i.test(note),
@@ -360,6 +361,8 @@ function packTimelineLanes(
  * pathological idle gaps from polluting the layout.
  */
 function activeEndMs(startMs: number, s: ScanResultSession): number {
+  // Imported dot conversations have no observed execution interval.
+  if (s.provider === "dot") return startMs;
   if (s.durationMs != null) return startMs + s.durationMs;
   if (s.endTime) {
     const wallClockMs = new Date(s.endTime).getTime() - startMs;
@@ -403,6 +406,10 @@ function buildTimeline(
     }
   }
 
+  // A dot import is a point on this activity view, not a measured interval.
+  // Give a lone point a coordinate range without changing its actual endpoint.
+  if (timed.length && minMs === maxMs && timed.every(({ session }) => session.provider === "dot"))
+    maxMs = minMs + 1;
   if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || maxMs <= minMs) {
     return {
       projects: [],
@@ -872,16 +879,18 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                                 track is the visual bar; the bright segment marks
                                 the actual active interval, including right-anchored
                                 sessions and bars widened for readable hit targets. */}
-                            <span className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[3px] bg-white/20">
-                              <span
-                                className="absolute bottom-0 h-full min-w-[2px] rounded-full bg-white/85"
-                                style={{
-                                  left: `${ts.actualStartFraction * 100}%`,
-                                  right: `${(1 - ts.actualEndFraction) * 100}%`,
-                                }}
-                                title="actual duration"
-                              />
-                            </span>
+                            {ts.session.provider !== "dot" && (
+                              <span className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[3px] bg-white/20">
+                                <span
+                                  className="absolute bottom-0 h-full min-w-[2px] rounded-full bg-white/85"
+                                  style={{
+                                    left: `${ts.actualStartFraction * 100}%`,
+                                    right: `${(1 - ts.actualEndFraction) * 100}%`,
+                                  }}
+                                  title="actual duration"
+                                />
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -943,13 +952,21 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                     </div>
                   );
                 })()}
-              {tooltip.session.durationMs && (
+              {tooltip.session.provider === "dot" && <div>Execution duration unavailable</div>}
+              {tooltip.session.provider !== "dot" && tooltip.session.durationMs && (
                 <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
               )}
               <div>
-                {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
-                {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
-                {plural(tooltip.session.toolCallCount, "tool")}
+                {tooltip.session.promptCount}p
+                {tooltip.session.provider === "dot" ? (
+                  " · Tool and edit counts unavailable"
+                ) : (
+                  <>
+                    {" "}
+                    · {tooltip.session.editCount} {plural(tooltip.session.editCount, "edit")} ·{" "}
+                    {tooltip.session.toolCallCount} {plural(tooltip.session.toolCallCount, "tool")}
+                  </>
+                )}
               </div>
               {tooltip.session.gitBranch && (
                 <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>

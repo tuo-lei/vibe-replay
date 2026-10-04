@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseJsonlLiveSession } from "../src/server-routes/live.js";
+import { Hono } from "hono";
+import { parseJsonlLiveSession, registerLiveRoutes } from "../src/server-routes/live.js";
 import type { SessionInfo } from "../src/types.js";
 
 const sessionInfo: SessionInfo = {
@@ -94,4 +95,20 @@ describe("live JSONL parsing", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+it("rejects live tailing of dot snapshots before resolving or watching files", async () => {
+  const app = new Hono();
+  let resolutions = 0;
+  registerLiveRoutes(app, {
+    resolveSessionInfo: async () => {
+      resolutions++;
+      return undefined;
+    },
+  });
+  const response = await app.request("/api/live?provider=dot&sessionId=snapshot");
+  expect(await response.text()).toContain(
+    '"message":"Live mode is unavailable for dot conversation imports"',
+  );
+  expect(resolutions).toBe(0);
 });

@@ -215,10 +215,14 @@ export default function StatsPanel({ session }: Props) {
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-user" />
         <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
-        <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-tool" />
+        <StatCard
+          label="Tool Calls"
+          value={meta.provider === "dot" ? "unavailable" : stats.toolCalls}
+          color="text-terminal-tool"
+        />
         <StatCard
           label="Files Modified"
-          value={stats.filesModified}
+          value={meta.provider === "dot" ? "unavailable" : stats.filesModified}
           color="text-terminal-response"
         />
       </div>

@@ -649,3 +649,17 @@ describe("LiveApp", () => {
     expect(screen.getByText("Watch live")).toBeTruthy();
   });
 });
+
+it("opens imported dot snapshots without offering live tailing", async () => {
+  const tail = vi.fn();
+  renderApp(
+    makeFake({
+      list: async () => [{ ...sessions[0], provider: "dot", title: "Synthetic dot snapshot" }],
+      tail,
+    }),
+  );
+  fireEvent.click(await screen.findByText("Synthetic dot snapshot"));
+  await screen.findByText("Here is the explanation.");
+  expect(screen.queryByRole("button", { name: "Watch live" })).toBeNull();
+  expect(tail).not.toHaveBeenCalled();
+});

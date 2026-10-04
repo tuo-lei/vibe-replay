@@ -55,6 +55,8 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 
 ## Gotchas
 
+- **dot**: Import-only visible conversation JSON; no native logs or execution metrics. See `docs/dot-conversation-import.md`.
+
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
 - **`lastIndexOf("</head>")`**: Use `lastIndexOf`, not `indexOf` — minified JS in the viewer bundle may contain the string `</head>`
 - **Shared types**: `Scene`, `Annotation`, `DataSourceInfo`, `ReplaySession` live in `packages/types` (`@vibe-replay/types`). CLI and viewer re-export from there. Provider-specific and viewer-specific types remain in their respective packages.

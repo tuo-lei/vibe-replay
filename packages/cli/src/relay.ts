@@ -66,15 +66,18 @@ function summarize(info: SessionInfo): RelaySessionSummary {
     // transcripts, Cursor global-state markers are "global-state",
     // SQLite-backed sessions are "sqlite", Cursor agent-tools sidecars are
     // "jsonl+tools", everything else is JSONL.
-    dataSource: info.hasSdk
-      ? "jsonl"
-      : (info.filePath ?? "").includes("#composerData:")
-        ? "global-state"
-        : info.hasSqlite
-          ? "sqlite"
-          : (info.toolPaths?.length ?? 0) > 0
-            ? "jsonl+tools"
-            : "jsonl",
+    dataSource:
+      info.provider === "dot"
+        ? "json"
+        : info.hasSdk
+          ? "jsonl"
+          : (info.filePath ?? "").includes("#composerData:")
+            ? "global-state"
+            : info.hasSqlite
+              ? "sqlite"
+              : (info.toolPaths?.length ?? 0) > 0
+                ? "jsonl+tools"
+                : "jsonl",
     compactionCount: info.compactionCount,
     durationMsEst: info.durationMsEst,
     editCountEst: info.editCountEst,
@@ -254,8 +257,11 @@ export async function startRelay(options: RelayOptions = {}): Promise<void> {
       existing.viewers.add(subscriber);
       return existing.sceneCount;
     }
-    const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const info = await findSessionInfo(sessionId);
+    if (info?.provider === "dot") {
+      throw new Error("Live mode is unavailable for dot conversation imports");
+    }
+    const replay = await loadReplay(sessionId, 0, Number.MAX_SAFE_INTEGER);
     const filePaths = info?.filePaths ?? [];
     const poll = async (): Promise<void> => {
       const tail = tails.get(sessionId);

@@ -233,6 +233,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | Cursor | Supported (SQLite + JSONL + SDK store, auto-discovered) |
 | OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |
+| dot | Conversation JSON import only ([format and limits](docs/dot-conversation-import.md)); local checkout, not released |
 | Muse | Supported (local agent JSONL transcripts, thinking blocks, tool calls, and compaction) |
 | Pi | Supported (JSONL tree sessions, branching, compaction summaries) |
 | OMP | Supported through the Pi-compatible JSONL session format (`~/.omp/agent/sessions`) |

@@ -56,7 +56,7 @@ function compactionQuality(
   compactionSessions: number,
   hasDataLoss: boolean,
 ): MetricQuality {
-  if (totalSessions === 0) return "unavailable";
+  if (totalSessions === 0 || provider === "dot") return "unavailable";
   // Cursor persists the latest conversation summary, not a durable event log.
   // A positive count is therefore a lower bound; zero is not proof of absence.
   if (provider === "cursor") return compactionSessions > 0 ? "partial" : "unavailable";
@@ -94,6 +94,9 @@ function providerNotes(provider: string): string[] | undefined {
     return [
       "Usage is read from the active JSONL branch; zero cache values mean none were recorded.",
     ];
+  }
+  if (provider === "dot") {
+    return ["Conversation imports contain no execution, token, cost, or tool usage data."];
   }
   if (provider === "grok-bot") {
     return [
@@ -154,9 +157,11 @@ function buildProviderCoverage(provider: string, scans: SessionScanResult[]): Pr
     ),
   );
   const invocationQuality: MetricQuality =
-    indexedSessions < totalSessions || missingInvocationSessions > 0 || hasDataLoss
-      ? "partial"
-      : "exact";
+    provider === "dot"
+      ? "unavailable"
+      : indexedSessions < totalSessions || missingInvocationSessions > 0 || hasDataLoss
+        ? "partial"
+        : "exact";
 
   return {
     provider,

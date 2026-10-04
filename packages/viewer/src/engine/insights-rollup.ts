@@ -337,7 +337,7 @@ export function buildSessionMetricDistributions(
 
   for (const session of sessions) {
     if (session.durationMs !== undefined) values.durationMs.push(session.durationMs);
-    values.toolCalls.push(session.toolCalls);
+    if (session.provider !== "dot") values.toolCalls.push(session.toolCalls);
     values.turns.push(session.prompts);
     if (session.tokenUsage) {
       values.tokens.push(
@@ -449,7 +449,7 @@ export function rollupInsightsBreakdown(
       cacheCreation += session.tokenUsage.cacheCreationTokens;
     }
     if (session.turnDurations) durations.push(...session.turnDurations);
-    if (session.turnMetrics) turnMetrics.push(...session.turnMetrics);
+    if (session.provider !== "dot" && session.turnMetrics) turnMetrics.push(...session.turnMetrics);
   }
 
   const tokenTotal = input + output + cacheRead + cacheCreation;

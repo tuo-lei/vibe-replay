@@ -194,6 +194,9 @@ export function transformToReplay(
   const syntheticSubAgentSummary: NonNullable<ReplaySession["meta"]["subAgentSummary"]> = [];
 
   for (const turn of parsed.turns) {
+    // Conversation delivery timestamps are not execution telemetry. Keeping them
+    // off dot scenes prevents viewers from treating chat gaps as LLM wait time.
+    const sceneTimestamp = provider === "dot" ? undefined : turn.timestamp;
     const speakerFields = turnSpeakerFields(turn.speaker);
     if (turn.role === "user") {
       const textBlocks = turn.blocks.filter(
@@ -209,20 +212,20 @@ export function transformToReplay(
           scenes.push({
             type: "compaction-summary",
             content: redactSecrets(redactPath(content)),
-            timestamp: turn.timestamp,
+            timestamp: sceneTimestamp,
           });
         } else if (turn.subtype === "context-injection") {
           scenes.push({
             type: "context-injection",
             content: redactSecrets(redactPath(content)),
-            timestamp: turn.timestamp,
+            timestamp: sceneTimestamp,
             injectionType: classifyInjection(content),
           });
         } else {
           scenes.push({
             type: "user-prompt",
             content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
-            timestamp: turn.timestamp,
+            timestamp: sceneTimestamp,
             ...(images && images.length > 0 ? { images } : {}),
             ...speakerFields,
           });
@@ -240,7 +243,7 @@ export function transformToReplay(
           scenes.push({
             type: "thinking",
             content: truncate(redactPath(thinking), 2000),
-            timestamp: turn.timestamp,
+            timestamp: sceneTimestamp,
             ...(tokens > 0 ? { tokens } : {}),
             ...speakerFields,
           });
@@ -252,7 +255,7 @@ export function transformToReplay(
           scenes.push({
             type: "text-response",
             content: redactSecrets(redactPath(text)),
-            timestamp: turn.timestamp,
+            timestamp: sceneTimestamp,
             ...(turn.stopReason === "max_tokens" ? { isTruncated: true as const } : {}),
             ...speakerFields,
           });
@@ -264,7 +267,7 @@ export function transformToReplay(
           block._result || "",
           block._images,
         );
-        scene.timestamp = turn.timestamp;
+        scene.timestamp = sceneTimestamp;
         scene.isError = !!block._isError;
         scene.hasResult = block._hasResult ?? block._result !== undefined;
         if (block._durationMs) scene.durationMs = block._durationMs;
@@ -329,8 +332,7 @@ export function transformToReplay(
     parsed.startTime ||
     turnTimestampBounds.startTime ||
     parsed.endTime ||
-    options?.generator?.generatedAt ||
-    new Date().toISOString();
+    (provider === "dot" ? "" : options?.generator?.generatedAt || new Date().toISOString());
   const endTime = parsed.endTime || turnTimestampBounds.endTime;
 
   const replay: ReplaySession = {
@@ -348,7 +350,7 @@ export function transformToReplay(
       endTime,
       model: parsed.model,
       cwd: redactFilePath(parsed.cwd),
-      project,
+      project: project || (provider === "dot" ? "dot conversations" : project),
       ...(options?.generator ? { generator: options.generator } : {}),
       stats: {
         sceneCount: scenes.length,

@@ -768,14 +768,16 @@ export default function LiveApp({ createClient = LiveClient.connect, pathname }:
               >
                 ← All sessions
               </button>
-              <button
-                type="button"
-                onClick={() => void toggleWatch()}
-                disabled={loadingScenes}
-                className="rounded-lg bg-terminal-surface px-3 py-1.5 text-xs text-terminal-dim ring-1 ring-terminal-border-subtle transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:opacity-50"
-              >
-                {watching ? "Stop watching" : "Watch live"}
-              </button>
+              {view.summary.provider !== "dot" && (
+                <button
+                  type="button"
+                  onClick={() => void toggleWatch()}
+                  disabled={loadingScenes}
+                  className="rounded-lg bg-terminal-surface px-3 py-1.5 text-xs text-terminal-dim ring-1 ring-terminal-border-subtle transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:opacity-50"
+                >
+                  {watching ? "Stop watching" : "Watch live"}
+                </button>
+              )}
             </div>
             <h2 className="text-lg font-semibold">
               {view.summary.title || `${view.summary.sessionId.slice(0, 12)}…`}

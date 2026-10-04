@@ -371,3 +371,10 @@ Open an issue at [github.com/tuo-lei/vibe-replay/issues](https://github.com/tuo-
 - What you expected vs what happened
 - Steps to reproduce
 - Provider (Claude Code / Cursor) and OS
+
+## dot conversation imports
+
+`packages/provider-dot` implements the bounded, text-only import documented in
+[dot conversation import](docs/dot-conversation-import.md). Its tests use synthetic
+user-visible message response shapes. Native dot session storage and execution
+traces have not been verified and are not supported by this provider.

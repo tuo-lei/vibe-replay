@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALL_PROJECTS } from "../../hooks/usePanelFilters";
 import type { SessionUsageSummary } from "../../types";
@@ -431,3 +431,41 @@ describe("Replays usage facets", () => {
     });
   });
 });
+
+it.each(["dot", "codex"])(
+  "offers source live controls only for tail-able providers (%s)",
+  async (provider) => {
+    window.__VIBE_REPLAY_EDITOR__ = true;
+    window.history.replaceState({}, "", "/?tab=sessions");
+    const source = {
+      provider,
+      sessionId: "synthetic-source",
+      slug: "synthetic-source",
+      project: "dot conversations",
+      title: "Synthetic source snapshot",
+      timestamp: new Date().toISOString(),
+      firstPrompt: "Synthetic source snapshot",
+      filePaths: [],
+      fileSize: 10,
+      lineCount: 2,
+      existingReplay: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.startsWith("/api/sources")
+            ? { sessions: [source], cachedAt: new Date().toISOString() }
+            : url === "/api/archived"
+              ? { slugs: [] }
+              : { sessions: [], results: [] },
+      })),
+    );
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByText("Synthetic source snapshot"));
+    await screen.findByRole("region", { name: "Session details" });
+    expect(screen.queryByRole("button", { name: "Watch live" }) !== null).toBe(provider !== "dot");
+    expect(screen.queryByRole("button", { name: "Live" }) !== null).toBe(provider !== "dot");
+  },
+);

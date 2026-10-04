@@ -943,6 +943,7 @@ export function formatDataSourceLabel(
     return "Cursor SDK";
   }
   if (dataSource === "sqlite") return hasSqlite ? "SQLite + JSONL supplement" : "SQLite";
+  if (dataSource === "json") return "Conversation JSON import";
   if (dataSource === "global-state") return "Cursor global state";
   if (dataSource === "jsonl") return hasSqlite ? "JSONL fallback" : "JSONL transcript";
   if (dataSource === "jsonl+tools")

@@ -71,8 +71,13 @@ export function safeTargetId(raw: string | undefined): string | null | undefined
   return TARGET_ID_RE.test(trimmed) && trimmed !== "local" ? trimmed : null;
 }
 
-/** A replay must contain at least one real user prompt, not only metadata/context. */
+/** Native traces require a user prompt; dot imports may be assistant-only visible windows. */
 export function hasReplayableContent(replay: Pick<ReplaySession, "meta" | "scenes">): boolean {
+  if (replay.meta.provider === "dot") {
+    return replay.scenes.some(
+      (scene) => scene.type === "user-prompt" || scene.type === "text-response",
+    );
+  }
   const sceneCount = replay.scenes.length;
   const userPrompts = replay.scenes.filter((scene) => scene.type === "user-prompt").length;
   return sceneCount > 0 && userPrompts > 0;

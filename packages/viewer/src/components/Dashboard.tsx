@@ -1220,7 +1220,7 @@ export function SessionDetailPopup({
                 Live unavailable for SSH
               </span>
             )}
-            {s.sessionId && s.location?.kind !== "ssh" && (
+            {s.sessionId && s.provider !== "dot" && s.location?.kind !== "ssh" && (
               <button
                 onClick={() => navigateToLive(s.provider, s.sessionId!)}
                 title="Stream this source session as the provider writes new turns"
@@ -3993,22 +3993,25 @@ function SessionsPanel() {
                     }
                     actions={
                       <>
-                        {s.sessionId && s.location?.kind !== "ssh" && isRecentSession && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigateToLive(s.provider, s.sessionId!);
-                            }}
-                            title="Stream this session live as the provider writes new turns"
-                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-all duration-200 ease-material flex items-center gap-1.5"
-                          >
-                            <span className="relative flex w-1.5 h-1.5">
-                              <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-red" />
-                            </span>
-                            Live
-                          </button>
-                        )}
+                        {s.sessionId &&
+                          s.provider !== "dot" &&
+                          s.location?.kind !== "ssh" &&
+                          isRecentSession && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigateToLive(s.provider, s.sessionId!);
+                              }}
+                              title="Stream this session live as the provider writes new turns"
+                              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-all duration-200 ease-material flex items-center gap-1.5"
+                            >
+                              <span className="relative flex w-1.5 h-1.5">
+                                <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-red" />
+                              </span>
+                              Live
+                            </button>
+                          )}
                         {replaySlug ? (
                           <>
                             <button
