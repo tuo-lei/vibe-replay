@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -49,5 +49,36 @@ it.each(["cursor", "opencode"])(
     expect((await resolveCliSource("agent-second", { provider })).info).toBe(sessions[1]);
     sessions = [sessions[1]];
     expect((await resolveCliSource(db, { provider })).info).toBe(sessions[0]);
+  },
+);
+
+it.each(["opencode", "hermes"])(
+  "infers a raw %s database before resolving its sessions",
+  async (provider) => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-native-storage-"));
+    roots.push(root);
+    const folder = join(root, provider === "hermes" ? ".hermes" : "opencode");
+    await mkdir(folder);
+    const db = join(folder, provider === "hermes" ? "state.db" : "opencode.db");
+    await writeFile(db, "SQLite format 3\0");
+    sessions = ["first", "second"].map((sessionId) => ({
+      provider,
+      sessionId,
+      slug: sessionId,
+      filePath: `${db}#session:${sessionId}`,
+      filePaths: [],
+      project: root,
+      cwd: root,
+      version: "",
+      timestamp: "2026-10-04T00:00:00Z",
+      firstPrompt: sessionId,
+      lineCount: 1,
+      fileSize: 1,
+    }));
+    await expect(resolveCliSource(db)).rejects.toMatchObject({ code: "ambiguous" });
+    sessions = [sessions[1]];
+    const resolved = await resolveCliSource(db);
+    expect(resolved.provider).toBe(provider);
+    expect(resolved.info).toBe(sessions[0]);
   },
 );

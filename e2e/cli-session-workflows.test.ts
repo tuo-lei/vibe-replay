@@ -75,6 +75,13 @@ afterAll(async () => {
 });
 
 describe("CLI session workflows", () => {
+  it("infers a raw OpenCode database path and reports contained-session ambiguity", async () => {
+    await expect(run(["inspect", join(root, "opencode.db"), "--json"])).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("Ambiguous"),
+    });
+  });
+
   it("selects only the requested session and exposes discovery coverage", async () => {
     const { stdout } = await run([
       "sessions",

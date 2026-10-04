@@ -136,7 +136,8 @@ async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
   const cursorPath = base.includes(".cursor") || /[/\\]Cursor[/\\]/i.test(base);
   if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
-  if (marker) {
+  if (marker || /\.(?:db|sqlite|vscdb)$/i.test(base)) {
+    if (cursorPath) return "cursor";
     if (base.includes("opencode")) return "opencode";
     if (base.includes("hermes")) return "hermes";
   }
