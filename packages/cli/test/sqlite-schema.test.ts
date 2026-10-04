@@ -3,7 +3,17 @@ import initSqlJs from "sql.js";
 
 const mocks = vi.hoisted(() => ({ execFile: vi.fn(), readFile: vi.fn(), stat: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile: mocks.execFile }));
-vi.mock("node:fs/promises", () => ({ readFile: mocks.readFile, stat: mocks.stat }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: mocks.readFile,
+    stat: (...args: Parameters<typeof actual.stat>) =>
+      typeof args[0] === "string" && /-(wal|shm)$/.test(args[0])
+        ? actual.stat(...args)
+        : mocks.stat(...args),
+  };
+});
 import { inferSqliteProvider } from "../src/sqlite-schema.js";
 
 beforeEach(() => {

@@ -236,7 +236,6 @@ async function stageSqliteSnapshot(path: string): Promise<{ source: string; dire
 
 /** Checkpoint/close may remove a sidecar between its existence probe and stat. */
 async function sqliteSidecarStat(path: string) {
-  if (!existsSync(path)) return null;
   return stat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -302,7 +301,6 @@ export async function withSqliteReadSource<T>(
 /** Pending rollback pages cannot be recovered from a main-file-only snapshot. */
 async function assertSqliteRollbackReadable(path: string): Promise<void> {
   path = existsSync(path) ? realpathSync(path) : path;
-  if (!existsSync(`${path}-journal`)) return;
   const journal = await open(`${path}-journal`, "r").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw new SqliteSnapshotRequiredError(
