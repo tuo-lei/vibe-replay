@@ -34,7 +34,21 @@ function readNestedExecTools(source: string, result: string): NestedExecTool[] |
   const calls: NestedExecTool[] = [];
   let toolCallCount = 0;
   let unsafe = false;
-  visit(program, (node) => {
+  visit(program, (node, parent) => {
+    // A tool reference used as a value can escape through an alias, callback,
+    // destructuring or reflective dispatch. Partial expansion would lose it.
+    if (isToolsMember(node) && !(parent?.type === "CallExpression" && parent.callee === node))
+      unsafe = true;
+    if (node.type === "Identifier" && node.name === "tools") {
+      const memberObject = parent?.type === "MemberExpression" && parent.object === node;
+      const propertyName =
+        (parent?.type === "MemberExpression" && parent.property === node && !parent.computed) ||
+        (parent?.type === "Property" &&
+          parent.key === node &&
+          !parent.computed &&
+          !parent.shorthand);
+      if (!memberObject && !propertyName) unsafe = true;
+    }
     if (node.type === "AssignmentExpression" || node.type === "UpdateExpression") {
       let target = node.left || node.argument;
       while (target?.type === "MemberExpression") target = target.object;
@@ -176,12 +190,16 @@ function literal(node: AstNode | undefined, bindings: Map<string, unknown>): unk
   return UNKNOWN;
 }
 
-function visit(node: AstNode, callback: (node: AstNode) => void): void {
-  callback(node);
+function visit(
+  node: AstNode,
+  callback: (node: AstNode, parent?: AstNode) => void,
+  parent?: AstNode,
+): void {
+  callback(node, parent);
   for (const value of Object.values(node)) {
     if (Array.isArray(value)) {
-      for (const child of value) if (child?.type) visit(child, callback);
-    } else if (value?.type) visit(value, callback);
+      for (const child of value) if (child?.type) visit(child, callback, node);
+    } else if (value?.type) visit(value, callback, node);
   }
 }
 

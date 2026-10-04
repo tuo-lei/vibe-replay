@@ -158,6 +158,27 @@ describe("Codex host accounting", () => {
     ).toMatchObject([{ name: "exec", _hasResult: true }]);
   });
 
+  it.each([
+    'const run = tools.exec_command; await run({cmd:"check"});',
+    'const {exec_command: run} = tools; await run({cmd:"check"});',
+    'const alias = tools; await alias.exec_command({cmd:"check"});',
+    'await tools.exec_command.call(null, {cmd:"check"});',
+    'const run = tools["exec_command"].bind(tools); await run({cmd:"check"});',
+  ])("keeps mixed aliased and direct calls opaque: %s", (aliasedCall) => {
+    const source = `${aliasedCall} await tools.apply_patch("patch");`;
+    expect(nestedExecTools(source, "Script completed\nOutput:")).toBeUndefined();
+    const parsed = parseCodexLines(encode(batch(source)));
+    expect(
+      parsed.turns.flatMap((turn) => turn.blocks).filter((block) => block.type === "tool_use"),
+    ).toMatchObject([{ name: "exec", _hasResult: true }]);
+  });
+
+  it("does not mistake a literal tools property for an aliased tool reference", () => {
+    expect(
+      nestedExecTools('await tools.exec_command({tools:"literal"});', "Script completed"),
+    ).toEqual([{ name: "exec_command", input: { tools: "literal" } }]);
+  });
+
   it("reads literal parallel calls without executing JavaScript or scraping tool names from strings", () => {
     const source =
       'const cmd = "tools.apply_patch(fake)"; globalThis.__vibeExecParserExecuted = true; const results = await Promise.allSettled([tools.exec_command({cmd}), tools.mcp__test__read({path:"src/a.ts"})]); results.forEach(text);';

@@ -79,7 +79,7 @@ export default function Minimap({
         });
       } else if (current) {
         current.endIndex = i;
-        if (scene.type === "tool-call") {
+        if (scene.type === "tool-call" && !scene.isToolContainer) {
           current.toolCalls++;
           if (scene.toolName === "Agent" && scene.subAgent) current.subAgentCalls++;
           if (!current.toolNames.includes(scene.toolName)) {
