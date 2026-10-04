@@ -313,6 +313,59 @@ describe("Codex host accounting", () => {
 });
 
 describe("Codex wrapped triggers and chronological accounting", () => {
+  it.each([
+    "## My request for Codex:",
+    "## My request:",
+    "# Files mentioned by the user:\n## My request for Codex:",
+    "<environment_context>host</environment_context>\n# Files mentioned by the user:\n## My request:\n<app-context>host</app-context>",
+  ])("classifies request-prefixed triggers in both record formats: %s", async (prefix) => {
+    for (const format of ["response_item", "event_msg"]) {
+      const records = encode([
+        { type: "session_meta", payload: { id: "request-prefixed-trigger", cwd: "/tmp/project" } },
+        ...[
+          heartbeat,
+          "Automation: Audit\nAutomation ID: audit\nCheck results",
+          "Human request",
+        ].map((text) => {
+          const wrapped = `${prefix}\n${text}`;
+          return format === "event_msg"
+            ? { type: "event_msg", payload: { type: "user_message", message: wrapped } }
+            : message(wrapped);
+        }),
+        message(
+          "# AGENTS.md instructions for /tmp/project\n<INSTRUCTIONS>Example: ## My request: human text</INSTRUCTIONS>",
+        ),
+      ]);
+      const parsed = parseCodexLines(records);
+      expect(parsed.turns.map((turn) => turn.subtype)).toEqual([
+        "automation-trigger",
+        "automation-trigger",
+        undefined,
+        "context-injection",
+      ]);
+      const replay = transformToReplay(parsed, "codex");
+      expect(replay.meta.stats.userPrompts).toBe(1);
+      expect(replay.meta.stats.automationTriggerCount).toBe(2);
+      expect(replay.scenes.filter((scene) => scene.type === "user-prompt")).toMatchObject([
+        { content: "Human request" },
+      ]);
+      const root = await mkdtemp(join(tmpdir(), "codex-request-trigger-"));
+      try {
+        const path = join(root, "rollout.jsonl");
+        await writeFile(path, records.join("\n"));
+        const info = await extractCodexSessionInfo(path, (await stat(path)).size);
+        expect(info).toMatchObject({
+          promptCount: 1,
+          automationTriggerCount: 2,
+          firstPrompt: "Human request",
+        });
+        expect(info?.prompts).toEqual(["Human request"]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
   it.each(["response_item", "event_msg"])(
     "classifies wrapped host messages in %s records",
     async (format) => {

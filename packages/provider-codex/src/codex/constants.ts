@@ -32,7 +32,11 @@ function stripUserMessagePrefix(text: string): string {
 
 /** Persisted host messages are replay context, not human interventions. */
 export function codexUserMessageSubtype(text: string): string | undefined {
-  const value = stripLeadingCodexContextBlocks(text).trim();
+  const leading = stripLeadingCodexContextBlocks(text).trim();
+  // An instructions document stays injected context even if its examples
+  // contain request-prefix syntax. Otherwise classify the displayed content.
+  if (/^# AGENTS\.md instructions for [^\n]+\n/.test(leading)) return "context-injection";
+  const value = codexStripTwoPass(leading);
   if (value.startsWith("<heartbeat>")) return "automation-trigger";
   if (/^Automation: [^\n]+\nAutomation ID: [^\n]+(?:\n|$)/.test(value)) return "automation-trigger";
   if (/^# AGENTS\.md instructions for [^\n]+\n/.test(value)) return "context-injection";
