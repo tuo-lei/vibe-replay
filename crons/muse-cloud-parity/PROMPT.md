@@ -117,7 +117,10 @@ so in your report.
    when replay-affecting code changed) — against the fixed code before
    `pnpm verify`: the pre-fix checks ran against the broken code, and a fix
    that was never exercised on the real failing session must not be
-   opened or merged. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`),
+   opened or merged. Rebuild the affected artifacts first (`pnpm build`,
+   or `pnpm --filter vibe-replay build` for CLI-only changes — the step-2
+   build predates the fix, so re-running checks against the stale bundle
+   proves nothing). Before commit: ensure `pnpm` is on PATH (`command -v pnpm`),
    run `pnpm lint:check` and fix all errors, then commit normally so the
    lefthook pre-commit hook runs — it applies
    and stages oxlint/oxfmt fixes, which `pnpm lint:check` alone does not.
