@@ -11,6 +11,7 @@
 - Token attribution follows source order and recorded model changes. Use
   cumulative deltas, not repeated `last_token_usage` or billing envelopes. Reset
   baselines have unknown attribution; later monotonic deltas keep their models.
+  Deltas spanning an automation interval with no bill have unknown attribution.
   Human turn metrics must not absorb an intervening automation's calls/billing.
 - Add regression tests without weakening existing assertions. Sanitized fixtures
   must not contain real local prompts, paths, tokens, or credentials.

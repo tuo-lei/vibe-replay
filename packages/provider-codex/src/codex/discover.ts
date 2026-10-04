@@ -290,13 +290,20 @@ export async function extractCodexSessionInfo(
         if (p.type === "user_message") {
           const rawText = typeof p.message === "string" ? p.message : "";
           const subtype = codexUserMessageSubtype(rawText);
+          const imageKey = userImageDedupeKey(p);
           if (
             subtype === "automation-trigger" &&
-            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "", true)
+            recordDiscoveredPrompt(
+              automationSeen,
+              [],
+              obj.timestamp,
+              codexStripTwoPass(rawText),
+              imageKey,
+              true,
+            )
           )
             automationTriggerCount++;
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
-          const imageKey = userImageDedupeKey(p);
           if (
             !subtype &&
             recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)
@@ -317,13 +324,20 @@ export async function extractCodexSessionInfo(
         if (p.type === "message" && p.role === "user") {
           const rawText = contentText(p.content);
           const subtype = codexUserMessageSubtype(rawText);
+          const imageKey = contentImageDedupeKey(p.content);
           if (
             subtype === "automation-trigger" &&
-            recordDiscoveredPrompt(automationSeen, [], obj.timestamp, rawText, "", true)
+            recordDiscoveredPrompt(
+              automationSeen,
+              [],
+              obj.timestamp,
+              codexStripTwoPass(rawText),
+              imageKey,
+              true,
+            )
           )
             automationTriggerCount++;
           const cleaned = subtype ? "" : normalizeDiscoveredUserMessage(rawText);
-          const imageKey = contentImageDedupeKey(p.content);
           if (
             !subtype &&
             recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)

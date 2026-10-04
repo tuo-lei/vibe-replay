@@ -603,12 +603,32 @@ export function parseCodexLines(
 
   const tokenUsage = tokenUsageFromSnapshots(tokenSnapshots);
   const contextLimit = [...tokenSnapshots].toReversed().find((s) => s.contextLimit)?.contextLimit;
-  const modelAccounting = codexUsageByModel(tokenSnapshots, tokenUsage);
-  const tokenUsageByModel = modelAccounting.usage;
-  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, turnOrder);
   const triggerTurns = turns.filter(
     (turn) => turn.role === "user" && (!turn.subtype || turn.subtype === "automation-trigger"),
   );
+  const unreportedAutomationRanges = triggerTurns.flatMap((turn, index) => {
+    if (turn.subtype !== "automation-trigger") return [];
+    const start = turnOrder.get(turn) ?? 0;
+    const next = triggerTurns[index + 1];
+    const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
+    const reported = tokenSnapshots.some(
+      (snapshot) => snapshot.total && snapshot.sourceIndex > start && snapshot.sourceIndex < end,
+    );
+    return reported ? [] : [{ start, end }];
+  });
+  let previousTotalIndex = -1;
+  for (const snapshot of tokenSnapshots) {
+    if (!snapshot.total) continue;
+    // An ending human snapshot cannot separate an unreported automation bill
+    // from that human's work. Keep the aggregate, but not its attribution.
+    snapshot.attributionGap = unreportedAutomationRanges.some(
+      (range) => range.start > previousTotalIndex && range.end < snapshot.sourceIndex,
+    );
+    previousTotalIndex = snapshot.sourceIndex;
+  }
+  const modelAccounting = codexUsageByModel(tokenSnapshots, tokenUsage);
+  const tokenUsageByModel = modelAccounting.usage;
+  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, turnOrder);
   const completedTriggerDurations = triggerTurns.map((turn, index) => {
     const start = turnOrder.get(turn) ?? 0;
     const next = triggerTurns[index + 1];

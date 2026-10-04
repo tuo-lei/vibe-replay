@@ -13,6 +13,8 @@ export interface CodexTokenSnapshot {
   contextLimit?: number;
   model?: string;
   sourceIndex: number;
+  /** Previous cumulative snapshot predates an automation interval with no bill. */
+  attributionGap?: boolean;
 }
 
 export function normalizeCodexUsage(value: CodexTokenInfo): TokenUsage {
@@ -62,7 +64,11 @@ export function snapshotUsageDeltas(snapshots: CodexTokenSnapshot[]): {
     }
     const usage = { ...total };
     for (const key of keys) usage[key] = Math.max(0, total[key] - previous[key]);
-    deltas.push({ snapshot, usage, attributable: true });
+    deltas.push({
+      snapshot: snapshot.attributionGap ? { ...snapshot, model: undefined } : snapshot,
+      usage,
+      attributable: !snapshot.attributionGap,
+    });
     previous = total;
   }
   return { deltas, reset };
@@ -86,14 +92,17 @@ export function codexUsageByModel(
       ? usage
       : { [snapshots.at(-1)?.model || "unknown"]: aggregate },
     notes: [
+      ...(snapshots.some((snapshot) => snapshot.attributionGap)
+        ? [
+            "Some Codex cumulative token deltas span an automation interval with no usage snapshot; model and human-turn attribution are unknown.",
+          ]
+        : []),
       ...(reset
         ? [
             "Codex cumulative token counters reset; earlier usage has unknown model attribution. Later monotonic deltas retain their recorded models.",
           ]
         : []),
-      ...(!reset && usage.unknown
-        ? ["Some Codex token usage has no persisted model attribution."]
-        : []),
+      ...(!reset && usage.unknown ? ["Some Codex token usage has unknown model attribution."] : []),
     ],
   };
 }

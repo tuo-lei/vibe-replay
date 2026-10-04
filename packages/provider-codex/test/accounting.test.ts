@@ -313,6 +313,86 @@ describe("Codex host accounting", () => {
 });
 
 describe("Codex wrapped triggers and chronological accounting", () => {
+  it.each([heartbeat, "Automation: Audit\nAutomation ID: audit\nCheck results"])(
+    "deduplicates normalized paired automation records and retains a later trigger: %s",
+    async (trigger) => {
+      const records = encode([
+        { type: "session_meta", payload: { id: "paired-triggers", cwd: "/tmp/project" } },
+        {
+          ...message(`## My request:\n<environment_context>host</environment_context>\n${trigger}`),
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-01-01T00:00:01Z",
+          payload: { type: "user_message", message: trigger },
+        },
+        { ...message(trigger), timestamp: "2026-01-01T00:00:05Z" },
+      ]);
+      const replay = transformToReplay(parseCodexLines(records), "codex");
+      expect(replay.meta.stats.userPrompts).toBe(0);
+      expect(replay.meta.stats.automationTriggerCount).toBe(2);
+      const root = await mkdtemp(join(tmpdir(), "codex-paired-trigger-"));
+      try {
+        const path = join(root, "rollout.jsonl");
+        await writeFile(path, records.join("\n"));
+        expect(await extractCodexSessionInfo(path, (await stat(path)).size)).toMatchObject({
+          promptCount: 0,
+          automationTriggerCount: 2,
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("leaves a delta spanning unreported automation unattributed, then resumes human/model accounting", () => {
+    const parsed = parseCodexLines(
+      encode([
+        context("model-a"),
+        message("First request"),
+        usage(100, 20, 10),
+        message(heartbeat),
+        context("model-auto"),
+        message("Second request"),
+        context("model-b"),
+        usage(300, 90, 50),
+        usage(350, 100, 60),
+      ]),
+    );
+    expect(parsed.turnStats).toMatchObject([
+      { turnIndex: 0, tokenUsage: { inputTokens: 80, cacheReadTokens: 20, outputTokens: 10 } },
+      { turnIndex: 1, tokenUsage: { inputTokens: 40, cacheReadTokens: 10, outputTokens: 10 } },
+    ]);
+    expect(parsed.tokenUsageByModel).toEqual({
+      "model-a": { inputTokens: 80, cacheReadTokens: 20, outputTokens: 10, cacheCreationTokens: 0 },
+      unknown: { inputTokens: 130, cacheReadTokens: 70, outputTokens: 40, cacheCreationTokens: 0 },
+      "model-b": { inputTokens: 40, cacheReadTokens: 10, outputTokens: 10, cacheCreationTokens: 0 },
+    });
+    expect(parsed.tokenUsage).toEqual({
+      inputTokens: 250,
+      cacheReadTokens: 100,
+      outputTokens: 60,
+      cacheCreationTokens: 0,
+    });
+    expect(parsed.dataSourceInfo?.notes?.join(" ")).toContain(
+      "automation interval with no usage snapshot",
+    );
+  });
+
+  it("omits human billing when its only cumulative delta spans unreported automation", () => {
+    const parsed = parseCodexLines(
+      encode([
+        context("model-a"),
+        message(heartbeat),
+        message("Human request"),
+        usage(100, 20, 10),
+      ]),
+    );
+    expect(parsed.turnStats?.[0]?.tokenUsage).toBeUndefined();
+    expect(parsed.tokenUsageByModel).toEqual({ unknown: parsed.tokenUsage });
+  });
+
   it.each([
     "## My request for Codex:",
     "## My request:",
