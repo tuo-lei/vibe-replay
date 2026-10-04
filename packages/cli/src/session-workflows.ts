@@ -143,7 +143,30 @@ export async function resolveCliSource(ref: string, options: SessionReferenceOpt
     if (!getProvider(provider)) throw new Error(`Unknown provider: ${provider}`);
     // Provider-scoped metadata preserves discovered titles and enriches DB/sidecar sources.
     const discovery = await discoverCliSessions({ ...options, provider });
-    const info = discovery.sessions.find((s) => [s.filePath, ...s.filePaths].includes(path));
+    const matches = discovery.sessions.filter((s) =>
+      [s.filePath, ...s.filePaths].some((candidate) =>
+        marker
+          ? candidate.split("#session:")[0] === resolve(base)
+          : candidate === path || candidate.split("#session:")[0] === path,
+      ),
+    );
+    const scoped = options.target
+      ? matches.filter(
+          (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === options.target,
+        )
+      : matches;
+    if (matches.length && !scoped.length)
+      throw new Error(`Source does not belong to target '${options.target}'`);
+    if (!marker && scoped.length > 1)
+      throw new SessionReferenceError(
+        "ambiguous",
+        `Ambiguous storage path '${ref}'. Use a session ID or a #session:<id> marker: ${scoped
+          .slice(0, 10)
+          .map((s) => s.sessionId)
+          .join(", ")}`,
+      );
+    const info =
+      marker && scoped.length ? resolveSessionReference(scoped, marker, options) : scoped[0];
     const target = info?.location?.kind === "ssh" ? info.location.id : "local";
     if (options.target && target !== options.target)
       throw new Error(`Source belongs to target '${target}', not '${options.target}'`);
