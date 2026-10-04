@@ -2,6 +2,7 @@ import { claudeCodeProvider } from "@vibe-replay/provider-claude-code/claude-cod
 import { claudeCoworkProvider } from "@vibe-replay/provider-claude-code/claude-cowork";
 import { claudeDesktopProvider } from "@vibe-replay/provider-claude-code/claude-desktop";
 import { codexProvider } from "@vibe-replay/provider-codex";
+import { dotProvider } from "@vibe-replay/provider-dot";
 import { cursorProvider } from "@vibe-replay/provider-cursor";
 import { grokBotProvider } from "@vibe-replay/provider-grok-bot";
 import { hermesProvider } from "@vibe-replay/provider-hermes";
@@ -21,6 +22,7 @@ const providers: Provider[] = [
   museProvider,
   opencodeProvider,
   piProvider,
+  dotProvider,
 ];
 
 // Priority order for deduplication — lower index = higher priority.
@@ -38,6 +40,7 @@ const PROVIDER_PRIORITY = [
   "muse",
   "opencode",
   "pi",
+  "dot",
 ];
 
 export function getAllProviders(): Provider[] {

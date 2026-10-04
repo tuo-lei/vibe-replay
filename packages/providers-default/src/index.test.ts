@@ -32,6 +32,7 @@ describe("default provider registry", () => {
       "muse",
       "opencode",
       "pi",
+      "dot",
     ]);
   });
 

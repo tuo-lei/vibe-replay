@@ -77,6 +77,7 @@ export function formatCost(cost?: number): string {
 const DATA_SOURCE_LABELS: Record<string, string> = {
   sqlite: "SQLite (store.db)",
   "global-state": "SQLite (global state.vscdb)",
+  json: "Conversation JSON import",
   jsonl: "JSONL transcript",
   "jsonl+tools": "JSONL + agent-tools",
 };

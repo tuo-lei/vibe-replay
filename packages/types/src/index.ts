@@ -1,6 +1,6 @@
 import type { ProjectIdentity } from "./project-identity.js";
 
-export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
+export type DataSource = "json" | "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
 export interface TokenUsage {
   /**

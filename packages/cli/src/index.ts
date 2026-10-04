@@ -261,7 +261,7 @@ program
   .name("vibe-replay")
   .description("AI Coding Session Replay & Sharing Tool")
   .version(CLI_VERSION)
-  .option("-s, --session <path>", "Path to a specific JSONL session file")
+  .option("-s, --session <path>", "Path to a specific session file (dot imports use JSON)")
   .option(
     "-p, --provider <name>",
     "Provider name (claude-code, cursor, grok-bot, ...)",

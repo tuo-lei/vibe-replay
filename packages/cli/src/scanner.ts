@@ -30,6 +30,7 @@ import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parseHermesSession } from "@vibe-replay/provider-hermes/parser";
 import { parseOpencodeSession } from "@vibe-replay/provider-opencode/parser";
 import { parseGrokBotSession } from "./providers/grok-bot/parser.js";
+import { parseDotSession } from "@vibe-replay/provider-dot";
 import { parseMuseSession } from "./providers/muse/parser.js";
 import { parsePiSession } from "./providers/pi/parser.js";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
@@ -842,6 +843,18 @@ interface SubAgentLine {
  * subagent JSONL reading, no transform step.
  */
 export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
+  if (input.provider === "dot") {
+    const parsed = await parseDotSession(input.filePaths);
+    return {
+      ...buildScanResultFromParsed(input, parsed),
+      usageIndexed: false,
+      usageSummary: undefined,
+      usageEvents: undefined,
+      startTime: parsed.startTime,
+      endTime: parsed.endTime,
+      durationMs: undefined,
+    };
+  }
   let richFallbackProvider: string | undefined;
   if (input.provider === "claude-cowork") {
     try {

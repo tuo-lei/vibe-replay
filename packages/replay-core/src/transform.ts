@@ -329,8 +329,7 @@ export function transformToReplay(
     parsed.startTime ||
     turnTimestampBounds.startTime ||
     parsed.endTime ||
-    options?.generator?.generatedAt ||
-    new Date().toISOString();
+    (provider === "dot" ? "" : options?.generator?.generatedAt || new Date().toISOString());
   const endTime = parsed.endTime || turnTimestampBounds.endTime;
 
   const replay: ReplaySession = {
