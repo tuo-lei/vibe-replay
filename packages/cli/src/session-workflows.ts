@@ -249,6 +249,29 @@ export async function loadCliSession(
       );
     throw error;
   }
+  if (options.preferReplay && !pathExists(ref) && source.info) {
+    const info = source.info;
+    const savedSlug = replayOutputSlug(info.slug || info.sessionId.slice(0, 8), info.location, {
+      provider: source.provider,
+      sessionId: info.sessionId,
+    });
+    const savedDir = join(homedir(), ".vibe-replay", savedSlug);
+    if (existsSync(join(savedDir, "replay.json"))) {
+      const existing = await readEffectiveReplay(savedDir);
+      const savedTarget =
+        existing.meta.location?.kind === "ssh" ? existing.meta.location.id : "local";
+      const sourceTarget = info.location?.kind === "ssh" ? info.location.id : "local";
+      if (
+        [info.sessionId, ...(info.sessionIds || [])].includes(existing.meta.sessionId) &&
+        existing.meta.provider === source.provider &&
+        savedTarget === sourceTarget
+      ) {
+        if ((!existing.meta.title || existing.meta.title === existing.meta.slug) && info.title)
+          existing.meta.title = info.title;
+        return { replay: existing, outputDir: savedDir, discovery: source.discovery };
+      }
+    }
+  }
   if (source.info?.transcriptStatus)
     throw new Error(`Session transcript is ${source.info.transcriptStatus}`);
   if (source.info?.location?.kind === "ssh") await hydrateCachedRemoteHomes();
@@ -277,20 +300,6 @@ export async function loadCliSession(
     { provider: source.provider, sessionId: replay.meta.sessionId },
   );
   const outputDir = join(homedir(), ".vibe-replay", slug);
-  if (options.preferReplay && !pathExists(ref) && existsSync(join(outputDir, "replay.json"))) {
-    const existing = await readEffectiveReplay(outputDir);
-    if (
-      existing.meta.sessionId === replay.meta.sessionId &&
-      existing.meta.provider === replay.meta.provider
-    ) {
-      if (
-        (!existing.meta.title || existing.meta.title === existing.meta.slug) &&
-        source.info?.title
-      )
-        existing.meta.title = source.info.title;
-      return { replay: existing, outputDir, discovery: source.discovery };
-    }
-  }
   return { replay, outputDir, discovery: source.discovery };
 }
 

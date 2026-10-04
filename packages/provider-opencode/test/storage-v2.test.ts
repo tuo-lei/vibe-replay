@@ -374,4 +374,25 @@ describe("OpenCode v2 storage compatibility", () => {
       db.close();
     }
   });
+
+  it("uses the latest assistant model when the session table has no model column", async () => {
+    const db = await v2Db();
+    try {
+      db.run("ALTER TABLE session_v2 DROP COLUMN model");
+      add(db, "u", "user", 0, { text: "Inspect" });
+      add(db, "a1", "assistant", 1, {
+        model: { id: "first-model" },
+        content: [{ type: "text", text: "First response" }],
+      });
+      add(db, "a2", "assistant", 2, {
+        model: { id: "last-model" },
+        content: [{ type: "text", text: "Last response" }],
+      });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.model).toBe("last-model");
+      expect(parsed.turns.slice(1).map((t) => t.model)).toEqual(["first-model", "last-model"]);
+    } finally {
+      db.close();
+    }
+  });
 });

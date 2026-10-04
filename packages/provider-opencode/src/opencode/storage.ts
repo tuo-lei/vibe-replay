@@ -83,6 +83,7 @@ export function prepareOpencodeStorage(db: Database): void {
                 ? "assistant"
                 : type,
         time,
+        _v2Message: true,
         _v2Compaction: type === "compaction",
         _compactionStatus: type === "compaction" ? data.status : undefined,
         _compactionReason: type === "compaction" ? data.reason : undefined,

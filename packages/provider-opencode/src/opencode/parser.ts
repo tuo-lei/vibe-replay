@@ -96,6 +96,7 @@ interface MessageMeta {
   };
   finish?: string;
   /** Transient v2 adapter fields; old status-less compactions remain compatible. */
+  _v2Message?: boolean;
   _v2Compaction?: boolean;
   _compactionStatus?: string;
   _compactionReason?: string;
@@ -281,6 +282,7 @@ export function parseSessionFromDb(
       }
     }
 
+    if (meta._v2Message && meta.role === "assistant" && meta.modelID) model = meta.modelID;
     if (meta._v2Compaction) {
       if (meta._compactionStatus === "running") runningCompactions++;
       if (
