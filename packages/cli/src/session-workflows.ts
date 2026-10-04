@@ -18,6 +18,7 @@ import { loadSavedGistInfo } from "./publishers/gist.js";
 import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
 import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
+import { inferSqliteProvider } from "./sqlite-schema.js";
 import { CLI_VERSION } from "./version.js";
 
 export interface SessionReferenceOptions {
@@ -136,36 +137,6 @@ function canonicalStoragePath(ref: string): string {
 
 function pathExists(ref: string): boolean {
   return existsSync(splitStorageReference(expandUserPath(ref)).base);
-}
-
-async function inferSqliteProvider(path: string): Promise<string | undefined> {
-  const bytes = await readFile(path);
-  if (bytes.length < 1024) return undefined;
-  const { default: initSqlJs } = await import("sql.js");
-  const SQL = await initSqlJs();
-  const db = new SQL.Database(bytes);
-  try {
-    const tables = new Set(
-      db
-        .exec("SELECT name FROM sqlite_master WHERE type = 'table'")[0]
-        ?.values.map((row) => row[0]),
-    );
-    if (tables.has("sessions") && tables.has("messages")) return "hermes";
-    if (
-      (tables.has("session_v2") && tables.has("session_message")) ||
-      (tables.has("session") && tables.has("message") && tables.has("part"))
-    )
-      return "opencode";
-    if (
-      tables.has("cursorDiskKV") ||
-      (tables.has("meta") && tables.has("blobs")) ||
-      (tables.has("agents") && tables.has("runs") && tables.has("run_events"))
-    )
-      return "cursor";
-    return undefined;
-  } finally {
-    db.close();
-  }
 }
 
 async function isSqliteFile(path: string): Promise<boolean> {

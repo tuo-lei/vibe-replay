@@ -228,7 +228,9 @@ selects one exact session; `--refresh` bypasses the 30-second discovery cache.
 Copied SQLite databases use their own contents, with a session marker required
 when they contain multiple sessions. Cursor SDK database copies also need the
 agent's JSONL transcript beside the database (or its `agent-transcripts` folder)
-to supply user prompts.
+to supply user prompts. Provider inference uses a bounded read-only `sqlite3` query
+when available; without it, databases above 32 MiB require `--provider` to skip
+loading another WASM snapshot solely for detection.
 `doctor --json` reports provider coverage and compatibility failures. Search output
 marks partial discovery, and empty results include recovery suggestions.
 
