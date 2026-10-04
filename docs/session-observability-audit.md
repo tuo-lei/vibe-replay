@@ -18,11 +18,27 @@ separately in the **Insights → Coverage** section.
 - `cacheReadShare = cacheReadTokens / promptTokens`.
 - “Uncached / miss” is derived. There is no provider-independent cache-miss
   counter, so it must not be presented as an exact billing field.
+- Codex human prompts exclude persisted heartbeat/scheduled automation triggers,
+  injected `AGENTS.md`, and ambient Page metadata. Triggers remain visible in
+  replays as **Automation Trigger**, with a separate **Auto Triggers** count.
+  Mixed human/automation sessions do not report CLI tools/edits per human prompt.
+- Codex model usage uses cumulative token deltas under the recorded model at
+  each source position. Repeated snapshots add zero. After counters reset, the
+  preceding baseline is `unknown`; later monotonic deltas keep their models.
+  Aggregate totals remain the provider's latest snapshot. Unknown attribution
+  prevents a whole-session cost estimate, and missing turns are not shifted.
 - Invocation counts are one event per concrete tool call or skill activation.
   A concrete read of a provider's `SKILL.md` is skill activation evidence;
   injected lists of available skills are not activations. MCP calls are removed
   from the ordinary-tool facet and counted under their server; named MCP tools
   are measured separately from server-only calls.
+- Completed Codex `exec` batches can expose awaited, literal, straight-line
+  nested calls, including literal `Promise.all`/`allSettled` arrays. The original
+  batch and its output stay in the replay as source evidence; only the nested
+  calls contribute to tool counts. Their individual results/status/durations
+  remain unknown. Scripts with dynamic inputs, control flow, or incomplete
+  execution stay opaque and carry a partial-coverage note. Transcript JavaScript
+  is parsed as syntax and never executed.
 - A completed index with zero invocations is valid evidence of zero calls. It is
   different from a deferred or failed index.
 - Cursor compaction counts are lower bounds: Cursor persists the latest

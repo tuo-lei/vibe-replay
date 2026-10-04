@@ -79,7 +79,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v38: retain compact per-turn duration/tool/token metrics for distributions.
 // v39: keep short CJK Grok Bot prompts as Explore firstPrompt instead of skipping
 // them for the 10-character English-oriented threshold.
-export const SCANNER_VERSION = 39;
+// v40: Codex host-trigger classification, nested exec tools, and per-model usage.
+export const SCANNER_VERSION = 40;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -116,12 +117,14 @@ export interface SessionScanResult {
 
   // Stats
   promptCount: number;
+  automationTriggerCount?: number;
   toolCallCount: number;
   editCount: number;
   filesModified: Array<{ file: string; count: number }>;
 
   // Token usage
   tokenUsage?: TokenUsage;
+  tokenUsageByModel?: Record<string, TokenUsage>;
   costEstimate?: number;
   contextBreakdown?: ContextBreakdown;
 
@@ -1656,13 +1659,13 @@ function isMetricUserPrompt(turn: ProviderParseResult["turns"][number]): boolean
 function turnToolCallCount(blocks: ContentBlock[]): number {
   let count = 0;
   for (const block of blocks) {
-    if (block.type !== "tool_use") continue;
+    if (block.type !== "tool_use" || block._isToolContainer) continue;
     count++;
     const subAgent = (
       block as {
         _subAgent?: {
           usageEvents?: UsageEvent[];
-          scenes?: Array<{ type?: string }>;
+          scenes?: Array<{ type?: string; isToolContainer?: boolean }>;
         };
       }
     )._subAgent;
@@ -1670,7 +1673,9 @@ function turnToolCallCount(blocks: ContentBlock[]): number {
     if (nestedEvents?.length) {
       count += nestedEvents.filter((event) => event.kind === "tool").length;
     } else if (subAgent?.scenes) {
-      count += subAgent.scenes.filter((scene) => scene.type === "tool-call").length;
+      count += subAgent.scenes.filter(
+        (scene) => scene.type === "tool-call" && !scene.isToolContainer,
+      ).length;
     }
   }
   return count;
@@ -1688,6 +1693,7 @@ export function buildTurnMetrics(
 ): TurnMetric[] | undefined {
   const metrics: TurnMetric[] = [];
   let currentTurnIndex = -1;
+  let promptIndex = -1;
 
   const ensureMetric = (turnIndex: number): TurnMetric => {
     while (metrics.length <= turnIndex) metrics.push({ toolCalls: 0 });
@@ -1695,8 +1701,12 @@ export function buildTurnMetrics(
   };
 
   for (const turn of turns) {
+    if (turn.subtype === "automation-trigger") {
+      currentTurnIndex = -1;
+      continue;
+    }
     if (isMetricUserPrompt(turn)) {
-      currentTurnIndex++;
+      currentTurnIndex = ++promptIndex;
       ensureMetric(currentTurnIndex);
       continue;
     }
@@ -1869,7 +1879,7 @@ function buildScanResultFromParsed(
     }
 
     for (const block of turn.blocks) {
-      if (block.type !== "tool_use") continue;
+      if (block.type !== "tool_use" || block._isToolContainer) continue;
       toolCallCount++;
       const skillName = skillNameFromTool(block);
       if (skillName) {
@@ -1950,7 +1960,7 @@ function buildScanResultFromParsed(
           }
         }
         for (const saScene of block._subAgent.scenes) {
-          if (saScene.type !== "tool-call") continue;
+          if (saScene.type !== "tool-call" || saScene.isToolContainer) continue;
           // When a complete provider-side index exists, it has already
           // contributed the nested call count and usage events above.
           if (!nestedUsageEvents?.length) {
@@ -2062,6 +2072,8 @@ function buildScanResultFromParsed(
     prLinks: parsed.prLinks,
     model: parsed.model,
     promptCount,
+    automationTriggerCount: parsed.turns.filter((turn) => turn.subtype === "automation-trigger")
+      .length,
     toolCallCount,
     editCount,
     filesModified: [...fileEditCounts.entries()]
@@ -2069,6 +2081,7 @@ function buildScanResultFromParsed(
       .sort((a, b) => b.count - a.count)
       .slice(0, 100),
     tokenUsage: parsed.tokenUsage,
+    tokenUsageByModel: parsed.tokenUsageByModel,
     costEstimate,
     contextBreakdown: parsed.contextBreakdown,
     subAgentCount: parsedSubAgentCount || derivedSubAgentCount,

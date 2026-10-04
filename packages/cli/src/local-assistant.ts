@@ -659,6 +659,11 @@ function resultStats(record: AssistantSessionRecord) {
   return {
     prompts:
       stats?.userPrompts ?? scan?.promptCount ?? sourceNumber(record.source?.promptCount) ?? 0,
+    automationTriggers:
+      stats?.automationTriggerCount ??
+      scan?.automationTriggerCount ??
+      sourceNumber(record.source?.automationTriggerCount) ??
+      0,
     toolCalls:
       stats?.toolCalls ?? scan?.toolCallCount ?? sourceNumber(record.source?.toolCallCount) ?? 0,
     edits: scan?.editCount ?? 0,
@@ -1044,7 +1049,7 @@ function sessionSummary(
     .slice(0, 12);
   const toolCounts: Record<string, number> = {};
   for (const scene of session.scenes) {
-    if (scene.type === "tool-call")
+    if (scene.type === "tool-call" && !scene.isToolContainer)
       toolCounts[scene.toolName] = (toolCounts[scene.toolName] || 0) + 1;
   }
   const turnStats = session.meta.stats.turnStats;

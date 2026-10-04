@@ -6,7 +6,21 @@ import { utf8ByteLength } from "@vibe-replay/provider-core/utils";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { Compaction, ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
-import { codexStripTwoPass, contentText, isCodexToolCallType } from "./constants.js";
+import {
+  codexStripTwoPass,
+  codexUserMessageSubtype,
+  contentText,
+  isCodexToolCallType,
+} from "./constants.js";
+import { nestedExecTools, patchFilePaths } from "./exec-tools.js";
+import {
+  addUsage,
+  codexUsageByModel,
+  normalizeCodexUsage,
+  snapshotUsageDeltas,
+  type CodexTokenInfo,
+  type CodexTokenSnapshot,
+} from "./token-accounting.js";
 
 interface PendingTool {
   id: string;
@@ -16,6 +30,9 @@ interface PendingTool {
   mcpServer?: string;
   mcpTool?: string;
   durationAnchor?: "end";
+  model?: string;
+  isContainer?: boolean;
+  resultUnavailable?: boolean;
 }
 
 interface ToolResult {
@@ -24,19 +41,6 @@ interface ToolResult {
   timestamp?: string;
   durationMs?: number;
   durationSource?: "timestamp";
-}
-
-interface CodexTokenInfo {
-  input_tokens?: number;
-  cached_input_tokens?: number;
-  output_tokens?: number;
-}
-
-interface CodexTokenSnapshot {
-  timestamp?: string;
-  total?: CodexTokenInfo;
-  last?: CodexTokenInfo;
-  contextLimit?: number;
 }
 
 function asCodexTokenInfo(value: unknown): CodexTokenInfo | undefined {
@@ -77,7 +81,8 @@ export function parseCodexLines(
   let slug = sessionInfo?.slug || "";
   let title = sessionInfo?.title;
   let cwd = sessionInfo?.cwd || "";
-  let model = sessionInfo?.model;
+  // Discovery knows the latest model, not the model at the start of the rollout.
+  let model: string | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
   let gitBranch = sessionInfo?.gitBranch;
@@ -95,7 +100,9 @@ export function parseCodexLines(
   const tools = new Map<string, PendingTool>();
   const toolResults = new Map<string, ToolResult>();
   const tokenSnapshots: CodexTokenSnapshot[] = [];
-  const taskDurations: number[] = [];
+  const taskDurations: Array<{ sourceIndex: number; durationMs: number }> = [];
+  let reconstructedExecCalls = false;
+  let opaqueExecCalls = false;
   const mcpServersUsed = new Set<string>();
   const gitBranches: string[] = [];
   const seenUserMessages = new Map<string, number[]>();
@@ -105,11 +112,16 @@ export function parseCodexLines(
   const turnOrder = new Map<ParsedTurn, number>();
   const toolOrder = new Map<string, number>();
   const pushTurn = (turn: ParsedTurn, order = currentLineIndex): void => {
-    turns.push(turn);
-    turnOrder.set(turn, order);
+    const turnModel = "model" in turn ? turn.model : model;
+    turns.push({
+      ...turn,
+      ...(turn.role === "assistant" && turnModel ? { model: turnModel } : {}),
+    });
+    turnOrder.set(turns[turns.length - 1], order);
   };
   const registerTool = (id: string, tool: PendingTool): void => {
     if (!toolOrder.has(id)) toolOrder.set(id, currentLineIndex);
+    tool.model ||= model;
     tools.set(id, tool);
   };
 
@@ -167,7 +179,7 @@ export function parseCodexLines(
 
     if (obj.type === "turn_context") {
       const p = obj.payload || {};
-      model = model || p.model;
+      model = asOptionalString(p.model) || model;
       permissionMode = permissionMode || p.permission_profile?.type || p.sandbox_policy?.type;
       approvalPolicy = approvalPolicy || p.approval_policy;
       continue;
@@ -181,11 +193,16 @@ export function parseCodexLines(
       }
       if (p.type === "user_message") {
         const blocks = userMessageBlocks(p);
+        const subtype = codexUserMessageSubtype(typeof p.message === "string" ? p.message : "");
         const text = textFromBlocks(blocks);
         if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
           pushTurn({
             role: "user",
-            ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
+            ...(isCompactionSummaryText(text)
+              ? { subtype: "compaction-summary" as const }
+              : subtype
+                ? { subtype }
+                : {}),
             timestamp: obj.timestamp,
             blocks,
           });
@@ -245,6 +262,8 @@ export function parseCodexLines(
       if (p.type === "token_count") {
         tokenSnapshots.push({
           timestamp: obj.timestamp,
+          sourceIndex: lineIndex,
+          model,
           total: asCodexTokenInfo(p.info?.total_token_usage),
           last: asCodexTokenInfo(p.info?.last_token_usage),
           contextLimit:
@@ -255,7 +274,8 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "task_complete" && typeof p.duration_ms === "number") {
-        if (p.duration_ms > 0) taskDurations.push(p.duration_ms);
+        if (p.duration_ms > 0)
+          taskDurations.push({ sourceIndex: lineIndex, durationMs: p.duration_ms });
         continue;
       }
       if (p.type === "context_compacted") {
@@ -382,7 +402,7 @@ export function parseCodexLines(
       // Environment snapshot (skills, agents.md, plugins, permissions). Keep
       // it metadata-only — never turn those blobs into replay scenes.
       const state = worldStatePayload(obj.payload);
-      model = model || asOptionalString(state?.model);
+      model = asOptionalString(state?.model) || model;
       continue;
     }
 
@@ -413,11 +433,16 @@ export function parseCodexLines(
 
     if (p.type === "message" && p.role === "user") {
       const blocks = userMessageBlocksFromContent(p.content);
+      const subtype = codexUserMessageSubtype(contentText(p.content));
       const text = textFromBlocks(blocks);
       if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
         pushTurn({
           role: "user",
-          ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
+          ...(isCompactionSummaryText(text)
+            ? { subtype: "compaction-summary" as const }
+            : subtype
+              ? { subtype }
+              : {}),
           timestamp: obj.timestamp,
           blocks,
         });
@@ -511,11 +536,45 @@ export function parseCodexLines(
     }
   }
 
+  const execBatches = [...tools.values()].filter(
+    (tool) => tool.name === "exec" || tool.name === "functions.exec",
+  );
+  for (const tool of execBatches) {
+    const source = typeof tool.input.value === "string" ? tool.input.value : undefined;
+    const result = toolResults.get(tool.id);
+    const children = source && result ? nestedExecTools(source, result.result) : undefined;
+    if (!children) {
+      opaqueExecCalls = true;
+      continue;
+    }
+    reconstructedExecCalls = true;
+    tool.isContainer = true;
+    for (const [index, child] of children.entries()) {
+      const id = `${tool.id}:nested:${index}`;
+      tools.set(id, {
+        ...child,
+        id,
+        timestamp: tool.timestamp,
+        model: tool.model,
+        resultUnavailable: true,
+      });
+      toolOrder.set(
+        id,
+        (toolOrder.get(tool.id) ?? lines.length) + (index + 1) / (children.length + 1),
+      );
+      if (child.name.startsWith("mcp__")) {
+        const server = child.name.split("__")[1];
+        if (server) mcpServersUsed.add(server);
+      }
+    }
+  }
+
   for (const tool of tools.values()) {
     const tr = toolResults.get(tool.id);
     pushTurn(
       {
         role: "assistant",
+        model: tool.model,
         timestamp: tool.timestamp,
         blocks: [
           {
@@ -523,6 +582,8 @@ export function parseCodexLines(
             id: tool.id,
             name: normalizeToolName(tool.name),
             input: normalizeToolInput(tool.name, tool.input),
+            ...(tool.isContainer ? { _isToolContainer: true } : {}),
+            ...(tool.resultUnavailable ? { _resultUnavailable: true } : {}),
             _hasResult: toolResults.has(tool.id),
             ...(tr ? { _result: tr.result } : {}),
             ...(tr?.isError ? { _isError: true } : {}),
@@ -542,18 +603,54 @@ export function parseCodexLines(
 
   const tokenUsage = tokenUsageFromSnapshots(tokenSnapshots);
   const contextLimit = [...tokenSnapshots].toReversed().find((s) => s.contextLimit)?.contextLimit;
-  const tokenUsageByModel =
-    tokenUsage && model
-      ? {
-          [model]: tokenUsage,
-        }
-      : undefined;
-  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, model);
-  const summedTaskDurationMs = taskDurations.reduce((sum, duration) => sum + duration, 0);
-  const userPromptTurnCount = turns.filter((turn) => turn.role === "user" && !turn.subtype).length;
+  const triggerTurns = turns.filter(
+    (turn) => turn.role === "user" && (!turn.subtype || turn.subtype === "automation-trigger"),
+  );
+  const positiveDeltas = snapshotUsageDeltas(tokenSnapshots).deltas.filter(({ usage }) =>
+    Object.values(usage).some((count) => count > 0),
+  );
+  const changedTotalIndices = new Set(positiveDeltas.map(({ snapshot }) => snapshot.sourceIndex));
+  const unreportedAutomationRanges = triggerTurns.flatMap((turn, index) => {
+    if (turn.subtype !== "automation-trigger") return [];
+    const start = turnOrder.get(turn) ?? 0;
+    const next = triggerTurns[index + 1];
+    const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
+    const lastActivity = turns.reduce((last, candidate) => {
+      const position = turnOrder.get(candidate) ?? -1;
+      return candidate.role === "assistant" && position > start && position < end
+        ? Math.max(last, position)
+        : last;
+    }, start);
+    const reported = positiveDeltas.some(
+      ({ snapshot, attributable }) =>
+        attributable && snapshot.sourceIndex > lastActivity && snapshot.sourceIndex < end,
+    );
+    return reported ? [] : [{ start, end }];
+  });
+  let previousTotalIndex = -1;
+  for (const snapshot of tokenSnapshots) {
+    if (!snapshot.total) continue;
+    // An ending human snapshot cannot separate an unreported automation bill
+    // from that human's work. Keep the aggregate, but not its attribution.
+    snapshot.attributionGap = unreportedAutomationRanges.some(
+      (range) => range.end > previousTotalIndex && range.end < snapshot.sourceIndex,
+    );
+    // A repeated pre-work snapshot is not a new bill or attribution baseline.
+    if (changedTotalIndices.has(snapshot.sourceIndex)) previousTotalIndex = snapshot.sourceIndex;
+  }
+  const modelAccounting = codexUsageByModel(tokenSnapshots, tokenUsage);
+  const tokenUsageByModel = modelAccounting.usage;
+  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, turnOrder);
+  const completedTriggerDurations = triggerTurns.map((turn, index) => {
+    const start = turnOrder.get(turn) ?? 0;
+    const next = triggerTurns[index + 1];
+    const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
+    return taskDurations.filter((task) => task.sourceIndex > start && task.sourceIndex < end);
+  });
   const completeTaskDurationMs =
-    userPromptTurnCount > 0 && taskDurations.length >= userPromptTurnCount
-      ? summedTaskDurationMs
+    completedTriggerDurations.length > 0 &&
+    completedTriggerDurations.every((tasks) => tasks.length > 0)
+      ? completedTriggerDurations.flat().reduce((sum, task) => sum + task.durationMs, 0)
       : undefined;
   const contextComponents: NonNullable<ProviderParseResult["contextBreakdown"]>["components"] = [];
   if (baseInstructionsBytes > 0) {
@@ -576,7 +673,7 @@ export function parseCodexLines(
     slug: slug || sessionId.slice(0, 8),
     title,
     cwd,
-    model,
+    model: model || sessionInfo?.model,
     startTime,
     endTime,
     totalDurationMs: completeTaskDurationMs || estimateActiveDuration(allTimestamps),
@@ -606,7 +703,20 @@ export function parseCodexLines(
       primary: "jsonl",
       sources: ["~/.codex/state_5.sqlite", "~/.codex/sessions"],
       supplements: sourcePaths,
-      notes: ["Discovered from Codex state and parsed from rollout JSONL (local beta)."],
+      notes: [
+        "Discovered from Codex state and parsed from rollout JSONL (local beta).",
+        ...modelAccounting.notes,
+        ...(reconstructedExecCalls
+          ? [
+              "Nested exec calls were reconstructed from completed, straight-line scripts; per-call results and durations are unavailable.",
+            ]
+          : []),
+        ...(opaqueExecCalls
+          ? [
+              "Some exec scripts could not be safely expanded; nested tool and file coverage is partial.",
+            ]
+          : []),
+      ],
     },
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
@@ -793,6 +903,11 @@ function normalizeToolName(name: string): string {
 }
 
 function normalizeToolInput(name: string, input: Record<string, any>): Record<string, any> {
+  if (name === "apply_patch" && typeof input.value === "string") {
+    if (Array.isArray(input.file_paths) && input.file_paths.length) return input;
+    const paths = patchFilePaths(input.value);
+    return { ...input, ...(paths.length ? { file_path: paths[0], file_paths: paths } : {}) };
+  }
   if (name === "exec_command" && typeof input.cmd === "string" && !input.command) {
     return { ...input, command: input.cmd };
   }
@@ -996,13 +1111,20 @@ function tokenUsageFromSnapshots(snapshots: CodexTokenSnapshot[]): TokenUsage | 
 function buildCodexTurnStats(
   turns: ParsedTurn[],
   snapshots: CodexTokenSnapshot[],
-  taskDurations: number[],
-  model?: string,
+  taskDurations: Array<{ sourceIndex: number; durationMs: number }>,
+  turnOrder: Map<ParsedTurn, number>,
 ) {
-  const userTurns = turns.filter((t) => t.role === "user" && !t.subtype);
-  const usable = snapshots.filter((s) => s.last);
+  const triggers = turns.filter(
+    (t) => t.role === "user" && (!t.subtype || t.subtype === "automation-trigger"),
+  );
+  const userTurns = triggers.filter((t) => !t.subtype);
+  const { deltas } = snapshotUsageDeltas(snapshots);
   return userTurns.map((turn, i) => {
-    const usage = usable[i]?.last;
+    const start = turnOrder.get(turn) ?? 0;
+    const triggerIndex = triggers.indexOf(turn);
+    const next = triggers[triggerIndex + 1];
+    const end = next ? (turnOrder.get(next) ?? Infinity) : Infinity;
+    const inTurn = snapshots.filter((s) => s.sourceIndex > start && s.sourceIndex < end);
     const stat: {
       turnIndex: number;
       model?: string;
@@ -1010,28 +1132,28 @@ function buildCodexTurnStats(
       contextTokens?: number;
       durationMs?: number;
     } = { turnIndex: i };
-    if (model) stat.model = model;
-    if (usage) {
-      const input = usage.input_tokens || 0;
-      const cached = usage.cached_input_tokens || 0;
-      stat.tokenUsage = {
-        inputTokens: Math.max(0, input - cached),
-        outputTokens: usage.output_tokens || 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: cached,
-      };
-      stat.contextTokens = input;
+    const models = new Set(inTurn.map((s) => s.model).filter(Boolean));
+    if (models.size === 1) stat.model = [...models][0];
+    const usage = normalizeCodexUsage({});
+    const usageDeltas = deltas.filter(
+      ({ snapshot, attributable }) =>
+        attributable && snapshot.sourceIndex > start && snapshot.sourceIndex < end,
+    );
+    if (usageDeltas.length > 0) {
+      for (const delta of usageDeltas) addUsage(usage, delta.usage);
+      if (Object.values(usage).some((count) => count > 0) || !inTurn.some((s) => s.attributionGap))
+        stat.tokenUsage = usage;
     }
-    const nextUser = userTurns[i + 1]?.timestamp;
-    const taskDuration = taskDurations[i];
-    if (typeof taskDuration === "number" && taskDuration > 0) {
-      stat.durationMs = taskDuration;
-    } else if (turn.timestamp) {
-      const end = nextUser || usable[i]?.timestamp;
-      if (end) {
-        const diff = Date.parse(end) - Date.parse(turn.timestamp);
-        if (diff > 0 && diff < 12 * 60 * 60 * 1000) stat.durationMs = diff;
-      }
+    const last = inTurn.at(-1)?.last;
+    if (last) stat.contextTokens = last.input_tokens;
+    const completed = taskDurations.filter(
+      (task) => task.sourceIndex > start && task.sourceIndex < end,
+    );
+    if (completed.length)
+      stat.durationMs = completed.reduce((sum, task) => sum + task.durationMs, 0);
+    else if (turn.timestamp) {
+      const endTime = next?.timestamp || inTurn.at(-1)?.timestamp;
+      if (endTime) stat.durationMs = durationBetweenTimestamps(turn.timestamp, endTime);
     }
     return stat;
   });

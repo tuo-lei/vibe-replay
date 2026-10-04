@@ -5,6 +5,48 @@ const timestamp = (seconds: number) =>
   `2026-08-31T00:00:${seconds.toString().padStart(2, "0")}.000Z`;
 
 describe("buildActivityTiming", () => {
+  it.each([undefined, 2_000])(
+    "counts nested invocations while retaining batch duration %s",
+    (durationMs) => {
+      const result = buildActivityTiming([
+        { type: "user-prompt", content: "Start", timestamp: timestamp(0) },
+        {
+          type: "tool-call",
+          toolName: "exec",
+          input: {},
+          result: "batch output",
+          timestamp: timestamp(1),
+          isToolContainer: true,
+          durationMs,
+        },
+        {
+          type: "tool-call",
+          toolName: "Edit",
+          input: {},
+          result: "",
+          timestamp: timestamp(1),
+          resultUnavailable: true,
+        },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: {},
+          result: "",
+          timestamp: timestamp(1),
+          resultUnavailable: true,
+        },
+        { type: "text-response", content: "Done", timestamp: timestamp(5) },
+      ]);
+      expect(result.toolCalls).toBe(2);
+      expect(result.recordedToolCalls).toBe(0);
+      expect(result.unmeasuredToolCalls).toBe(2);
+      expect(result.toolDurationMs).toBe(durationMs ?? 0);
+      expect(result.unknownToolMs).toBe(durationMs ?? 0);
+      expect(result.toolCategories.other).toEqual({ durationMs: durationMs ?? 0, count: 0 });
+      expect(result.totalMs).toBe(5_000);
+    },
+  );
+
   it("keeps user idle, model gaps, tool time, and response gaps non-overlapping", () => {
     const result = buildActivityTiming([
       { type: "user-prompt", content: "Start", timestamp: timestamp(0) },

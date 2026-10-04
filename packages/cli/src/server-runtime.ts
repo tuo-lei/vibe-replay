@@ -145,7 +145,8 @@ export async function startServer(
   // v7 → v8: disambiguate Cursor SDK workflow display labels.
   // v8 → v9: Codex source titles now follow explicit session_index names.
   // v9 → v10: carry provider compaction counts and storage fingerprints.
-  const sourcesCacheKey = `dashboard-sources-v10-${cacheKeySuffix}`;
+  // v10 → v11: distinguish Codex automation triggers from human prompts.
+  const sourcesCacheKey = `dashboard-sources-v11-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets

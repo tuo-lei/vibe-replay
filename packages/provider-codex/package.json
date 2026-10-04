@@ -35,6 +35,7 @@
   "dependencies": {
     "@vibe-replay/provider-contract": "workspace:*",
     "@vibe-replay/provider-core": "workspace:*",
+    "acorn": "8.16.0",
     "sql.js": "^1.14.2"
   },
   "devDependencies": {

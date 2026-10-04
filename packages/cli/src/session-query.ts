@@ -36,6 +36,7 @@ export interface SessionQueryMatch {
   filePaths: string[];
   toolPaths?: string[];
   promptCount?: number;
+  automationTriggerCount?: number;
   toolCallCount?: number;
   editCount?: number;
   durationMs?: number;
@@ -52,6 +53,7 @@ export interface SessionQueryMatch {
 
 export interface SessionQueryScanSummary {
   promptCount: number;
+  automationTriggerCount?: number;
   toolCallCount: number;
   editCount: number;
   filesModified: Array<{ file: string; count: number }>;
@@ -64,6 +66,7 @@ export interface SessionQueryScanSummary {
   editsPerPrompt?: number;
   medianTurnDurationMs?: number;
   tokenUsage?: SessionScanResult["tokenUsage"];
+  tokenUsageByModel?: SessionScanResult["tokenUsageByModel"];
   contextBreakdown?: SessionScanResult["contextBreakdown"];
   dataQualityNotes?: string[];
 }
@@ -220,6 +223,8 @@ export function formatSessionQueryText(matches: SessionQueryMatch[]): string {
       if ((match.compactionCount || 0) > 0) {
         lines.push(`   compactions: ${match.compactionCount}`);
       }
+      const automationCount = match.scan?.automationTriggerCount ?? match.automationTriggerCount;
+      if (automationCount) lines.push(`   automation triggers: ${automationCount}`);
       if (match.scan) lines.push(`   efficiency: ${formatScanSummary(match.scan)}`);
       if (match.brief) {
         lines.push(`   brief: ${match.brief.summary}`);
@@ -258,6 +263,7 @@ function sessionInfoToMatch(
     filePaths: session.filePaths,
     toolPaths: session.toolPaths,
     promptCount: session.promptCount,
+    automationTriggerCount: session.automationTriggerCount,
     toolCallCount: session.toolCallCount,
     editCount: session.editCountEst,
     durationMs: session.durationMsEst,
@@ -275,6 +281,7 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
   const promptCount = scan.promptCount;
   return {
     promptCount,
+    automationTriggerCount: scan.automationTriggerCount,
     toolCallCount: scan.toolCallCount,
     editCount: scan.editCount,
     filesModified: scan.filesModified.slice(0, 20),
@@ -283,10 +290,13 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
     apiErrorCount: scan.apiErrorCount,
     compactionCount: scan.compactionCount,
     subAgentCount: scan.subAgentCount,
-    toolCallsPerPrompt: ratio(scan.toolCallCount, promptCount),
-    editsPerPrompt: ratio(scan.editCount, promptCount),
+    toolCallsPerPrompt: scan.automationTriggerCount
+      ? undefined
+      : ratio(scan.toolCallCount, promptCount),
+    editsPerPrompt: scan.automationTriggerCount ? undefined : ratio(scan.editCount, promptCount),
     medianTurnDurationMs: median(scan.turnDurations),
     tokenUsage: scan.tokenUsage,
+    tokenUsageByModel: scan.tokenUsageByModel,
     contextBreakdown: scan.contextBreakdown,
     dataQualityNotes: scan.dataQualityNotes,
   };
@@ -298,6 +308,8 @@ function formatScanSummary(scan: SessionQueryScanSummary): string {
     `${scan.toolCallCount} tools`,
     `${scan.editCount} edits`,
   ];
+  if (scan.automationTriggerCount)
+    parts.push(plural(scan.automationTriggerCount, "automation trigger"));
   if (scan.durationMs) parts.push(formatDuration(scan.durationMs));
   if (scan.costEstimate) parts.push(`$${scan.costEstimate.toFixed(2)}`);
   if (scan.toolCallsPerPrompt !== undefined) {
@@ -429,7 +441,10 @@ function sessionSignals(
   const signals: string[] = [];
   const promptCount = scan?.promptCount ?? match.promptCount ?? 0;
   const toolCount = scan?.toolCallCount ?? match.toolCallCount ?? 0;
-  const toolsPerPrompt = scan?.toolCallsPerPrompt ?? ratio(toolCount, promptCount);
+  const hasAutomation = Boolean(scan?.automationTriggerCount ?? match.automationTriggerCount);
+  const toolsPerPrompt = hasAutomation
+    ? undefined
+    : (scan?.toolCallsPerPrompt ?? ratio(toolCount, promptCount));
 
   if (toolsPerPrompt !== undefined && toolsPerPrompt >= HIGH_TOOL_DENSITY_THRESHOLD) {
     signals.push(`high tool density (${toolsPerPrompt.toFixed(1)} tools/prompt)`);

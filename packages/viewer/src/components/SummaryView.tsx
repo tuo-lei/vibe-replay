@@ -155,8 +155,9 @@ export default function SummaryView({ session }: Props) {
       sceneCount: number;
     }> = [];
 
+    let humanTurnActive = false;
     const closeTurn = () => {
-      if (turns.length > 0) {
+      if (humanTurnActive && turns.length > 0) {
         const t = turns[turns.length - 1];
         t.toolCount = curToolCount;
         t.errorCount = curErrors;
@@ -169,6 +170,7 @@ export default function SummaryView({ session }: Props) {
       switch (scene.type) {
         case "user-prompt": {
           closeTurn();
+          humanTurnActive = true;
           curToolCount = 0;
           curErrors = 0;
           promptChars += scene.content.length;
@@ -182,6 +184,12 @@ export default function SummaryView({ session }: Props) {
           });
           break;
         }
+        case "context-injection":
+          if (scene.injectionType === "automation") {
+            closeTurn();
+            humanTurnActive = false;
+          }
+          break;
         case "thinking":
           thinkingChars += scene.content.length;
           break;
@@ -189,7 +197,8 @@ export default function SummaryView({ session }: Props) {
           responseChars += scene.content.length;
           break;
         case "tool-call": {
-          curToolCount++;
+          if (scene.isToolContainer) break;
+          if (humanTurnActive) curToolCount++;
           const tn = scene.toolName;
           toolCounts.set(tn, (toolCounts.get(tn) || 0) + 1);
 
@@ -201,7 +210,7 @@ export default function SummaryView({ session }: Props) {
               const f = getFile(diff.filePath);
               f.editCount++;
               const turnIdx = turns.length; // current turn (1-indexed)
-              f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
+              if (humanTurnActive) f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
               const oldL = diff.oldContent ? diff.oldContent.split("\n").length : 0;
               const newL = diff.newContent ? diff.newContent.split("\n").length : 0;
               f.linesAdded += Math.max(0, newL - oldL);
@@ -227,11 +236,11 @@ export default function SummaryView({ session }: Props) {
             });
             // Count file modifications from sub-agent scenes
             for (const saScene of sa.scenes) {
-              if (saScene.type === "tool-call" && saScene.diff) {
+              if (saScene.type === "tool-call" && !saScene.isToolContainer && saScene.diff) {
                 const f = getFile(saScene.diff.filePath);
                 f.editCount++;
                 const turnIdx = turns.length;
-                f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
+                if (humanTurnActive) f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
                 const oldL = saScene.diff.oldContent
                   ? saScene.diff.oldContent.split("\n").length
                   : 0;

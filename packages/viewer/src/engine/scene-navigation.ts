@@ -114,11 +114,17 @@ export function computePrevIndex(
   // Fallback: Default ALL mode.
   // If the scene we are moving BACK into is part of a batch, skip to the START of that batch
   const targetScene = scenes[prevIdx];
-  if (targetScene.type === "tool-call" && !targetScene.diff && !targetScene.bashOutput) {
+  if (
+    targetScene.type === "tool-call" &&
+    !targetScene.isToolContainer &&
+    !targetScene.diff &&
+    !targetScene.bashOutput
+  ) {
     const toolName = targetScene.toolName;
     while (
       prevIdx > 0 &&
       scenes[prevIdx - 1].type === "tool-call" &&
+      !(scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).isToolContainer &&
       !(scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).diff &&
       !(scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).bashOutput &&
       (scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).toolName === toolName

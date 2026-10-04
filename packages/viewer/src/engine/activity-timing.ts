@@ -219,9 +219,10 @@ function addToolCategory(
   categories: Record<ToolCategory, ToolCategoryTotal>,
   category: ToolCategory,
   durationMs: number,
+  countInvocation = true,
 ): void {
   categories[category].durationMs += durationMs;
-  categories[category].count++;
+  if (countInvocation) categories[category].count++;
 }
 
 function gapKind(
@@ -333,7 +334,8 @@ export function buildActivityTiming(
       if (atMs !== undefined) cursorMs = Math.max(cursorMs ?? atMs, atMs);
       previous = "context";
     } else if (scene.type === "tool-call") {
-      toolCalls++;
+      const countInvocation = !scene.isToolContainer;
+      if (countInvocation) toolCalls++;
       const descriptor = toolDescriptor(scene.toolName, scene.input);
       const hasDuration = scene.durationMs !== undefined && scene.durationMs > 0;
 
@@ -364,8 +366,15 @@ export function buildActivityTiming(
             toolScope: descriptor.scope,
           });
         }
-        recordedToolCalls++;
-        addToolCategory(toolCategories, descriptor.category, representedDurationMs);
+        if (countInvocation) recordedToolCalls++;
+        // Retain measured batch time without counting the wrapper as another
+        // invocation or assigning its duration to any reconstructed child.
+        addToolCategory(
+          toolCategories,
+          descriptor.category,
+          representedDurationMs,
+          countInvocation,
+        );
         if (descriptor.scope === "local") localToolMs += representedDurationMs;
         else if (descriptor.scope === "remote") remoteToolMs += representedDurationMs;
         else unknownToolMs += representedDurationMs;
@@ -375,7 +384,7 @@ export function buildActivityTiming(
           cursorMs += durationMs;
         }
       } else {
-        unmeasuredToolCalls++;
+        if (countInvocation) unmeasuredToolCalls++;
         hasUnmeasuredTool = true;
       }
       if (!hasDuration && atMs !== undefined) {

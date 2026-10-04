@@ -1,4 +1,4 @@
-const USER_MESSAGE_BEGIN = "## My request for Codex:";
+const USER_MESSAGE_PREFIXES = ["## My request for Codex:", "## My request:"];
 export const CODEX_CONTEXT_TAGS = [
   "environment_context",
   "permissions instructions",
@@ -7,6 +7,8 @@ export const CODEX_CONTEXT_TAGS = [
   "apps_instructions",
   "skills_instructions",
   "plugins_instructions",
+  "recommended_plugins",
+  "external_codex_apps_open_page",
 ];
 
 export function isCodexToolCallType(type?: string): boolean {
@@ -21,8 +23,29 @@ export function isCodexToolCallType(type?: string): boolean {
 }
 
 function stripUserMessagePrefix(text: string): string {
-  const idx = text.indexOf(USER_MESSAGE_BEGIN);
-  return idx === -1 ? text : text.slice(idx + USER_MESSAGE_BEGIN.length);
+  for (const prefix of USER_MESSAGE_PREFIXES) {
+    if (text.startsWith(prefix)) return text.slice(prefix.length);
+  }
+  // File/IDE context is a host envelope. Prefix-looking examples elsewhere in
+  // a human's prose must remain part of that human request.
+  if (/^# (?:Files mentioned by the user|Context from my IDE setup):(?:\r?\n|$)/.test(text)) {
+    const request = /^## My request(?: for Codex)?:/m.exec(text);
+    if (request) return text.slice(request.index + request[0].length);
+  }
+  return text;
+}
+
+/** Persisted host messages are replay context, not human interventions. */
+export function codexUserMessageSubtype(text: string): string | undefined {
+  const leading = stripLeadingCodexContextBlocks(text).trim();
+  // An instructions document stays injected context even if its examples
+  // contain request-prefix syntax. Otherwise classify the displayed content.
+  if (/^# AGENTS\.md instructions for [^\n]+\n/.test(leading)) return "context-injection";
+  const value = codexStripTwoPass(leading);
+  if (value.startsWith("<heartbeat>")) return "automation-trigger";
+  if (/^Automation: [^\n]+\nAutomation ID: [^\n]+(?:\n|$)/.test(value)) return "automation-trigger";
+  if (/^# AGENTS\.md instructions for [^\n]+\n/.test(value)) return "context-injection";
+  return undefined;
 }
 
 function stripLeadingCodexContextBlocks(text: string): string {

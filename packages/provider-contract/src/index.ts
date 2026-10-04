@@ -83,6 +83,7 @@ export interface SessionInfo {
   groupId?: string;
   firstPrompt: string;
   prompts?: string[]; // first N meaningful user prompts (cleaned)
+  automationTriggerCount?: number;
   promptCount?: number; // total user prompts (counted via lightweight scan)
   toolCallCount?: number; // total tool_use blocks (counted via lightweight scan)
   // Lightweight estimates extracted via regex during discovery (no JSON.parse per line)
@@ -255,6 +256,10 @@ export type ContentBlock =
        * from `_result` because an empty string can be a valid completed result.
        */
       _hasResult?: boolean;
+      /** Orchestration wrapper retained for replay; nested calls carry usage. */
+      _isToolContainer?: boolean;
+      /** Call was reconstructed, but no individually attributable result exists. */
+      _resultUnavailable?: boolean;
       /** Internal source timestamp for the tool result; omitted from replay scenes. */
       _resultTimestamp?: string;
       _images?: string[];

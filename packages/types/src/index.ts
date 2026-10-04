@@ -263,6 +263,8 @@ export type Scene =
     }
   | {
       type: "tool-call";
+      /** Wrapper retained for source evidence; nested calls carry counts. */
+      isToolContainer?: boolean;
       toolName: string;
       input: Record<string, any>;
       result: string;
@@ -271,6 +273,8 @@ export type Scene =
        * from `result` because an empty string can be a valid completed result.
        */
       hasResult?: boolean;
+      /** A reconstructed call has no separately recorded result. */
+      resultUnavailable?: boolean;
       timestamp?: string;
       isError?: boolean;
       /** Primary/first diff, retained for backward compatibility. */
@@ -503,6 +507,7 @@ export interface SessionInsight {
 
   // Stats
   promptCount: number;
+  automationTriggerCount?: number;
   toolCallCount: number;
   editCount: number;
   filesModified?: Array<{ file: string; count: number }>;
@@ -510,6 +515,7 @@ export interface SessionInsight {
 
   // Cost
   tokenUsage?: TokenUsage;
+  tokenUsageByModel?: Record<string, TokenUsage>;
   costEstimate?: number;
   contextBreakdown?: ContextBreakdown;
 
@@ -574,10 +580,12 @@ export interface SessionScanWireData {
   gitBranches?: string[];
   model?: string;
   promptCount: number;
+  automationTriggerCount?: number;
   toolCallCount: number;
   editCount: number;
   filesModified: Array<{ file: string; count: number }>;
   tokenUsage?: TokenUsage;
+  tokenUsageByModel?: Record<string, TokenUsage>;
   costEstimate?: number;
   contextBreakdown?: ContextBreakdown;
   subAgentCount: number;
@@ -624,6 +632,7 @@ export interface ReplaySession {
     stats: {
       sceneCount: number;
       userPrompts: number;
+      automationTriggerCount?: number;
       toolCalls: number;
       thinkingBlocks?: number;
       durationMs?: number;

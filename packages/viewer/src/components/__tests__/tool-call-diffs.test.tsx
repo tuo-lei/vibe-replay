@@ -29,6 +29,23 @@ describe("ToolCallBlock multi-file diffs", () => {
 });
 
 describe("ToolCallBlock result state", () => {
+  it("does not mark a reconstructed call as still pending", () => {
+    render(
+      <ToolCallBlock
+        scene={{
+          type: "tool-call",
+          toolName: "Custom",
+          input: {},
+          result: "",
+          hasResult: false,
+          resultUnavailable: true,
+        }}
+        isActive={false}
+      />,
+    );
+    expect(screen.getByText("not recorded")).toBeTruthy();
+    expect(screen.queryByText("pending")).toBeNull();
+  });
   it("shows an empty recorded result instead of treating it as missing", () => {
     render(
       <ToolCallBlock

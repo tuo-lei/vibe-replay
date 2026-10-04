@@ -85,6 +85,40 @@ function makeSession(overrides?: Partial<ReplaySession>): ReplaySession {
 // ─── Markdown tests ────────────────────────────────────────
 
 describe("generateGitHubMarkdown", () => {
+  it("counts reconstructed children without the evidence wrapper in Markdown and SVG", () => {
+    const session = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Update and check" },
+        {
+          type: "tool-call",
+          toolName: "exec",
+          input: {},
+          result: "batch output",
+          isToolContainer: true,
+        },
+        {
+          type: "tool-call",
+          toolName: "Edit",
+          input: { file_path: "src/a.ts" },
+          result: "",
+          resultUnavailable: true,
+        },
+        {
+          type: "tool-call",
+          toolName: "Bash",
+          input: { command: "pnpm test" },
+          result: "",
+          resultUnavailable: true,
+        },
+      ],
+    });
+    for (const output of [generateGitHubMarkdown(session), generateGitHubSvg(session)]) {
+      expect(output).toContain("2 tools");
+      expect(output).not.toContain("3 tools");
+      expect(output).not.toContain("exec 1");
+    }
+  });
+
   it("generates valid markdown structure", () => {
     const session = makeSession();
     const md = generateGitHubMarkdown(session);
