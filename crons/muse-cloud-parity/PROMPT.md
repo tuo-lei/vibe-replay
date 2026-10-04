@@ -31,7 +31,9 @@ so in your report.
 
 ## Procedure
 
-1. **Sync.** `git pull` latest `main`. Record the HEAD SHA in the watermark.
+1. **Sync.** `git checkout main` first (a reused checkout may still sit on a
+   deleted PR branch — a bare `git pull` would follow the stale upstream),
+   then `git pull` latest `main`. Record the HEAD SHA in the watermark.
 2. **Build.** `pnpm install` if `node_modules` is missing (or a dep from
    the latest pull is unresolved — the install's EPERM chown of
    `.modules.yaml` is non-fatal here, exit 0; verify with `pnpm build`
@@ -54,11 +56,17 @@ so in your report.
    corrupt/truncated JSONL lines, sessions that fail to parse, and sessions
    that parse to zero prompts. Shapes and type names only — never raw
    prompts, tool arguments, or tool outputs.
-5. **Drift.** Collect top-level record types, item `type` values, and the
-   shallow field-name set per type from recent sessions; compare with
-   `src/muse/parser.ts` and `src/muse/tool-mapping.ts`. A new user-facing
-   Muse feature the parser ignores → extend the parser. A changed shape the
-   parser relies on → breaking-change candidate, fix it prominently.
+5. **Drift.** Collect top-level record types, item `type` values, the
+   shallow field-name set per type, the tool names actually invoked, and the
+   privacy-safe decoded argument-key sets per tool (the `arguments` field is
+   a JSON string — collect key names only, never values) from recent
+   sessions; compare with `src/muse/parser.ts` and
+   `src/muse/tool-mapping.ts`. A new user-facing Muse feature the parser
+   ignores → extend the parser. A new built-in tool name or a changed
+   argument shape → mapping-coverage candidate (terminal output/diff
+   rendering and edit analytics silently degrade otherwise). A changed
+   shape the parser relies on → breaking-change candidate, fix it
+   prominently.
 6. **Parity end-to-end.** Take the most recent non-trivial Muse session
    (skip sessions with activity in the last ~60s — this run's own session
    is always the newest and its file is still being written to) and: run
