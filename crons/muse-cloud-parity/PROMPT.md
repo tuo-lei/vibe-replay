@@ -34,15 +34,18 @@ so in your report.
 1. **Sync.** `git checkout main` first (a reused checkout may still sit on a
    deleted PR branch — a bare `git pull` would follow the stale upstream),
    then `git pull` latest `main`. Record the HEAD SHA in the watermark.
-2. **Build.** `pnpm install` if `node_modules` is missing (or a dep from
-   the latest pull is unresolved — the install's EPERM chown of
-   `.modules.yaml` is non-fatal here, exit 0; verify with `pnpm build`
-   rather than re-running), then `pnpm build`.
-   Environment quirks: if `pnpm` is missing, install the exact version from
-   `package.json`'s `packageManager` pin (e.g.
-   `/opt/hatch-image/bin/npm install -g pnpm@<pinned-major>`), never an
-   arbitrary latest; the pnpm-only rule governs project commands, not
-   bootstrapping the package manager itself. If pnpm fails with EPERM
+2. **Build.** After every sync, run `pnpm install` (a reused checkout's
+   `node_modules` can be stale even when present — a pull that only bumps
+   an installed dep would otherwise test the old tree), then `pnpm build`.
+   The install's EPERM chown of `.modules.yaml` is non-fatal here (exit 0);
+   verify with `pnpm build` rather than re-running.
+   Environment quirks: if `pnpm` is missing, install the exact pinned
+   version — parse it from `package.json`'s `packageManager` field
+   (`node -p "require('./package.json').packageManager.replace(/^pnpm@/,'').split('+')[0]"`)
+   and install that (e.g. `/opt/hatch-image/bin/npm install -g
+   pnpm@<exact-pinned-version>`), never an arbitrary latest. The pnpm-only
+   rule governs project commands, not bootstrapping the package manager
+   itself. If pnpm fails with EPERM
    on the `packageManager` pin, delete that line from `package.json` for the
    pnpm commands, then `git checkout -- package.json` to restore it — never
    commit the pin removal. Commit with `git commit --no-verify` (the
@@ -54,8 +57,10 @@ so in your report.
    confirm sessions from the last 14 days are found.
 4. **Integrity.** Stream (never fully load) recent session files. Flag
    corrupt/truncated JSONL lines, sessions that fail to parse, and sessions
-   that parse to zero prompts. Shapes and type names only — never raw
-   prompts, tool arguments, or tool outputs.
+   that are truly empty — a session with zero prompts but one or more tool
+   calls is replayable by design (discovery's predicate), so only flag
+   sessions with neither prompts nor tool calls. Shapes and type names
+   only — never raw prompts, tool arguments, or tool outputs.
 5. **Drift.** Collect top-level record types, item `type` values, the
    shallow field-name set per type, the tool names actually invoked, and the
    privacy-safe decoded argument-key sets per tool (the `arguments` field is

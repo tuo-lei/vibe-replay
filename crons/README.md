@@ -40,6 +40,7 @@ The repository currently defines these maintenance handoffs (all times `America/
 | `weekly-deps-update` | Monday 02:00 | GitHub PRs, the `[deps] weekly summary` issue, and a dedicated run ledger issue |
 | `weekly-issue-fix` | Monday 08:45 | GitHub issues/PRs and the `[automation] weekly-issue-fix ledger` issue |
 | `weekly-readme-docs-sync` | Wednesday 02:00 | GitHub merged/open PR history and a dedicated run ledger issue |
+| `muse-cloud-parity` | Tuesday & Friday 09:06 | GitHub PR history and the local `crons/muse-cloud-parity/watermark.json` |
 
 `weekly-issue-fix` keeps Monday 08:45 (not a round hour) to match the live Eng Grok Bot routine. It is product-issue hygiene, not `daily-code-quality` or `weekly-deps-update`.
 
