@@ -183,6 +183,7 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
     workspacePath: session.workspacePath,
     hasSqlite: session.hasSqlite,
     hasSdk: session.hasSdk,
+    sourceDatabasePath: session.sourceDatabasePath,
     sourceFingerprint: session.sourceFingerprint,
     timestamp: session.timestamp,
     title: session.title,
