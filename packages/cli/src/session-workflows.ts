@@ -208,7 +208,8 @@ function looksLikeGrokTranscript(head: string): boolean {
           (block) =>
             block?.type === "text" &&
             typeof block.text === "string" &&
-            /^\s*\[(?:SAND_HIDDEN_PROMPT|t\d+u)\]/.test(block.text),
+            (/^\s*\[SAND_HIDDEN_PROMPT\]/.test(block.text) ||
+              /^\s*\[(?:t\d+u\]|Group chat:)/i.test(block.text)),
         )
       )
         return true;
