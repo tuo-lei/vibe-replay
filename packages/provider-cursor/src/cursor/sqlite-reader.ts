@@ -2,7 +2,7 @@
 import type { Database, SqlJsStatic } from "sql.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
