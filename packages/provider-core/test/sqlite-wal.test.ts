@@ -1,9 +1,13 @@
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { assertSqliteWalReadable, sqliteReadOnlyLocation } from "../src/utils.js";
+import {
+  assertSqliteWalReadable,
+  sqliteReadOnlyLocation,
+  withReadOnlySqlite,
+} from "../src/utils.js";
 
 it("does not create a sidecar for an uncoordinated WAL snapshot", async () => {
   const root = await mkdtemp(join(tmpdir(), "vibe-wal-guard-"));
@@ -60,6 +64,28 @@ it("opens a checkpointed database immutably with URI-safe special characters", a
     expect(uri).toMatch(/^file:.*copy%20%23snapshot\.db\?immutable=1$/);
     expect(existsSync(`${path}-wal`)).toBe(false);
     expect(existsSync(`${path}-shm`)).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("rejects coordinated active WAL in a zero-write scope without changing ordinary readers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vibe-wal-scope-"));
+  try {
+    const path = join(root, "copy.db");
+    await writeFile(path, "database");
+    await writeFile(`${path}-wal`, "active WAL frames");
+    await writeFile(`${path}-shm`, "existing coordination state");
+    const results = await Promise.allSettled([
+      withReadOnlySqlite(true, () => sqliteReadOnlyLocation(path)),
+      sqliteReadOnlyLocation(path),
+    ]);
+    expect(results[0]).toMatchObject({
+      status: "rejected",
+      reason: { message: expect.stringContaining("Checkpoint") },
+    });
+    expect(results[1]).toEqual({ status: "fulfilled", value: realpathSync(path) });
+    await expect(sqliteReadOnlyLocation(path)).resolves.toBe(realpathSync(path));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

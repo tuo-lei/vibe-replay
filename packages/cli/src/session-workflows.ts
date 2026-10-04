@@ -18,7 +18,7 @@ import { loadSavedGistInfo } from "./publishers/gist.js";
 import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
 import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
-import { assertSqliteWalReadable } from "@vibe-replay/provider-core/utils";
+import { assertSqliteWalReadable, withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
 import { inferSqliteProvider } from "./sqlite-schema.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -42,10 +42,14 @@ export async function discoverCliSessions(options: SessionReferenceOptions = {})
       updatedAt: cached.updatedAt,
     };
   }
-  const discovery = await discoverProvidersSafely(
-    providers.filter((p) => p !== undefined),
-    undefined,
-    { readOnly: options.readOnly },
+  const discovery = await withReadOnlySqlite(!!options.readOnly, () =>
+    discoverProvidersSafely(
+      providers.filter((p) => p !== undefined),
+      undefined,
+      {
+        readOnly: options.readOnly,
+      },
+    ),
   );
   if (!options.readOnly) await writeFileCache(key, discovery);
   return {
@@ -242,8 +246,10 @@ export async function resolveCliSource(
   if (suffix && !marker) throw new Error("Session marker must contain an ID");
   const path = resolve(base) + suffix;
   if (pathExists(path)) {
-    if (options.readOnly && (await isSqliteFile(base))) await assertSqliteWalReadable(base);
-    const provider = options.provider || (await inferProvider(path));
+    if (options.readOnly && (await isSqliteFile(base)))
+      await withReadOnlySqlite(true, () => assertSqliteWalReadable(base));
+    const provider =
+      options.provider || (await withReadOnlySqlite(!!options.readOnly, () => inferProvider(path)));
     if (!getProvider(provider)) throw new Error(`Unknown provider: ${provider}`);
     // Provider-scoped metadata preserves discovered titles and enriches DB/sidecar sources.
     const discovery = suppliedDiscovery ?? (await discoverCliSessions({ ...options, provider }));
@@ -256,7 +262,11 @@ export async function resolveCliSource(
     const explicitDatabase =
       ["hermes", "opencode", "cursor"].includes(provider) && (await isSqliteFile(base));
     if (!matches.length && explicitDatabase) {
-      matches.push(...(await discoverDatabaseSessions(resolve(base), provider)));
+      matches.push(
+        ...(await withReadOnlySqlite(!!options.readOnly, () =>
+          discoverDatabaseSessions(resolve(base), provider),
+        )),
+      );
       if (!marker && !matches.length)
         throw new SessionReferenceError(
           "not-found",
@@ -318,7 +328,9 @@ export async function resolveCliSessionInfo(
   const source = await resolveCliSource(ref, options, discovery);
   if (source.info && !(source.info.sourceDatabasePath && !source.info.transcriptStatus))
     return source.info;
-  const parsed = await getProvider(source.provider)!.parse(source.paths, source.info);
+  const parsed = await withReadOnlySqlite(!!options.readOnly, () =>
+    getProvider(source.provider)!.parse(source.paths, source.info),
+  );
   const replay = transformToReplay(parsed, source.provider, shortenPath(parsed.cwd));
   if (!hasReplayableContent(replay)) throw new Error("This session has no replayable user prompts");
   const prompts = replay.scenes
@@ -493,7 +505,9 @@ export async function loadCliSession(
         : `Session transcript is ${source.info.transcriptStatus}`,
     );
   if (source.info?.location?.kind === "ssh") await hydrateCachedRemoteHomes();
-  const parsed = await getProvider(source.provider)!.parse(source.paths, source.info);
+  const parsed = await withReadOnlySqlite(!!options.readOnly, () =>
+    getProvider(source.provider)!.parse(source.paths, source.info),
+  );
   const replay = transformToReplay(
     parsed,
     source.provider,

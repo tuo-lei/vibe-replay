@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
@@ -158,6 +159,13 @@ export function normalizeGitUrl(url: string): string | undefined {
   return undefined;
 }
 
+const sqliteNoWrites = new AsyncLocalStorage<boolean>();
+
+/** Carry the zero-write contract through async provider discovery and parsing. */
+export function withReadOnlySqlite<T>(readOnly: boolean, action: () => Promise<T>): Promise<T> {
+  return readOnly ? sqliteNoWrites.run(true, action) : action();
+}
+
 /** SQLite's readonly mode can create a missing WAL shared-memory sidecar. */
 export async function assertSqliteWalReadable(path: string): Promise<void> {
   // SQLite resolves file symlinks before selecting the WAL/SHM filenames.
@@ -165,6 +173,10 @@ export async function assertSqliteWalReadable(path: string): Promise<void> {
   if (!existsSync(`${path}-wal`)) return;
   const wal = await stat(`${path}-wal`);
   if (wal.size === 0) return;
+  if (sqliteNoWrites.getStore())
+    throw new Error(
+      "Read-only export and preflight cannot query an active WAL because SQLite may change its shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay.",
+    );
   if (!existsSync(`${path}-shm`) || !(await stat(`${path}-shm`)).isFile())
     throw new Error(
       "The database has an active WAL but no shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay; a read-only query could otherwise create a -shm file.",
