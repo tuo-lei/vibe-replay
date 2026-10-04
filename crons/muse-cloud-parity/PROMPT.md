@@ -112,7 +112,12 @@ so in your report.
    (`git checkout -b <task-branch>`) before editing or committing — never
    commit fixes on local `main`, or the local checkout diverges from the
    squash-merged remote `main` and breaks the next run's pull. Implement
-   the fixes. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`),
+   the fixes. After every fix, re-run the affected checks from steps 3–6 —
+   including the real-session E2E replay generation (both required sizes
+   when replay-affecting code changed) — against the fixed code before
+   `pnpm verify`: the pre-fix checks ran against the broken code, and a fix
+   that was never exercised on the real failing session must not be
+   opened or merged. Before commit: ensure `pnpm` is on PATH (`command -v pnpm`),
    run `pnpm lint:check` and fix all errors, then commit normally so the
    lefthook pre-commit hook runs — it applies
    and stages oxlint/oxfmt fixes, which `pnpm lint:check` alone does not.
