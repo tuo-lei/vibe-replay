@@ -443,6 +443,25 @@ describe("OpenCode v2 storage compatibility", () => {
     }
   });
 
+  it("preserves repeated native v2 skill activations without turning their prompt text into scenes", async () => {
+    const db = await v2Db();
+    try {
+      add(db, "u", "user", 0, { text: "Review" });
+      add(db, "skill1", "skill", 1, { name: "review", text: "PRIVATE SKILL PROMPT" });
+      add(db, "skill2", "skill", 2, { name: "review", text: "PRIVATE SKILL PROMPT" });
+      add(db, "skill3", "skill", 3, { name: "debug", text: "PRIVATE DEBUG PROMPT" });
+      add(db, "a", "assistant", 4, { content: [{ type: "text", text: "Done" }] });
+      const parsed = parseSessionFromDb(db, "ses_parent");
+      expect(parsed.skillsUsed).toEqual(["review", "debug"]);
+      expect(parsed.skillActivations).toEqual(["review", "review", "debug"]);
+      expect(parsed.turns.map((turn) => turn.role)).toEqual(["user", "assistant"]);
+      expect(JSON.stringify(parsed)).not.toContain("PRIVATE SKILL PROMPT");
+      expect(JSON.stringify(parsed)).not.toContain("PRIVATE DEBUG PROMPT");
+    } finally {
+      db.close();
+    }
+  });
+
   it("includes v2 reasoning in aggregate and per-turn output totals", async () => {
     const db = await v2Db();
     try {

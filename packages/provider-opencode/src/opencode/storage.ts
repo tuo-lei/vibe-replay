@@ -90,6 +90,8 @@ export function prepareOpencodeStorage(db: Database): void {
             }
           : undefined,
         _v2Message: true,
+        _v2SkillName:
+          type === "skill" && typeof data.name === "string" ? data.name.trim() : undefined,
         _v2Compaction: type === "compaction",
         _compactionStatus: type === "compaction" ? data.status : undefined,
         _compactionReason: type === "compaction" ? data.reason : undefined,

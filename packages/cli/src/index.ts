@@ -309,7 +309,12 @@ program
           `Use a positional session reference with ${commandName}; --session is supported by sessions and replay generation`,
         );
     }
-    if (commandName === "telemetry" || process.argv[2] === "telemetry") return;
+    if (
+      commandName === "telemetry" ||
+      process.argv[2] === "telemetry" ||
+      (commandName === "share" && actionCommand.opts().dryRun)
+    )
+      return;
     const notice = await getTelemetryNotice();
     if (notice) process.stderr.write(`\n  ${notice}\n\n`);
     recordTelemetry("cli.started");
