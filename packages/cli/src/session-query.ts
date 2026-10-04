@@ -48,6 +48,7 @@ export interface SessionQueryMatch {
   matchQuality?: "all-terms" | "strong" | "weak";
   whyMatched?: string[];
   scan?: SessionQueryScanSummary;
+  scanStatus?: "ready" | "unavailable";
   brief?: SessionQueryBrief;
 }
 
@@ -111,6 +112,7 @@ export async function queryLocalSessions(
     const summary = scan ? scanSummary(scan) : undefined;
     return {
       ...match,
+      scanStatus: summary ? "ready" : "unavailable",
       ...(summary ? { scan: summary } : {}),
       ...(options.brief ? { brief: buildSessionBrief(match, summary) } : {}),
     };

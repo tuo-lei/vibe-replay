@@ -207,6 +207,46 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 "Generate an interactive replay of this session and open it"
 ```
 
+### CLI workflows
+
+Find a session, inspect evidence, and export only the format you need:
+
+```bash
+npx vibe-replay sessions --query "build" --any --brief --json
+npx vibe-replay inspect <session-id> --json
+npx vibe-replay inspect <session-id> --query "EUSAGE" --json
+npx vibe-replay diagnose <session-id> --query "EUSAGE" --json
+npx vibe-replay export <session-id> --format markdown --stdout > session.md
+npx vibe-replay export <session-id> --format html --output ./replay
+npx vibe-replay share <session-id> --dry-run --json
+npx vibe-replay share ./replay --visibility unlisted --json
+```
+
+References accept full IDs, unique prefixes of at least four characters, and source paths.
+Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
+selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+`doctor --json` reports provider coverage and compatibility failures. Search output
+marks partial discovery, and empty results include recovery suggestions.
+
+`inspect --scene <index>` reads an exact 0-based scene; `--offset` and `--limit`
+bound larger content slices. `diagnose` separates model API errors, tool failures,
+compactions, and matching text evidence; it does not infer root causes from an error
+string alone. Metadata search does not search tool results: use `inspect --query`
+after selecting a session.
+
+`export` supports `markdown`, `json`, and `html`, defaulting to Markdown with no
+preview images. Files go under `~/.vibe-replay/<slug>/exports` unless `--output` is
+provided. `--stdout` emits only Markdown or replay JSON and creates no files;
+file exports include a redaction report. `--github` remains available for the
+Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
+replay with its editor overlays and annotations when available; an explicit source
+path reparses the source, while an explicit `replay.json` uses that saved snapshot.
+
+Sharing preflight performs no upload and reports the effective payload's size,
+visibility, potential-secret count, and cloud/local mode. Check that report and
+review the content before sharing. JSON share results include `uploaded` and `mode`
+so a local HTML fallback is distinguishable from a cloud URL.
+
 ## Features
 
 - **Local-first** — one command and no account required for local replays; sign in only when you want cloud publishing or synced insights

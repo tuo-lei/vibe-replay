@@ -7,6 +7,7 @@ import {
   sessionForExternalOutput,
   sessionWithEffectiveContent,
 } from "../overlays.js";
+import { loadAnnotations } from "../server-persistence.js";
 import type { ReplaySession } from "../types.js";
 
 const CLOUD_META_FILE = ".vibe-replay-cloud.json";
@@ -252,6 +253,9 @@ export async function publishCloudWithOverlays(
   const replayPath = join(outputDir, "replay.json");
   const originalContent = await readFile(replayPath, "utf-8");
   const session = JSON.parse(originalContent) as ReplaySession;
+  const annotations = await loadAnnotations(baseDir, slug, opts?.targetId);
+  if (annotations.length || existsSync(join(outputDir, "annotations.json")))
+    session.annotations = annotations;
   const merged = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
   await writeFile(replayPath, JSON.stringify(merged), "utf-8");
   try {

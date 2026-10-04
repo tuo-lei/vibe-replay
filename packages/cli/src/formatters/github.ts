@@ -5,6 +5,7 @@
  * The SVG renders natively on GitHub (CSS animations, no JS needed).
  */
 
+import { codexStripTwoPass } from "@vibe-replay/provider-codex/constants";
 import type { ReplaySession, Scene } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "../clean-prompt.js";
 
@@ -50,7 +51,7 @@ export function generateGitHubMarkdown(
   }
 
   // ── Header ──
-  lines.push("### AI Coding Session");
+  lines.push(`### AI Coding Session: ${escMd(condensedTitle)}`);
   lines.push("");
 
   // Stats line
@@ -252,7 +253,8 @@ export function extractPhases(scenes: Scene[]): Phase[] {
   for (const scene of scenes) {
     if (scene.type === "user-prompt") {
       // Skip system-generated messages (e.g. <bash-stdout>, <task-notification>)
-      if (isSystemGeneratedMessage(scene.content)) continue;
+      const prompt = codexStripTwoPass(scene.content);
+      if (!prompt || isSystemGeneratedMessage(prompt)) continue;
       if (current) {
         phases.push({
           prompt: current.prompt,
@@ -260,7 +262,7 @@ export function extractPhases(scenes: Scene[]): Phase[] {
           scenes: current.scenes,
         });
       }
-      current = { prompt: scene.content, rawActions: [], scenes: [] };
+      current = { prompt, rawActions: [], scenes: [] };
       continue;
     }
 

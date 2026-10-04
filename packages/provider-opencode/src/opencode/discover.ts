@@ -5,6 +5,7 @@ import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
+import { prepareOpencodeStorage } from "./storage.js";
 
 export const OPENCODE_PROVIDER = "opencode";
 
@@ -88,6 +89,7 @@ function buildSessionSelect(db: Database): string {
 }
 
 export function listSessionsFromDb(db: Database): SessionInfo[] {
+  prepareOpencodeStorage(db);
   const rows: OpencodeSessionRow[] = rowValues(db, buildSessionSelect(db));
 
   // Aggregate stats are computed with a handful of GROUP BY queries (one per

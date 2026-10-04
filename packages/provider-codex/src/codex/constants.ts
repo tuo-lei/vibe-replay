@@ -28,7 +28,11 @@ function stripUserMessagePrefix(text: string): string {
   }
   // File/IDE context is a host envelope. Prefix-looking examples elsewhere in
   // a human's prose must remain part of that human request.
-  if (/^# (?:Files mentioned by the user|Context from my IDE setup):(?:\r?\n|$)/.test(text)) {
+  if (
+    /^# (?:Files mentioned by the user|Context from my IDE setup|Chrome tabs):(?:\r?\n|$)/.test(
+      text,
+    )
+  ) {
     const request = /^## My request(?: for Codex)?:/m.exec(text);
     if (request) return text.slice(request.index + request[0].length);
   }

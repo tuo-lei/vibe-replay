@@ -64,6 +64,18 @@ import { transformToReplay } from "./transform.js";
 import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
 import { expandUserPath, normalizeTitle, shortenPath } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
+import {
+  diagnoseSession,
+  discoverCliSessions,
+  exportSession,
+  exportText,
+  inspectSession,
+  loadCliSession,
+  readEffectiveReplay,
+  resolveCliSource,
+  resolveSessionReference,
+  sharePreflight,
+} from "./session-workflows.js";
 
 setFileCacheAppVersion(CLI_VERSION);
 
@@ -262,7 +274,7 @@ program
   .name("vibe-replay")
   .description("AI Coding Session Replay & Sharing Tool")
   .version(CLI_VERSION)
-  .option("-s, --session <path>", "Path to a specific JSONL session file")
+  .option("-s, --session <path>", "Session ID, unique short ID, or source path")
   .option(
     "-p, --provider <name>",
     "Provider name (claude-code, cursor, grok-bot, ...)",
@@ -280,13 +292,32 @@ program
   )
   .hook("preAction", async (thisCommand, actionCommand) => {
     const commandName = actionCommand?.name() || thisCommand.name();
+    if (commandName !== "vibe-replay") {
+      if (
+        program.getOptionValueSource("provider") === "cli" &&
+        !["sessions", "inspect", "diagnose", "export", "doctor", "share", "live"].includes(
+          commandName,
+        )
+      )
+        throw new Error(`--provider is not supported by ${commandName}`);
+      for (const key of ["title", "dashboard", "open", "github"]) {
+        if (program.getOptionValueSource(key) === "cli")
+          throw new Error(`--${key} is not supported by ${commandName}`);
+      }
+      if (commandName !== "sessions" && program.getOptionValueSource("session") === "cli")
+        throw new Error(
+          `Use a positional session reference with ${commandName}; --session is supported by sessions and replay generation`,
+        );
+    }
     if (commandName === "telemetry" || process.argv[2] === "telemetry") return;
     const notice = await getTelemetryNotice();
     if (notice) process.stderr.write(`\n  ${notice}\n\n`);
     recordTelemetry("cli.started");
   })
   .action(async (opts) => {
-    console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
+    (opts.github ? console.error : console.log)(
+      chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`),
+    );
 
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
@@ -294,11 +325,12 @@ program
 
     // Pre-warm session discovery cache while user reads the menu
     // Fire-and-forget: never blocks the UI, silently caches results
-    void discoverAllSessions()
-      .then(async (sessions) => {
-        await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, sessions);
-      })
-      .catch(() => {});
+    if (!opts.session)
+      void discoverAllSessions()
+        .then(async (sessions) => {
+          await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, sessions);
+        })
+        .catch(() => {});
 
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
@@ -317,8 +349,12 @@ program
     let providerName: string;
 
     if (opts.session) {
-      sessionPaths = expandUserPath(opts.session);
-      providerName = opts.provider;
+      const source = await resolveCliSource(opts.session, {
+        provider: program.getOptionValueSource("provider") === "cli" ? opts.provider : undefined,
+      });
+      sessionPaths = source.paths;
+      providerName = source.provider;
+      sessionInfo = source.info;
     } else {
       // ─── Top-level menu ─────────────────────────────────
       const topChoice = await select<"dashboard" | "sessions" | "replays">({
@@ -866,6 +902,9 @@ interface SessionsCommandOptions {
   dedupe?: boolean;
   compacted?: boolean;
   json?: boolean;
+  session?: string;
+  target?: string;
+  refresh?: boolean;
 }
 
 program
@@ -873,6 +912,9 @@ program
   .description("Search local AI coding sessions (agent-friendly)")
   .option("-q, --query <text>", "Search title, prompt, project, branch, model, or slug")
   .option("--project <text>", "Filter by project path substring")
+  .option("-s, --session <ref>", "Select an exact session ID, unique short ID, or source path")
+  .option("--target <id>", "Select an SSH target ID, or local")
+  .option("--refresh", "Bypass the short-lived discovery cache")
   .option(
     "-P, --provider-filter <name>",
     "Filter by provider (claude-code, cursor, codex, grok-bot, pi, ...)",
@@ -888,8 +930,21 @@ program
     const discoverSpinner = opts.json ? undefined : ora("Discovering sessions...").start();
     try {
       const queryOptions = normalizeSessionsCommandOptions(opts, command);
-      const sessions = mergeSameSessions(await discoverAllSessions());
+      const discovery = await discoverCliSessions(queryOptions);
+      let sessions = discovery.sessions;
+      if (queryOptions.session)
+        sessions = [
+          resolveSessionReference(sessions, expandUserPath(queryOptions.session), queryOptions),
+        ];
+      if (queryOptions.target)
+        sessions = sessions.filter(
+          (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === queryOptions.target,
+        );
       discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
+      if (discovery.failedProviders.length)
+        process.stderr.write(
+          `Discovery incomplete: ${discovery.failedProviders.join(", ")}. Run vibe-replay doctor --json.\n`,
+        );
 
       const scanSpinner =
         opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
@@ -901,12 +956,41 @@ program
       });
 
       if (opts.json) {
-        console.log(JSON.stringify({ sessions: matches }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              sessions: matches,
+              discovery: {
+                source: discovery.source,
+                updatedAt: discovery.updatedAt,
+                partial: discovery.failedProviders.length > 0,
+                coverage: discovery.coverage,
+              },
+              ...(matches.length
+                ? {}
+                : {
+                    suggestions: [
+                      "Try --any to match fewer terms",
+                      "Remove the project/provider filter",
+                      "Use inspect <session> --query <text> to search tool results",
+                    ],
+                  }),
+            },
+            null,
+            2,
+          ),
+        );
       } else {
         console.log();
         console.log(formatSessionQueryText(matches));
+        if (!matches.length)
+          console.log(
+            "Try --any, broaden filters, or use inspect <session> --query <text> to search tool results.",
+          );
         console.log();
       }
+      if (discovery.coverage.length && discovery.coverage.every((c) => c.status === "failed"))
+        process.exitCode = 1;
     } catch (err) {
       discoverSpinner?.fail("Session search failed");
       const message = err instanceof Error ? err.message : String(err);
@@ -917,6 +1001,164 @@ program
       }
       process.exit(1);
     }
+  });
+
+interface WorkflowOptions {
+  provider?: string;
+  target?: string;
+  refresh?: boolean;
+  json?: boolean;
+  query?: string;
+  scene?: number;
+  offset?: number;
+  limit?: number;
+  format?: string;
+  output?: string;
+  stdout?: boolean;
+}
+
+function workflowInteger(value: string): number {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0)
+    throw new Error("Expected a non-negative integer");
+  return number;
+}
+
+function workflowCommand(name: string, description: string): Command {
+  return program
+    .command(name)
+    .description(description)
+    .argument(
+      "<session>",
+      "Session ID, unique short ID, source path, replay directory, or replay.json",
+    )
+    .option("-p, --provider <name>", "Provider filter for session references")
+    .option("--target <id>", "Select an SSH target ID, or local")
+    .option("--refresh", "Bypass the discovery cache")
+    .option("--json", "Print a machine-readable result");
+}
+
+function printWorkflowResult(payload: unknown, json = false): void {
+  if (json) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  const data = payload as ReturnType<typeof inspectSession>;
+  if (data.title) console.log(`${data.title} (${data.sessionId})`);
+  if (data.stats)
+    console.log(
+      `${data.provider} | ${data.stats.userPrompts} prompts | ${data.stats.toolCalls} tools | ${data.stats.sceneCount} scenes`,
+    );
+  if ("scenes" in data && data.scenes)
+    for (const scene of data.scenes)
+      console.log(`\n[scene ${scene.index}] ${scene.type}\n${scene.text}`);
+  else if ("prompts" in data && data.prompts) {
+    for (const prompt of data.prompts) console.log(`\n[scene ${prompt.index}] ${prompt.text}`);
+    if (data.lastResponse)
+      console.log(`\n[scene ${data.lastResponse.index}] Last response\n${data.lastResponse.text}`);
+  } else console.log(JSON.stringify(payload, null, 2));
+  if ("truncated" in data && data.truncated)
+    console.log("\nMore scenes available; use --offset or --scene to continue.");
+}
+
+workflowCommand(
+  "inspect",
+  "Understand a session or search its prompts, responses, and tool results",
+)
+  .option("-q, --query <text>", "Find exact text in session content and tool results")
+  .option("--scene <index>", "Read one exact 0-based scene", workflowInteger)
+  .option("--offset <index>", "Read content starting at this scene", workflowInteger)
+  .option("--limit <number>", "Maximum entries (1–100)", workflowInteger, 12)
+  .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
+    if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
+    if (opts.query !== undefined && !opts.query.trim()) throw new Error("--query cannot be empty");
+    if (
+      [opts.query !== undefined, opts.scene !== undefined, opts.offset !== undefined].filter(
+        Boolean,
+      ).length > 1
+    )
+      throw new Error("Use one of --query, --scene, or --offset");
+    const { replay } = await loadCliSession(ref, {
+      ...opts,
+      provider: normalizeCommandProviderOption(opts.provider, command),
+    });
+    if (opts.scene !== undefined && opts.scene >= replay.scenes.length)
+      throw new Error(`Scene index must be below ${replay.scenes.length}`);
+    printWorkflowResult(inspectSession(replay, opts), opts.json);
+  });
+
+workflowCommand(
+  "diagnose",
+  "Inspect API errors, tool failures, compactions, parser warnings, and matching evidence",
+)
+  .option("-q, --query <text>", "Find error evidence in tool results and responses")
+  .option("--limit <number>", "Maximum entries per signal (1–100)", workflowInteger, 12)
+  .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
+    if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
+    if (opts.query !== undefined && !opts.query.trim()) throw new Error("--query cannot be empty");
+    const { replay } = await loadCliSession(ref, {
+      ...opts,
+      provider: normalizeCommandProviderOption(opts.provider, command),
+    });
+    printWorkflowResult(diagnoseSession(replay, opts.query, opts.limit), opts.json);
+  });
+
+workflowCommand("export", "Export a session in one format; previews are optional through --github")
+  .option("--format <type>", "markdown, json, or html", "markdown")
+  .option("--output <directory>", "Output directory (default: ~/.vibe-replay/<slug>/exports)")
+  .option("--stdout", "Write only Markdown or replay JSON to stdout, without creating files")
+  .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
+    if (!["markdown", "json", "html"].includes(opts.format || ""))
+      throw new Error("--format must be markdown, json, or html");
+    if (opts.stdout && (opts.json || opts.output || opts.format === "html"))
+      throw new Error(
+        "--stdout supports markdown/json and cannot be combined with --json or --output",
+      );
+    const { replay, outputDir } = await loadCliSession(ref, {
+      ...opts,
+      preferReplay: true,
+      provider: normalizeCommandProviderOption(opts.provider, command),
+    });
+    if (opts.stdout) {
+      const text = await exportText(replay, outputDir, opts.format!);
+      const findings = scanForSecrets(text);
+      if (findings.length)
+        process.stderr.write(`Review output: ${findings.length} potential secret(s) detected.\n`);
+      process.stdout.write(`${text.trimEnd()}\n`);
+      return;
+    }
+    printWorkflowResult(
+      await exportSession(
+        replay,
+        opts.output
+          ? expandUserPath(opts.output)
+          : (await import("node:path")).join(outputDir, "exports"),
+        opts.format!,
+        outputDir,
+      ),
+      opts.json,
+    );
+  });
+
+program
+  .command("doctor")
+  .description("Check session discovery coverage and provider storage compatibility")
+  .option("-p, --provider <name>", "Check one provider")
+  .option("--json", "Print a machine-readable result")
+  .action(async (opts: WorkflowOptions, command: Command) => {
+    const result = await discoverCliSessions({
+      provider: normalizeCommandProviderOption(opts.provider, command),
+      refresh: true,
+    });
+    printWorkflowResult(
+      {
+        partial: result.failedProviders.length > 0,
+        coverage: result.coverage,
+        sessionCount: result.sessions.length,
+      },
+      opts.json,
+    );
+    if (result.failedProviders.length) process.exitCode = 1;
   });
 
 // ---------------------------------------------------------------------------
@@ -1089,130 +1331,206 @@ program
   .description(
     "Share a replay via cloud (unlisted link, 7 days). Without login, opens the local HTML instead.",
   )
-  .argument("[path]", "Path to replay directory or replay.json")
+  .argument("[path]", "Session reference, source path, replay directory, or replay.json")
+  .option("-p, --provider <name>", "Provider filter for session references")
   .option("--visibility <type>", `Visibility: ${SHARE_VISIBILITIES.join(", ")}`, "unlisted")
   .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
-  .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl?: string }) => {
-    const { readFile, readdir } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    const { homedir } = await import("node:os");
+  .option(
+    "--dry-run",
+    "Inspect sharing mode, size, visibility, and potential secrets without writing or uploading",
+  )
+  .option("--json", "Print a structured result")
+  .option("--target <id>", "Select an SSH target ID, or local")
+  .option("--refresh", "Bypass the discovery cache")
+  .action(
+    async (
+      pathArg: string | undefined,
+      opts: {
+        visibility: string;
+        provider?: string;
+        apiUrl?: string;
+        dryRun?: boolean;
+        json?: boolean;
+        target?: string;
+        refresh?: boolean;
+      },
+      command: Command,
+    ) => {
+      const { readFile, readdir } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const { homedir } = await import("node:os");
 
-    // Honor --api-url whenever the user supplies it, even when the value
-    // matches DEFAULT_API_URL (overriding a preset shell env var).
-    // Without the flag, fall through to existing precedence: env > DEFAULT_API_URL.
-    if (opts.apiUrl) {
-      process.env.VIBE_REPLAY_API_URL = opts.apiUrl.replace(/\/$/, "");
-    }
+      // Honor --api-url whenever the user supplies it, even when the value
+      // matches DEFAULT_API_URL (overriding a preset shell env var).
+      // Without the flag, fall through to existing precedence: env > DEFAULT_API_URL.
+      if (opts.apiUrl) {
+        process.env.VIBE_REPLAY_API_URL = opts.apiUrl.replace(/\/$/, "");
+      }
 
-    // Validate raw string before narrowing the type.
-    if (!(SHARE_VISIBILITIES as readonly string[]).includes(opts.visibility)) {
-      console.error(chalk.red(`\n  ✗ Invalid --visibility: ${opts.visibility}`));
-      console.error(chalk.dim(`  Must be one of: ${SHARE_VISIBILITIES.join(", ")}\n`));
-      process.exit(1);
-    }
-    const visibility = opts.visibility as ShareVisibility;
+      // Validate raw string before narrowing the type.
+      if (!(SHARE_VISIBILITIES as readonly string[]).includes(opts.visibility)) {
+        throw new Error(
+          `Invalid --visibility: ${opts.visibility}. Must be one of: ${SHARE_VISIBILITIES.join(", ")}`,
+        );
+      }
+      const visibility = opts.visibility as ShareVisibility;
 
-    let outputDir: string;
+      let outputDir: string;
+      let shareSourceDir: string | undefined;
 
-    if (pathArg) {
-      try {
-        outputDir = requireReplayDir(pathArg);
-      } catch (err: unknown) {
-        const message = err instanceof ShareError ? err.message : String(err);
-        console.error(chalk.red(`\n  ✗ ${message}\n`));
-        process.exit(1);
+      if (pathArg) {
+        try {
+          const candidate = expandUserPath(pathArg);
+          const { existsSync } = await import("node:fs");
+          const { dirname } = await import("node:path");
+          const isReplay =
+            existsSync(join(candidate, "replay.json")) ||
+            (existsSync(candidate) && existsSync(join(dirname(candidate), "replay.json")));
+          if (isReplay) {
+            outputDir = requireReplayDir(candidate);
+            await loadCliSession(outputDir, {
+              target: opts.target,
+              provider: normalizeCommandProviderOption(opts.provider, command),
+            });
+          } else {
+            const loaded = await loadCliSession(pathArg, {
+              ...opts,
+              preferReplay: true,
+              readOnly: opts.dryRun,
+              provider: normalizeCommandProviderOption(opts.provider, command),
+            });
+            shareSourceDir = loaded.outputDir;
+            outputDir = join(loaded.outputDir, "share");
+            if (opts.dryRun) {
+              printWorkflowResult(
+                sharePreflight(loaded.replay, visibility, !!loadAuthToken()),
+                opts.json,
+              );
+              return;
+            }
+            await generateOutput(loaded.replay, outputDir);
+          }
+        } catch (err: unknown) {
+          const message = err instanceof ShareError ? err.message : String(err);
+          throw new Error(message, { cause: err });
+        }
+      } else {
+        if (opts.json || opts.dryRun)
+          throw new Error("share --json and --dry-run require a session reference or replay path");
+        const replayBaseDir = join(homedir(), ".vibe-replay");
+        const entries = await readdir(replayBaseDir).catch(() => [] as string[]);
+        const replays: { name: string; value: string; time: string }[] = [];
+
+        for (const slug of entries) {
+          if (slug.startsWith(".") || slug === "cache") continue;
+          const jsonPath = join(replayBaseDir, slug, "replay.json");
+          try {
+            const raw = await readFile(jsonPath, "utf-8");
+            const replay = JSON.parse(raw) as ReplaySession;
+            const title = replay.meta?.title || slug;
+            const startTime = replay.meta?.startTime || "";
+            const time = startTime
+              ? new Date(startTime).toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                })
+              : "";
+            replays.push({
+              name: time ? `${chalk.dim(`[${time}]`)} ${chalk.white(title)}` : chalk.white(title),
+              value: join(replayBaseDir, slug),
+              time: startTime,
+            });
+          } catch {
+            // skip slugs without a valid replay.json
+          }
+        }
+
+        if (replays.length === 0) {
+          console.log(chalk.yellow("\n  No replays found. Generate one first!"));
+          console.log(chalk.dim("  Local preview (no login): ") + chalk.white(LOCAL_PREVIEW_HINT));
+          console.log();
+          process.exit(1);
+        }
+
+        replays.sort((a, b) => b.time.localeCompare(a.time));
+        outputDir = await select({
+          message: "Pick a replay to share:",
+          choices: replays,
+        });
+      }
+
+      const loggedIn = !!loadAuthToken();
+      if (opts.dryRun) {
+        printWorkflowResult(
+          sharePreflight(await readEffectiveReplay(outputDir), visibility, loggedIn),
+          opts.json,
+        );
         return;
       }
-    } else {
-      const replayBaseDir = join(homedir(), ".vibe-replay");
-      const entries = await readdir(replayBaseDir).catch(() => [] as string[]);
-      const replays: { name: string; value: string; time: string }[] = [];
-
-      for (const slug of entries) {
-        if (slug.startsWith(".") || slug === "cache") continue;
-        const jsonPath = join(replayBaseDir, slug, "replay.json");
+      if (!loggedIn) {
         try {
-          const raw = await readFile(jsonPath, "utf-8");
-          const replay = JSON.parse(raw) as ReplaySession;
-          const title = replay.meta?.title || slug;
-          const startTime = replay.meta?.startTime || "";
-          const time = startTime
-            ? new Date(startTime).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: false,
-              })
-            : "";
-          replays.push({
-            name: time ? `${chalk.dim(`[${time}]`)} ${chalk.white(title)}` : chalk.white(title),
-            value: join(replayBaseDir, slug),
-            time: startTime,
-          });
-        } catch {
-          // skip slugs without a valid replay.json
+          const result = await shareReplay(outputDir, { loggedIn: false, open: !opts.json });
+          if (opts.json) console.log(JSON.stringify({ ...result, uploaded: false }, null, 2));
+          else if (result.mode === "local-fallback") printLocalShareFallback(result);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(message, { cause: err });
         }
+        return;
       }
 
-      if (replays.length === 0) {
-        console.log(chalk.yellow("\n  No replays found. Generate one first!"));
-        console.log(chalk.dim("  Local preview (no login): ") + chalk.white(LOCAL_PREVIEW_HINT));
-        console.log();
-        process.exit(1);
-      }
-
-      replays.sort((a, b) => b.time.localeCompare(a.time));
-      outputDir = await select({
-        message: "Pick a replay to share:",
-        choices: replays,
-      });
-    }
-
-    const loggedIn = !!loadAuthToken();
-    if (!loggedIn) {
+      const spinner = opts.json ? undefined : ora("Uploading to cloud...").start();
       try {
-        const result = await shareReplay(outputDir, { loggedIn: false });
-        if (result.mode === "local-fallback") printLocalShareFallback(result);
+        const result = await shareReplay(outputDir, { loggedIn: true, visibility });
+        if (result.mode !== "cloud") {
+          spinner?.fail("Unexpected local fallback while logged in");
+          process.exit(1);
+        }
+        if (shareSourceDir) {
+          const { copyFile } = await import("node:fs/promises");
+          await copyFile(
+            join(outputDir, ".vibe-replay-cloud.json"),
+            join(shareSourceDir, ".vibe-replay-cloud.json"),
+          ).catch(() => {
+            console.error(
+              "Uploaded successfully, but could not save the share link beside the source replay.",
+            );
+          });
+        }
+        spinner?.succeed("Uploaded!");
+        if (opts.json) {
+          console.log(JSON.stringify({ ...result, uploaded: true, visibility }, null, 2));
+          return;
+        }
+        console.log();
+        console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
+        console.log(
+          chalk.dim("  Expires:   ") + chalk.white(new Date(result.expiresAt).toLocaleDateString()),
+        );
+        console.log();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(chalk.red(`\n  ✗ ${message}\n`));
-        process.exit(1);
-      }
-      return;
-    }
-
-    const spinner = ora("Uploading to cloud...").start();
-    try {
-      const result = await shareReplay(outputDir, { loggedIn: true, visibility });
-      if (result.mode !== "cloud") {
-        spinner.fail("Unexpected local fallback while logged in");
-        process.exit(1);
-      }
-      spinner.succeed("Uploaded!");
-      console.log();
-      console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
-      console.log(
-        chalk.dim("  Expires:   ") + chalk.white(new Date(result.expiresAt).toLocaleDateString()),
-      );
-      console.log();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      spinner.fail(message);
-      if (/not logged in|session expired/i.test(message)) {
-        try {
-          const fallback = await shareReplay(outputDir, { loggedIn: false });
-          if (fallback.mode === "local-fallback") {
-            printLocalShareFallback(fallback);
-            return;
+        spinner?.fail(message);
+        if (opts.json) process.stderr.write(`${JSON.stringify({ error: message })}\n`);
+        if (/not logged in|session expired/i.test(message)) {
+          try {
+            const fallback = await shareReplay(outputDir, { loggedIn: false, open: !opts.json });
+            if (fallback.mode === "local-fallback") {
+              if (opts.json) console.log(JSON.stringify({ ...fallback, uploaded: false }, null, 2));
+              else printLocalShareFallback(fallback);
+              return;
+            }
+          } catch {
+            // Local fallback failed too — fall through to exit.
           }
-        } catch {
-          // Local fallback failed too — fall through to exit.
         }
+        process.exit(1);
       }
-      process.exit(1);
-    }
-  });
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // live — open the dashboard streaming a currently-active session
@@ -1358,7 +1676,15 @@ telemetryCmd
     console.log("Pseudonymous telemetry disabled.");
   });
 
-await program.parseAsync();
+await program.parseAsync().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    process.argv.includes("--json")
+      ? `${JSON.stringify({ error: message })}\n`
+      : `\n  ✗ ${message}\n`,
+  );
+  process.exitCode = 1;
+});
 await flushTelemetry();
 
 function normalizeSessionsCommandOptions(
@@ -1368,7 +1694,8 @@ function normalizeSessionsCommandOptions(
   const provider = opts.providerFilter || normalizeCommandProviderOption(opts.provider, command);
   return {
     ...opts,
-    ...(provider ? { provider } : {}),
+    provider,
+    session: opts.session || command.parent?.opts<{ session?: string }>().session,
   };
 }
 

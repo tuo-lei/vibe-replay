@@ -11,6 +11,7 @@ import type {
 import type { SubAgent, UsageEvent } from "@vibe-replay/types";
 import { normalizeSubAgentType } from "@vibe-replay/provider-contract";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
+import { prepareOpencodeStorage, opencodeMessageOrder } from "./storage.js";
 import { attributeOpencodeMcpTool, loadOpencodeMcpServerNames } from "./mcp-servers.js";
 import { isOpencodeBuiltinTool, mapOpencodeToolArgs, mapOpencodeToolName } from "./tool-mapping.js";
 import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
@@ -185,6 +186,7 @@ export function parseSessionFromDb(
   sessionInfo?: SessionInfo,
   dbPath?: string,
 ): ProviderParseResult {
+  prepareOpencodeStorage(db);
   const session = firstValue(db, `SELECT * FROM session WHERE id = ?`, {
     sid: sessionId,
   }) as SessionMetaRow | null;
@@ -195,7 +197,7 @@ export function parseSessionFromDb(
       SELECT id, session_id, data
       FROM message
       WHERE session_id = ?
-      ORDER BY time_created ASC
+      ORDER BY ${opencodeMessageOrder(db)}
     `,
     { sid: sessionId },
   ) as OpencodeMessageRow[];
@@ -608,7 +610,7 @@ function buildSubAgentFromChildSession(
       SELECT id, session_id, data
       FROM message
       WHERE session_id = ?
-      ORDER BY time_created ASC
+      ORDER BY ${opencodeMessageOrder(db)}
     `,
     { sid: call.sessionId },
   ) as OpencodeMessageRow[];
