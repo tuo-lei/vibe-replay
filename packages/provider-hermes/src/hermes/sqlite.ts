@@ -1,6 +1,10 @@
 /// <reference path="../sql-js.d.ts" />
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import {
+  assertSqliteSnapshotCurrent,
+  readSqliteSnapshot,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
@@ -116,10 +120,12 @@ const getSqlJs = createRetryableInit<SqlJsStatic>(async () => {
 export async function openHermesDb(
   dbPath = hermesDbPath(),
 ): Promise<{ db: Database; dbPath: string } | null> {
+  await assertSqliteSnapshotCurrent(dbPath);
   let db: Database | null = null;
   try {
     const SQL = await getSqlJs();
-    const buffer = await readFile(dbPath);
+    const buffer = await readSqliteSnapshot(dbPath);
+    await assertSqliteSnapshotCurrent(dbPath);
     if (buffer.length < 1024) return null;
     db = new SQL.Database(buffer);
     // Probe the table layout before handing the handle out: a state.db from an
@@ -133,8 +139,9 @@ export async function openHermesDb(
       return null;
     }
     return { db, dbPath };
-  } catch {
+  } catch (error) {
     db?.close();
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }
@@ -143,15 +150,33 @@ export async function openHermesDb(
  * Open each known Hermes DB (default + profiles). Useful for discovery and
  * for parsing a session that could live in any profile.
  */
-export async function openAllHermesDbs(): Promise<Array<{ db: Database; dbPath: string }>> {
+export async function openAllHermesDbs(
+  onSnapshotError?: (error: SqliteSnapshotRequiredError) => void,
+): Promise<Array<{ db: Database; dbPath: string }>> {
   const paths = hermesDbPaths();
   if (paths.length === 0) return [];
   const out: Array<{ db: Database; dbPath: string }> = [];
-  for (const p of paths) {
-    const opened = await openHermesDb(p);
-    if (opened) out.push(opened);
+  try {
+    for (const p of paths) {
+      try {
+        const opened = await openHermesDb(p);
+        if (opened) out.push(opened);
+      } catch (error) {
+        if (error instanceof SqliteSnapshotRequiredError && onSnapshotError) onSnapshotError(error);
+        else throw error;
+      }
+    }
+    return out;
+  } catch (error) {
+    for (const { db } of out) {
+      try {
+        db.close();
+      } catch {
+        /* preserve the original discovery failure */
+      }
+    }
+    throw error;
   }
-  return out;
 }
 
 /** True when the session id looks like a Hermes session id (`YYYYMMDD_HHMMSS_...`). */

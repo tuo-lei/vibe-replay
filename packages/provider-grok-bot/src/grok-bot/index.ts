@@ -5,6 +5,6 @@ import { parseGrokBotSession } from "./parser.js";
 export const grokBotProvider: Provider = {
   name: "grok-bot",
   displayName: "Grok Bot",
-  discover: discoverGrokBotSessions,
+  discover: () => discoverGrokBotSessions(),
   parse: parseGrokBotSession,
 };

@@ -11,6 +11,7 @@
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
@@ -726,6 +727,7 @@ export interface ScanInput {
   workspacePath?: string;
   hasSqlite?: boolean;
   hasSdk?: boolean;
+  sourceDatabasePath?: string;
   /** Provider-side storage fingerprint for cache freshness. */
   sourceFingerprint?: string;
   deferRichCursorParse?: boolean;
@@ -748,10 +750,13 @@ export interface ScanInput {
 
 /** Keep provider-native IDs isolated when caching cross-provider scan results. */
 export function scanCacheEntryKey(
-  session: Pick<ScanInput, "provider" | "sessionId" | "location">,
+  session: Pick<ScanInput, "provider" | "sessionId" | "location" | "sourceDatabasePath">,
 ): string {
   const targetId = session.location?.kind === "ssh" ? `${session.location.id}::` : "";
-  return `${targetId}${session.provider}::${session.sessionId}`;
+  const databaseKey = session.sourceDatabasePath
+    ? `::db:${createHash("sha256").update(session.sourceDatabasePath).digest("hex")}`
+    : "";
+  return `${targetId}${session.provider}::${session.sessionId}${databaseKey}`;
 }
 
 function shortenSessionPath(path: string, input: Pick<ScanInput, "remoteHome">): string {
@@ -1637,6 +1642,7 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
     ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
     ...(input.hasSqlite !== undefined ? { hasSqlite: input.hasSqlite } : {}),
     ...(input.hasSdk !== undefined ? { hasSdk: input.hasSdk } : {}),
+    ...(input.sourceDatabasePath ? { sourceDatabasePath: input.sourceDatabasePath } : {}),
     firstPrompt: scanFallbackPrompt(input, "(cursor session)"),
   };
 
@@ -2219,6 +2225,8 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
   sourceFingerprint?: string;
 }> {
   const paths = [...session.filePaths, ...(session.toolPaths || [])];
+  if (session.sourceDatabasePath)
+    paths.push(session.sourceDatabasePath, `${session.sourceDatabasePath}-wal`);
   const sourceFilePath = session.sourceFilePath || "";
   if (sourceFilePath && !sourceFilePath.includes("#") && !paths.includes(sourceFilePath)) {
     paths.push(sourceFilePath);

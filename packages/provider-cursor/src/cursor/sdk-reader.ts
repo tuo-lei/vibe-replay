@@ -1,9 +1,17 @@
 /// <reference path="../sql-js.d.ts" />
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import {
+  assertSqliteSnapshotCurrent,
+  readSqliteSnapshot,
+  assertSqliteWalReadable,
+  withSqliteReadSource,
+  withSqliteSnapshotScope,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, TokenUsage } from "@vibe-replay/provider-contract";
 import type { TurnStat } from "@vibe-replay/types";
@@ -61,6 +69,16 @@ export interface SdkAgent {
   updatedAt: string;
   /** Absolute path to the SDK index.db file backing this agent. */
   dbPath: string;
+}
+
+/** Healthy agents remain usable when another independent SDK index is blocked. */
+export class SdkIndexSnapshotRequiredError extends SqliteSnapshotRequiredError {
+  constructor(
+    message: string,
+    readonly agents: SdkAgent[],
+  ) {
+    super(message);
+  }
 }
 
 export interface SdkRun {
@@ -140,16 +158,29 @@ export async function discoverSdkAgents(): Promise<SdkAgent[]> {
 
 export async function findSdkAgentById(agentId: string): Promise<SdkAgent | null> {
   if (!agentId) return null;
-  const index = await getSdkAgentIndex();
-  return index.get(agentId) || null;
+  try {
+    const index = await getSdkAgentIndex();
+    return index.get(agentId) || null;
+  } catch (error) {
+    if (error instanceof SdkIndexSnapshotRequiredError) {
+      const agent = error.agents.find((candidate) => candidate.agentId === agentId);
+      if (agent) return agent;
+    }
+    throw error;
+  }
 }
 
-async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
+function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
+  return withSqliteSnapshotScope(getSdkAgentIndexOnce);
+}
+
+async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   if (cachedAgentIndex && Date.now() - cachedAgentIndexAt < AGENT_INDEX_TTL_MS) {
     return cachedAgentIndex;
   }
   const dbPaths = await listSdkIndexDbPaths(CURSOR_PROJECTS_ROOT);
   const index = new Map<string, SdkAgent>();
+  const blocked: SqliteSnapshotRequiredError[] = [];
   for (const dbPath of dbPaths) {
     let handle: IndexDbHandle | null = null;
     try {
@@ -172,11 +203,16 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
           dbPath,
         });
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) blocked.push(error);
       // SDK schema differs across Cursor versions; skip databases we can't read.
     } finally {
       closeIndexDb(handle);
     }
+  }
+  // Do not cache partial coverage as a successful full index.
+  if (blocked.length) {
+    throw new SdkIndexSnapshotRequiredError(blocked[0].message, [...index.values()]);
   }
   cachedAgentIndex = index;
   cachedAgentIndexAt = Date.now();
@@ -187,7 +223,11 @@ async function getSdkAgentIndex(): Promise<Map<string, SdkAgent>> {
  * Read a single agent's runs + stream events and assemble the structured
  * enrichment record used to augment the JSONL transcript.
  */
-export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
+export function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
+  return withSqliteSnapshotScope(() => loadSdkAgentEnrichmentOnce(agent));
+}
+
+async function loadSdkAgentEnrichmentOnce(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
   let handle: IndexDbHandle | null = null;
   try {
     handle = await openIndexDb(agent.dbPath);
@@ -256,7 +296,8 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
     const toolCallsByRun = collectToolCalls(eventRows);
 
     return finalizeEnrichment(agent, runs, toolCallsByRun);
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   } finally {
     closeIndexDb(handle);
@@ -300,7 +341,8 @@ async function tableColumns(handle: IndexDbHandle, table: string): Promise<Set<s
   try {
     const rows = await queryIndexDb(handle, `PRAGMA table_info(${table})`);
     return new Set(rows.map((row) => stringOrEmpty(row.name)).filter(Boolean));
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return new Set();
   }
 }
@@ -687,7 +729,11 @@ async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
     return null;
   }
   if (st.size > MAX_SQLJS_DB_BYTES) return null;
-  const buffer = await readFile(dbPath).catch(() => null);
+  const buffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!buffer) return null;
   const db = new SQL.Database(buffer);
   return { dbPath, backend: "sqljs", db };
@@ -703,11 +749,14 @@ function closeIndexDb(handle: IndexDbHandle | null): void {
 }
 
 async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<string, any>[]> {
+  await assertSqliteSnapshotCurrent(handle.dbPath);
   if (handle.backend === "sqlite-cli") {
-    const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", handle.dbPath, sql], {
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: 60_000,
-    });
+    const { stdout } = await withSqliteReadSource(handle.dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 60_000,
+      }),
+    );
     const trimmed = stdout.trim();
     if (!trimmed) return [];
     const parsed = JSON.parse(trimmed);
@@ -720,19 +769,21 @@ const sqliteCliCheckCache = new Map<string, { canUse: boolean; checkedAt: number
 const SQLITE_CLI_CHECK_TTL_MS = 30_000;
 
 async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
+  await assertSqliteWalReadable(dbPath);
   const cached = sqliteCliCheckCache.get(dbPath);
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_CHECK_TTL_MS) return cached.canUse;
 
   let canUse = false;
   try {
-    const { stdout } = await execFileAsync(
-      "sqlite3",
-      ["-readonly", "-json", dbPath, "SELECT json_valid('{}') AS ok;"],
-      { maxBuffer: 1024 * 1024 },
+    const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"], {
+        maxBuffer: 1024 * 1024,
+      }),
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     canUse = false;
   }
   sqliteCliCheckCache.set(dbPath, { canUse, checkedAt: Date.now() });

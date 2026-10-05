@@ -96,9 +96,33 @@ After choosing a session, branch by intent:
 - **PR sharing or replay export** - continue with Steps 2-5, then Step 7.
 - **Session retro or efficiency analysis** - skip PR artifact cleanup and use Step 6.
 
+### Inspect the selected session
+
+Use the returned session ID directly for bounded inspection; do not manually read a large raw transcript:
+
+```bash
+npx vibe-replay inspect <session-id> --json
+npx vibe-replay inspect <session-id> --query "<error or command>" --json
+npx vibe-replay inspect <session-id> --scene <index> --json
+npx vibe-replay diagnose <session-id> --query "<error>" --json
+```
+
+`--provider` and `--target` disambiguate references. Metadata search does not search tool results. `doctor --json` distinguishes missing histories from incompatible provider storage; search JSON includes discovery coverage and `--refresh` bypasses its short cache.
+For a copied JSONL that reports ambiguous Cursor/Grok formats, use the known source provider with `--provider cursor` or `--provider grok-bot`. Generic wake tags plus id-less custom tools fit both formats; do not guess from missing IDs.
+
 ## Step 2 - PR sharing path: generate the artifacts
 
-Once you have a session path and provider, run `vibe-replay` with the provider when known:
+For a text-only PR summary, use the selected ID and avoid generating images:
+
+```bash
+npx vibe-replay export <session-id> --format markdown --json
+```
+
+This writes `github-summary.md` and `redactions.json` under `~/.vibe-replay/<slug>/exports/`; use the exact paths in the JSON result. Export/share by ID preserves an existing replay snapshot and its editor edits. Pass the explicit source path to regenerate from the current source instead. The review, opt-in cleanup, and PR-append rules below still apply.
+
+Use `--stdout` for Markdown or JSON without saving output files, discovery caches, or telemetry. Native SQLite queries use a private temporary snapshot, validated against concurrent source changes and deleted after the command; source DB/WAL/SHM files are never modified. SSH stdout exports and sharing preflight read already staged sessions; run `sessions --refresh` first when needed.
+
+For the full preview bundle, run `vibe-replay` with the provider when known:
 
 ```bash
 npx vibe-replay --provider <provider> --session <PATH> --github

@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  SqliteSnapshotRequiredError,
+  withSqliteSnapshotScope,
+} from "@vibe-replay/provider-core/utils";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -43,6 +47,7 @@ export interface CursorParserDependencies {
   parseCursorSqlite: (
     workspacePath: string,
     sessionId: string,
+    explicitPath?: string,
   ) => Promise<ProviderParseResult | null>;
 }
 
@@ -56,7 +61,9 @@ const defaultDependencies: CursorParserDependencies = {
 export function createCursorParser(deps: Partial<CursorParserDependencies> = {}) {
   const resolved: CursorParserDependencies = { ...defaultDependencies, ...deps };
   return (filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult> =>
-    parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved);
+    withSqliteSnapshotScope(() =>
+      parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved),
+    );
 }
 
 function toErrorMessage(err: unknown): string {
@@ -98,8 +105,15 @@ async function parseCursorSessionWithDependencies(
     let sqliteResult: ProviderParseResult | null = null;
     try {
       const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
-      sqliteResult = await deps.parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
+      sqliteResult = sessionInfo?.sourceDatabasePath
+        ? await deps.parseCursorSqlite(
+            preferredWorkspacePath,
+            sqliteSessionId,
+            sessionInfo.sourceDatabasePath,
+          )
+        : await deps.parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
     } catch (err) {
+      if (err instanceof SqliteSnapshotRequiredError) throw err;
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
       sqliteError = compactErrorMessage(err);
       sqliteFallbackNote = `cursor SQLite parse failed (${sqliteError}); fell back to JSONL transcript`;
@@ -197,7 +211,7 @@ async function parseCursorSessionWithDependencies(
   // store keys agents on).
   const sdkSessionId = sessionInfo?.sessionId || deriveSessionIdFromTranscript(transcriptPaths);
   if (sdkSessionId) {
-    const enrichment = await tryLoadSdkEnrichment(sdkSessionId);
+    const enrichment = await tryLoadSdkEnrichment(sdkSessionId, sessionInfo);
     if (enrichment) {
       const { toolCallsEnriched, assistantTurnsModelTagged } = applySdkEnrichmentToTurns(
         jsonlResult.turns,
@@ -268,15 +282,29 @@ function sessionIdFromStoreDbPath(path: string): string | undefined {
   return rawSessionId;
 }
 
-async function tryLoadSdkEnrichment(sessionId: string): Promise<SdkAgentEnrichment | null> {
+async function tryLoadSdkEnrichment(
+  sessionId: string,
+  sessionInfo?: SessionInfo,
+): Promise<SdkAgentEnrichment | null> {
   // SDK agent IDs are prefixed `agent-`. Skip the lookup for plain UUID sessions
   // (Cursor IDE chats) to avoid touching SDK SQLite when we know it won't match.
   if (!sessionId.startsWith("agent-")) return null;
   try {
-    const agent = await findSdkAgentById(sessionId);
+    const agent =
+      sessionInfo?.sourceDatabasePath && sessionInfo.hasSdk
+        ? {
+            agentId: sessionId,
+            dbPath: sessionInfo.sourceDatabasePath,
+            workspaceRef: sessionInfo.cwd,
+            status: "",
+            createdAt: sessionInfo.timestamp,
+            updatedAt: sessionInfo.timestamp,
+          }
+        : await findSdkAgentById(sessionId);
     if (!agent) return null;
     return await loadSdkAgentEnrichment(agent);
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }

@@ -74,8 +74,14 @@ export function safeTargetId(raw: string | undefined): string | null | undefined
 /** A replay must contain at least one real user prompt, not only metadata/context. */
 export function hasReplayableContent(replay: Pick<ReplaySession, "meta" | "scenes">): boolean {
   const sceneCount = replay.scenes.length;
-  const userPrompts = replay.scenes.filter((scene) => scene.type === "user-prompt").length;
-  return sceneCount > 0 && userPrompts > 0;
+  const hasEntry = replay.scenes.some(
+    (scene) =>
+      scene.type === "user-prompt" ||
+      (replay.meta.provider === "codex" &&
+        scene.type === "context-injection" &&
+        scene.injectionType === "automation"),
+  );
+  return sceneCount > 0 && hasEntry;
 }
 
 export interface ResolvedGenerateInputs {

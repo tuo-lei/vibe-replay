@@ -247,4 +247,50 @@ describe("cloud publisher", () => {
       "private-org/private-repo",
     );
   });
+
+  it.each([true, false])(
+    "uploads edited scenes and annotations and restores the original (success=%s)",
+    async (ok) => {
+      saveAuthTokenSync({ token: "mock-session-token", user: { id: "u1", name: "Test User" } });
+      const dir = join(mockAuthDir, "edited-replay");
+      mkdirSync(dir, { recursive: true });
+      const original = JSON.stringify({
+        meta: { sessionId: "edited", title: "Edited task", provider: "codex" },
+        scenes: [{ type: "user-prompt", content: "Original request" }],
+        annotations: [{ id: "stale", sceneIndex: 0, body: "Stale note" }],
+      });
+      writeFileSync(join(dir, "replay.json"), original);
+      writeFileSync(
+        join(dir, "overlays.json"),
+        JSON.stringify({
+          version: 1,
+          overlays: [
+            { sceneIndex: 0, modifiedValue: "Edited request", updatedAt: "2026-10-04T00:00:00Z" },
+          ],
+        }),
+      );
+      const annotations = [{ id: "current", sceneIndex: 0, body: "Current note", resolved: false }];
+      writeFileSync(join(dir, "annotations.json"), JSON.stringify(annotations));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok,
+        status: ok ? 200 : 500,
+        json: async () =>
+          ok
+            ? {
+                id: "cloud-id",
+                url: "https://vibe-replay.com/r/cloud-id",
+                expiresAt: "2026-10-11T00:00:00Z",
+              }
+            : { error: "Upload failed" },
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      if (ok) await publishCloudWithOverlays(dir);
+      else await expect(publishCloudWithOverlays(dir)).rejects.toThrow();
+      const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      const body = JSON.parse(String(request.body));
+      expect(body.replay.scenes[0].content).toBe("Edited request");
+      expect(body.replay.annotations).toEqual(annotations);
+      expect(readFileSync(join(dir, "replay.json"), "utf-8")).toBe(original);
+    },
+  );
 });

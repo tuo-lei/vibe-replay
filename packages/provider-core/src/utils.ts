@@ -1,5 +1,9 @@
-import { readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import type { SessionInfo } from "@vibe-replay/provider-contract";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { constants, existsSync, realpathSync } from "node:fs";
+import { copyFile, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 /** UTF-8 byte size without retaining or exposing the underlying content. */
@@ -154,4 +158,209 @@ export function normalizeGitUrl(url: string): string | undefined {
     // not a valid URL
   }
   return undefined;
+}
+
+export class SqliteSnapshotRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly sessions: SessionInfo[] = [],
+  ) {
+    super(message);
+    this.name = "SqliteSnapshotRequiredError";
+  }
+}
+
+interface SqliteReadScope {
+  snapshots: Map<string, Promise<{ source: string; directory: string }>>;
+}
+const sqliteNoWrites = new AsyncLocalStorage<SqliteReadScope>();
+const sqliteOperationSnapshots = new AsyncLocalStorage<SqliteReadScope>();
+
+/** Reuse checkpointed copies during ordinary operations without rejecting coordinated live WAL. */
+export function withSqliteSnapshotScope<T>(action: () => Promise<T>): Promise<T> {
+  if (sqliteNoWrites.getStore() || sqliteOperationSnapshots.getStore()) return action();
+  const scope: SqliteReadScope = { snapshots: new Map() };
+  return sqliteOperationSnapshots.run(scope, async () => {
+    try {
+      return await action();
+    } finally {
+      for (const pending of scope.snapshots.values()) {
+        const snapshot = await pending.catch(() => null);
+        if (snapshot) await rm(snapshot.directory, { recursive: true, force: true });
+      }
+    }
+  });
+}
+
+/** Carry the zero-write contract through async provider discovery and parsing. */
+export function withReadOnlySqlite<T>(readOnly: boolean, action: () => Promise<T>): Promise<T> {
+  if (!readOnly || sqliteNoWrites.getStore()) return action();
+  const scope: SqliteReadScope = { snapshots: new Map() };
+  return sqliteNoWrites.run(scope, async () => {
+    try {
+      return await action();
+    } finally {
+      for (const pending of scope.snapshots.values()) {
+        const snapshot = await pending.catch(() => null);
+        if (snapshot) await rm(snapshot.directory, { recursive: true, force: true });
+      }
+    }
+  });
+}
+
+async function stageSqliteSnapshot(path: string): Promise<{ source: string; directory: string }> {
+  if (!sqliteNoWrites.getStore()) return withReadOnlySqlite(true, () => stageSqliteSnapshot(path));
+  await assertSqliteWalReadable(path);
+  const before = await stat(path, { bigint: true });
+  const directory = await mkdtemp(join(tmpdir(), "vibe-sqlite-snapshot-"));
+  try {
+    const snapshot = join(directory, "source.db");
+    await copyFile(path, snapshot, constants.COPYFILE_FICLONE);
+    await assertSqliteWalReadable(path);
+    const after = await stat(path, { bigint: true });
+    if (
+      before.size !== after.size ||
+      before.ino !== after.ino ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs
+    )
+      throw new SqliteSnapshotRequiredError(
+        "The database changed while acquiring a snapshot. Retry after the source application is idle or checkpointed, or use an already saved replay.",
+      );
+    return { source: `${pathToFileURL(snapshot).href}?immutable=1`, directory };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** Checkpoint/close may remove a sidecar between its existence probe and stat. */
+async function sqliteSidecarStat(path: string) {
+  return stat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+}
+
+/** WASM snapshots stay in memory but still reject concurrent source changes. */
+export async function readSqliteSnapshot(path: string): Promise<Buffer> {
+  const validate = sqliteNoWrites.getStore()
+    ? assertSqliteWalReadable
+    : assertSqliteRollbackReadable;
+  await validate(path);
+  const before = await stat(path, { bigint: true });
+  const bytes = await readFile(path);
+  await validate(path);
+  const after = await stat(path, { bigint: true });
+  if (
+    before.size !== after.size ||
+    before.ino !== after.ino ||
+    before.mtimeNs !== after.mtimeNs ||
+    before.ctimeNs !== after.ctimeNs
+  )
+    throw new SqliteSnapshotRequiredError(
+      "The database changed while acquiring a snapshot. Retry after the source application is idle or checkpointed, or use an already saved replay.",
+    );
+  return bytes;
+}
+
+/** Native queries use a validated private copy; immutable never names a live DB. */
+export async function withSqliteReadSource<T>(
+  path: string,
+  action: (source: string) => Promise<T>,
+): Promise<T> {
+  await assertSqliteWalReadable(path);
+  if (!existsSync(path)) return action(path);
+  path = realpathSync(path);
+  const readOnlyScope = sqliteNoWrites.getStore();
+  const scope = readOnlyScope || sqliteOperationSnapshots.getStore();
+  if (
+    !readOnlyScope &&
+    !scope?.snapshots.has(path) &&
+    ((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) > 0
+  ) {
+    await assertSqliteWalReadable(path);
+    return action(path);
+  }
+  if (scope) {
+    let pending = scope.snapshots.get(path);
+    if (!pending) {
+      pending = stageSqliteSnapshot(path);
+      scope.snapshots.set(path, pending);
+    }
+    return action((await pending).source);
+  }
+  const snapshot = await stageSqliteSnapshot(path);
+  try {
+    return await action(snapshot.source);
+  } finally {
+    await rm(snapshot.directory, { recursive: true, force: true });
+  }
+}
+
+/** Pending rollback pages cannot be recovered from a main-file-only snapshot. */
+async function assertSqliteRollbackReadable(path: string): Promise<void> {
+  path = existsSync(path) ? realpathSync(path) : path;
+  const journal = await open(`${path}-journal`, "r").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw new SqliteSnapshotRequiredError(
+      "Cannot verify the SQLite rollback journal. Finish the source transaction or recovery, or use an already saved replay.",
+    );
+  });
+  if (!journal) return;
+  try {
+    // SQLite PERSIST commits by zeroing the 28-byte header while retaining
+    // old page bytes. A nonempty file alone is therefore not an active journal.
+    const header = Buffer.alloc(28);
+    const { bytesRead } = await journal.read(header, 0, header.length, 0);
+    if (header.subarray(0, bytesRead).some((byte) => byte !== 0))
+      throw new SqliteSnapshotRequiredError(
+        "The database has a pending rollback journal. Finish the transaction or let the source application recover it, or use an already saved replay.",
+      );
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    throw new SqliteSnapshotRequiredError(
+      "Cannot verify the SQLite rollback journal. Finish the source transaction or recovery, or use an already saved replay.",
+    );
+  } finally {
+    await journal.close();
+  }
+}
+
+/** SQLite's readonly queries may need journal recovery or a WAL sidecar write. */
+export async function assertSqliteWalReadable(path: string): Promise<void> {
+  // SQLite resolves file symlinks before selecting the WAL/SHM filenames.
+  path = existsSync(path) ? realpathSync(path) : path;
+  await assertSqliteRollbackReadable(path);
+  const wal = await sqliteSidecarStat(`${path}-wal`);
+  if (!wal || wal.size === 0) return;
+  if (sqliteNoWrites.getStore())
+    throw new SqliteSnapshotRequiredError(
+      "Read-only export and preflight cannot query an active WAL because SQLite may change its shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay.",
+    );
+  if (!(await sqliteSidecarStat(`${path}-shm`))?.isFile()) {
+    // A completed checkpoint may remove both sidecars after the first WAL stat.
+    if (((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) === 0) return;
+    throw new Error(
+      "The database has an active WAL but no shared-memory sidecar. Checkpoint it in the source application, or use an already saved replay; a read-only query could otherwise create a -shm file.",
+    );
+  }
+}
+
+/** URI formatting for frozen snapshots; native live-source readers use withSqliteReadSource. */
+export async function sqliteReadOnlyLocation(path: string): Promise<string> {
+  await assertSqliteWalReadable(path);
+  if (!existsSync(path)) return path;
+  path = realpathSync(path);
+  if (((await sqliteSidecarStat(`${path}-wal`))?.size ?? 0) > 0) {
+    await assertSqliteWalReadable(path);
+    if (!sqliteNoWrites.getStore()) return path;
+  }
+  return `${pathToFileURL(path).href}?immutable=1`;
+}
+
+/** WASM readers cannot apply WAL frames; zero-write flows require a current snapshot. */
+export async function assertSqliteSnapshotCurrent(path: string): Promise<void> {
+  await assertSqliteRollbackReadable(path);
+  if (sqliteNoWrites.getStore()) await assertSqliteWalReadable(path);
 }

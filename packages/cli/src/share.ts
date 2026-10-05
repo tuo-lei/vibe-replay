@@ -90,9 +90,10 @@ export async function ensureLocalReplayHtml(
   const session = JSON.parse(originalContent) as ReplaySession;
   const slug = basename(outputDir);
   const baseDir = dirname(outputDir);
-  const overlays = await loadOverlays(baseDir, slug);
-  const annotations = await loadAnnotations(baseDir, slug);
-  if (annotations.length > 0) session.annotations = annotations;
+  const overlays = await loadOverlays(baseDir, slug, undefined, false);
+  const annotations = await loadAnnotations(baseDir, slug, undefined, false);
+  if (annotations.length > 0 || existsSync(join(outputDir, "annotations.json")))
+    session.annotations = annotations;
 
   const shareable = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
   try {

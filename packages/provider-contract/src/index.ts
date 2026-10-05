@@ -77,6 +77,8 @@ export interface SessionInfo {
   workspacePath?: string; // absolute workspace path for Cursor lookup
   hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
   hasSdk?: boolean; // true if a Cursor SDK agent record exists in sdk-agent-store/index.db
+  /** Explicit Cursor database input; parse/enrich only this source, never the configured stores. */
+  sourceDatabasePath?: string;
   /** Canonical project/workspace identity for dashboard aggregation. */
   projectIdentity?: ProjectIdentity;
   /** Provider-native group/room identity when a display title is not unique. */
@@ -291,10 +293,15 @@ export type ToolResultContent =
   | { type: "tool_result"; tool_use_id: string; content: string }
   | { type: "image"; source: { type: string; media_type: string; data: string } };
 
+export interface ProviderDiscoveryOptions {
+  /** Read local storage without writing persistent discovery caches. */
+  readOnly?: boolean;
+}
+
 export interface Provider {
   name: string;
   displayName: string;
-  discover(): Promise<SessionInfo[]>;
+  discover(options?: ProviderDiscoveryOptions): Promise<SessionInfo[]>;
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
 }
 

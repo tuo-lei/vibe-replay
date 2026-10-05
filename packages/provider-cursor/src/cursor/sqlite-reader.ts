@@ -2,9 +2,9 @@
 import type { Database, SqlJsStatic } from "sql.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, posix, win32 } from "node:path";
+import { basename, dirname, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type {
   ContextBreakdown,
@@ -14,6 +14,14 @@ import type {
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
+import {
+  assertSqliteSnapshotCurrent,
+  readSqliteSnapshot,
+  assertSqliteWalReadable,
+  withSqliteReadSource,
+  withSqliteSnapshotScope,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   buildTurnDurationIntervals,
@@ -23,6 +31,7 @@ import type {
   Compaction,
   ContentBlock,
   ParsedTurn,
+  ProviderDiscoveryOptions,
   SessionInfo,
 } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
@@ -330,22 +339,22 @@ const SQLITE_CLI_NEGATIVE_CACHE_TTL_MS = 30_000;
 const sqliteCliUsabilityCache = new Map<string, SqliteCliUsabilityCacheEntry>();
 
 async function canUseSqliteCli(dbPath: string): Promise<boolean> {
+  await assertSqliteWalReadable(dbPath);
   const cached = sqliteCliUsabilityCache.get(dbPath);
   if (cached?.canUse) return true;
   if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_NEGATIVE_CACHE_TTL_MS) return false;
 
   let canUse = false;
   try {
-    const { stdout } = await execFileAsync(
-      "sqlite3",
-      ["-readonly", "-json", dbPath, "SELECT json_valid('{}') AS ok;"],
-      {
+    const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+      execFileAsync("sqlite3", ["-readonly", "-json", source, "SELECT json_valid('{}') AS ok;"], {
         maxBuffer: 1024 * 1024,
-      },
+      }),
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
     canUse = rows[0]?.ok === 1;
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     canUse = false;
   }
   sqliteCliUsabilityCache.set(dbPath, { canUse, checkedAt: Date.now() });
@@ -353,20 +362,24 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
 }
 
 async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", dbPath, sql], {
-    maxBuffer: SQLITE_CLI_MAX_BUFFER,
-    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
-  });
+  const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+    execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
+      maxBuffer: SQLITE_CLI_MAX_BUFFER,
+      timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+    }),
+  );
   const trimmed = stdout.trim();
   if (!trimmed) return [];
   return JSON.parse(trimmed) as Record<string, any>[];
 }
 
 async function querySqliteCliText(dbPath: string, sql: string): Promise<string> {
-  const { stdout } = await execFileAsync("sqlite3", ["-readonly", dbPath, sql], {
-    maxBuffer: SQLITE_CLI_MAX_BUFFER,
-    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
-  });
+  const { stdout } = await withSqliteReadSource(dbPath, (source) =>
+    execFileAsync("sqlite3", ["-readonly", source, sql], {
+      maxBuffer: SQLITE_CLI_MAX_BUFFER,
+      timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+    }),
+  );
   return stdout.replace(/\r?\n$/, "");
 }
 
@@ -387,6 +400,7 @@ async function queryGlobalStateRows(
   globalStateDb: CachedGlobalStateDb,
   sql: string,
 ): Promise<Record<string, any>[]> {
+  await assertSqliteSnapshotCurrent(globalStateDb.dbPath);
   if (globalStateDb.backend === "sqlite-cli") {
     return querySqliteCli(globalStateDb.dbPath, sql);
   }
@@ -515,9 +529,10 @@ async function loadComposerHeaders(
   return headers;
 }
 
-async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
-  const dbPath = await findGlobalStateDb();
+async function openGlobalStateDb(explicitPath?: string): Promise<CachedGlobalStateDb | null> {
+  const dbPath = explicitPath || (await findGlobalStateDb());
   if (!dbPath) return null;
+  await assertSqliteSnapshotCurrent(dbPath);
 
   const dbStat = await stat(dbPath).catch(() => null);
   if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) return null;
@@ -553,7 +568,11 @@ async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
     return null;
   }
 
-  const dbBuffer = await readFile(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
 
   const db = new SQL.Database(dbBuffer);
@@ -689,7 +708,11 @@ async function existingPath(path: string): Promise<string | null> {
  * main DB mtime moves. These paths are triggers only; parsing still goes through
  * the normal SQLite/global-state reader so we keep one source of truth.
  */
-export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<string[]> {
+export function resolveCursorLiveWatchPaths(sessionId: string): Promise<string[]> {
+  return withSqliteSnapshotScope(() => resolveCursorLiveWatchPathsOnce(sessionId));
+}
+
+async function resolveCursorLiveWatchPathsOnce(sessionId: string): Promise<string[]> {
   const paths = new Set<string>();
 
   const addIfExists = async (path: string) => {
@@ -721,7 +744,13 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
   return [...paths];
 }
 
-export async function readCursorLiveDiagnostics(
+export function readCursorLiveDiagnostics(
+  sessionId: string,
+): Promise<CursorLiveDiagnostics | null> {
+  return withSqliteSnapshotScope(() => readCursorLiveDiagnosticsOnce(sessionId));
+}
+
+async function readCursorLiveDiagnosticsOnce(
   sessionId: string,
 ): Promise<CursorLiveDiagnostics | null> {
   const globalStateDb = await openGlobalStateDb();
@@ -1471,13 +1500,18 @@ function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, str
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
 async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | null> {
+  await assertSqliteSnapshotCurrent(dbPath);
   let SQL: SqlJsStatic;
   try {
     SQL = await getSqlJs();
   } catch {
     return null;
   }
-  const dbBuffer = await readFile(dbPath).catch(() => null);
+  const dbBuffer = await readSqliteSnapshot(dbPath).catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return null;
+  });
+  await assertSqliteSnapshotCurrent(dbPath);
   if (!dbBuffer) return null;
   const db = new SQL.Database(dbBuffer);
   try {
@@ -1517,16 +1551,25 @@ export async function discoverSqliteOnlySessions(
     (entry) => !knownSessionIds.has(entry.sessionId),
   );
   const metadataConcurrency = 8;
+  const blocked: SqliteSnapshotRequiredError[] = [];
 
   for (let offset = 0; offset < candidates.length; offset += metadataConcurrency) {
     const batch = candidates.slice(offset, offset + metadataConcurrency);
-    const previews = await Promise.all(
+    const previews = await Promise.allSettled(
       batch.map(async (entry) => ({
         entry,
         metaPreview: await readStoreDbMeta(entry.dbPath),
       })),
     );
-    for (const { entry, metaPreview } of previews) {
+    for (const preview of previews) {
+      if (preview.status === "rejected") {
+        if (preview.reason instanceof SqliteSnapshotRequiredError) {
+          blocked.push(preview.reason);
+          continue;
+        }
+        throw preview.reason;
+      }
+      const { entry, metaPreview } = preview.value;
       if (!metaPreview?.hasReplayableRoot) continue;
       const meta = metaPreview.meta;
 
@@ -1555,6 +1598,7 @@ export async function discoverSqliteOnlySessions(
     }
   }
 
+  if (blocked.length) throw new SqliteSnapshotRequiredError(blocked[0].message, sessions);
   return sessions;
 }
 
@@ -1714,9 +1758,11 @@ function finalizeGlobalStateDiscovery(
 export async function discoverGlobalStateOnlySessions(
   knownSessionIds: Set<string>,
   decodedWorkspacePaths: string[] = [],
+  options: ProviderDiscoveryOptions = {},
+  explicitPath?: string,
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
-  const globalStateDb = await openGlobalStateDb();
+  const globalStateDb = await openGlobalStateDb(explicitPath);
   if (!globalStateDb) return { sessions: [], sessionIds, allSessions: [] };
   const { dbPath } = globalStateDb;
   const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
@@ -1823,20 +1869,22 @@ export async function discoverGlobalStateOnlySessions(
       };
       discoveredSessions.push(sessionInfo);
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     // no-op: ignore malformed db rows and return what we have
   }
 
-  await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
-    dbPath,
-    size: globalStateDb.size,
-    mtimeMs: globalStateDb.mtimeMs,
-    walSize: globalStateDb.walSize,
-    walMtimeMs: globalStateDb.walMtimeMs,
-    decodedPathsHash,
-    sessions: discoveredSessions,
-    sessionIds: [...sessionIds],
-  });
+  if (!options.readOnly)
+    await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
+      dbPath,
+      size: globalStateDb.size,
+      mtimeMs: globalStateDb.mtimeMs,
+      walSize: globalStateDb.walSize,
+      walMtimeMs: globalStateDb.walMtimeMs,
+      decodedPathsHash,
+      sessions: discoveredSessions,
+      sessionIds: [...sessionIds],
+    });
 
   return {
     sessions: finalizeGlobalStateDiscovery(discoveredSessions, knownSessionIds),
@@ -2020,10 +2068,130 @@ function extractChildBlobIds(data: Uint8Array): string[] {
   return ids;
 }
 
-export async function parseCursorSqlite(
+/** Enumerate an explicitly supplied SQLite copy without consulting native stores. */
+export function discoverCursorDatabaseSessions(dbPath: string): Promise<SessionInfo[]> {
+  return withSqliteSnapshotScope(() => discoverCursorDatabaseSessionsOnce(dbPath));
+}
+
+async function discoverCursorDatabaseSessionsOnce(dbPath: string): Promise<SessionInfo[]> {
+  const handle = await openGlobalStateDb(dbPath);
+  if (!handle) throw new Error("Cannot read the supplied Cursor database");
+  const tables = new Set(
+    (await queryGlobalStateRows(handle, "SELECT name FROM sqlite_master WHERE type = 'table'")).map(
+      (row) => row.name,
+    ),
+  );
+  if (tables.has("cursorDiskKV")) {
+    const result = await discoverGlobalStateOnlySessions(new Set(), [], { readOnly: true }, dbPath);
+    return result.allSessions.map((session) => ({ ...session, sourceDatabasePath: dbPath }));
+  }
+  if (tables.has("meta") && tables.has("blobs")) {
+    const preview = await readStoreDbMeta(dbPath);
+    if (!preview?.hasReplayableRoot || !preview.meta.agentId) return [];
+    const id = preview.meta.agentId;
+    return [
+      {
+        provider: "cursor",
+        sessionId: id,
+        slug: id.slice(0, 8),
+        title: preview.meta.name,
+        project: "",
+        cwd: "",
+        version: "",
+        timestamp: toIsoTimestamp(preview.meta.createdAt) || new Date(handle.mtimeMs).toISOString(),
+        filePath: dbPath,
+        filePaths: [dbPath],
+        fileSize: handle.size,
+        lineCount: 0,
+        firstPrompt: preview.meta.name || "(sqlite-only session)",
+        hasSqlite: true,
+        sourceDatabasePath: dbPath,
+      },
+    ];
+  }
+  if (tables.has("agents") && tables.has("runs") && tables.has("run_events")) {
+    const agents = await queryGlobalStateRows(
+      handle,
+      "SELECT agent_id, workspace_ref, name, created_at, updated_at FROM agents",
+    );
+    const sessions: SessionInfo[] = [];
+    for (const row of agents) {
+      const id = typeof row.agent_id === "string" ? row.agent_id : "";
+      if (!id) continue;
+      const cwd = typeof row.workspace_ref === "string" ? row.workspace_ref : "";
+      const folder = dirname(dbPath);
+      const roots = [folder];
+      if (basename(dirname(folder)) === "sdk-agent-store") roots.push(dirname(dirname(folder)));
+      const candidates = /^[A-Za-z0-9_-]+$/.test(id)
+        ? roots.flatMap((root) => [
+            join(root, `${id}.jsonl`),
+            join(root, "agent-transcripts", id, `${id}.jsonl`),
+          ])
+        : [];
+      let transcript: string | undefined;
+      for (const candidate of candidates)
+        if ((await stat(candidate).catch(() => null))?.isFile()) {
+          transcript = candidate;
+          break;
+        }
+      const marker = `${dbPath}#session:${id}`;
+      sessions.push({
+        provider: "cursor",
+        sessionId: id,
+        slug: id.slice(0, 8),
+        title: typeof row.name === "string" ? row.name : undefined,
+        cwd,
+        project: shortenPath(cwd),
+        version: "",
+        timestamp:
+          typeof row.updated_at === "string"
+            ? row.updated_at
+            : new Date(handle.mtimeMs).toISOString(),
+        filePath: marker,
+        filePaths: transcript ? [transcript] : [marker],
+        fileSize: handle.size,
+        lineCount: 0,
+        firstPrompt: "",
+        hasSqlite: false,
+        hasSdk: true,
+        sourceDatabasePath: dbPath,
+        ...(transcript ? {} : { transcriptStatus: "no-prompts" as const }),
+      });
+    }
+    return sessions;
+  }
+  throw new Error("Unsupported explicit Cursor database schema");
+}
+
+export function parseCursorSqlite(
   workspacePath: string,
   sessionId: string,
+  explicitPath?: string,
 ): Promise<ProviderParseResult | null> {
+  return withSqliteSnapshotScope(() =>
+    parseCursorSqliteOnce(workspacePath, sessionId, explicitPath),
+  );
+}
+
+async function parseCursorSqliteOnce(
+  workspacePath: string,
+  sessionId: string,
+  explicitPath?: string,
+): Promise<ProviderParseResult | null> {
+  if (explicitPath) {
+    const handle = await openGlobalStateDb(explicitPath);
+    if (!handle) return null;
+    const tables = new Set(
+      (
+        await queryGlobalStateRows(handle, "SELECT name FROM sqlite_master WHERE type = 'table'")
+      ).map((row) => row.name),
+    );
+    if (tables.has("meta") && tables.has("blobs"))
+      return parseCursorStoreDb(sessionId, workspacePath, explicitPath);
+    if (tables.has("cursorDiskKV"))
+      return parseCursorGlobalStateDb(sessionId, handle, workspacePath);
+    throw new Error("Unsupported explicit Cursor database schema");
+  }
   const storeResult = await parseCursorStoreDb(sessionId, workspacePath);
   if (storeResult) {
     // sql.js needs the whole DB loaded into memory, so the first global-state probe is expensive.
@@ -2048,14 +2216,16 @@ export async function parseCursorSqlite(
 async function parseCursorStoreDb(
   sessionId: string,
   workspacePath = "",
+  explicitPath?: string,
 ): Promise<ProviderParseResult | null> {
-  const dbPath = await findStoreDb(sessionId);
+  const dbPath = explicitPath || (await findStoreDb(sessionId));
   if (!dbPath) return null;
 
   if (await canUseSqliteCli(dbPath)) {
     try {
       return await parseCursorStoreDbWithSqliteCli(dbPath, sessionId, workspacePath);
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) throw error;
       // Fall through to sql.js. Some machines may have sqlite3 installed but
       // unable to read this specific DB/WAL state in readonly mode.
     }
@@ -2068,7 +2238,8 @@ async function parseCursorStoreDb(
     return null;
   }
 
-  const dbBuffer = await readFile(dbPath);
+  const dbBuffer = await readSqliteSnapshot(dbPath);
+  await assertSqliteSnapshotCurrent(dbPath);
   const db = new SQL.Database(dbBuffer);
 
   try {
@@ -2205,7 +2376,8 @@ async function parseCursorStoreDbWithSqliteCli(
           .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
           .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof SqliteSnapshotRequiredError) throw error;
       // Older or session-scoped store.db files may not have cursorDiskKV.
     }
   }
@@ -3654,7 +3826,8 @@ async function parseCursorGlobalStateDb(
         notes,
       },
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   }
 }

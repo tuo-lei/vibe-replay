@@ -1,8 +1,13 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import type { ProviderDiscoveryOptions, SessionInfo } from "@vibe-replay/provider-contract";
+import {
+  readGitRepo,
+  shortenPath,
+  SqliteSnapshotRequiredError,
+  withSqliteSnapshotScope,
+} from "@vibe-replay/provider-core/utils";
 import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
   discoverGlobalStateOnlySessions,
@@ -10,7 +15,7 @@ import {
   getCursorSessionFingerprints,
   listStoreDbSessionIds,
 } from "./sqlite-reader.js";
-import { discoverSdkAgents, type SdkAgent } from "./sdk-reader.js";
+import { discoverSdkAgents, SdkIndexSnapshotRequiredError, type SdkAgent } from "./sdk-reader.js";
 import { sanitizeCursorUserText } from "./sanitize.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
@@ -20,90 +25,140 @@ const ENTRY_STAT_CONCURRENCY = 32;
 const decodedProjectDirCache = new Map<string, Promise<string>>();
 const sdkWorkspaceRepoCache = new Map<string, Promise<string | undefined>>();
 const transcriptDelegatedPrompts = new Map<string, string[]>();
-let cursorDiscoveryInFlight: Promise<SessionInfo[]> | null = null;
+const cursorDiscoveryInFlight = new Map<boolean, Promise<SessionInfo[]>>();
 
 /** Coalesce dashboard/source scans that request the same local catalog concurrently. */
-export function discoverCursorSessions(): Promise<SessionInfo[]> {
-  if (cursorDiscoveryInFlight) return cursorDiscoveryInFlight;
-  const current = discoverCursorSessionsOnce();
+export function discoverCursorSessions(
+  options: ProviderDiscoveryOptions = {},
+): Promise<SessionInfo[]> {
+  const readOnly = options.readOnly === true;
+  const existing = cursorDiscoveryInFlight.get(readOnly);
+  if (existing) return existing;
+  const current = withSqliteSnapshotScope(() => discoverCursorSessionsOnce(options));
   const tracked = current.finally(() => {
-    if (cursorDiscoveryInFlight === tracked) cursorDiscoveryInFlight = null;
+    if (cursorDiscoveryInFlight.get(readOnly) === tracked) cursorDiscoveryInFlight.delete(readOnly);
   });
-  cursorDiscoveryInFlight = tracked;
+  cursorDiscoveryInFlight.set(readOnly, tracked);
   return tracked;
 }
 
-async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
+async function discoverCursorSessionsOnce(
+  options: ProviderDiscoveryOptions,
+): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
+  const snapshotErrors: SqliteSnapshotRequiredError[] = [];
   // SDK databases are independent from IDE transcript/store discovery. Start
   // their machine-wide index in parallel instead of paying both costs serially.
-  const sdkAgentsPromise = discoverSdkAgents().catch(() => [] as SdkAgent[]);
+  let sdkSnapshotError: SqliteSnapshotRequiredError | undefined;
+  const sdkAgentsPromise = discoverSdkAgents().catch((error) => {
+    if (error instanceof SqliteSnapshotRequiredError) sdkSnapshotError = error;
+    return error instanceof SdkIndexSnapshotRequiredError ? error.agents : ([] as SdkAgent[]);
+  });
 
-  let projectDirs: string[];
   try {
-    projectDirs = await readdir(CURSOR_DIR);
-  } catch {
-    projectDirs = [];
-  }
-
-  const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
-    discoverProjectSessions(projDir),
-  );
-  for (const projectSessionList of projectSessions) {
-    sessions.push(...projectSessionList);
-  }
-  const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
-  const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
-  sessions.length = 0;
-  sessions.push(
-    ...mergedTranscriptSessions.filter(
-      (session) => !hiddenTranscriptSessionIds.has(session.sessionId),
-    ),
-  );
-
-  // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
-  const transcriptSessions = mergedTranscriptSessions;
-  const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
-  const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-  const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
-  sessions.push(...sqliteOnly);
-  for (const s of sqliteOnly) knownIds.add(s.sessionId);
-
-  // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
-  const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths);
-  sessions.push(...globalState.sessions);
-  const globalStateById = new Map(
-    globalState.allSessions.map((session) => [session.sessionId, session]),
-  );
-
-  // Mark transcript-discovered sessions that have any SQLite-backed rich data.
-  const storeDbSessionIds = await listStoreDbSessionIds();
-  for (const session of transcriptSessions) {
-    const hasStoreDb = storeDbSessionIds.has(session.sessionId);
-    session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
-    const globalStateSession = globalStateById.get(session.sessionId);
-    if (globalStateSession?.compactionCount) {
-      session.compactionCount = Math.max(
-        session.compactionCount || 0,
-        globalStateSession.compactionCount,
-      );
+    let projectDirs: string[];
+    try {
+      projectDirs = await readdir(CURSOR_DIR);
+    } catch {
+      projectDirs = [];
     }
-  }
 
-  // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
-  // store. Mark transcripts that also have an SDK record so the parser can enrich
-  // them with structured tool results, run timing, and per-turn model.
-  await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
-  const fingerprints = await getCursorSessionFingerprints(
-    sessions.map((session) => session.sessionId),
-  );
-  for (const session of sessions) {
-    const fingerprint = fingerprints.get(session.sessionId);
-    if (fingerprint) session.sourceFingerprint = fingerprint;
-  }
+    const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
+      discoverProjectSessions(projDir),
+    );
+    for (const projectSessionList of projectSessions) {
+      sessions.push(...projectSessionList);
+    }
+    const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
+    const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
+    sessions.length = 0;
+    sessions.push(
+      ...mergedTranscriptSessions.filter(
+        (session) => !hiddenTranscriptSessionIds.has(session.sessionId),
+      ),
+    );
 
-  sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return sessions;
+    // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
+    const transcriptSessions = mergedTranscriptSessions;
+    const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
+    const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+    // A blocked store must not hide healthy, independent global-state/SDK sources.
+    const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true).catch(
+      (error) => {
+        if (!(error instanceof SqliteSnapshotRequiredError)) throw error;
+        snapshotErrors.push(error);
+        return error.sessions;
+      },
+    );
+    sessions.push(...sqliteOnly);
+    for (const s of sqliteOnly) knownIds.add(s.sessionId);
+
+    // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
+    const globalState = await discoverGlobalStateOnlySessions(
+      knownIds,
+      decodedPaths,
+      options,
+    ).catch((error) => {
+      if (!(error instanceof SqliteSnapshotRequiredError)) throw error;
+      snapshotErrors.push(error);
+      return {
+        sessions: error.sessions,
+        allSessions: error.sessions,
+        sessionIds: new Set(error.sessions.map((session) => session.sessionId)),
+      };
+    });
+    sessions.push(...globalState.sessions);
+    const globalStateById = new Map(
+      globalState.allSessions.map((session) => [session.sessionId, session]),
+    );
+
+    // Mark transcript-discovered sessions that have any SQLite-backed rich data.
+    const storeDbSessionIds = await listStoreDbSessionIds();
+    for (const session of transcriptSessions) {
+      const hasStoreDb = storeDbSessionIds.has(session.sessionId);
+      session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
+      const globalStateSession = globalStateById.get(session.sessionId);
+      if (globalStateSession?.compactionCount) {
+        session.compactionCount = Math.max(
+          session.compactionCount || 0,
+          globalStateSession.compactionCount,
+        );
+      }
+    }
+
+    // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
+    // store. Mark transcripts that also have an SDK record so the parser can enrich
+    // them with structured tool results, run timing, and per-turn model.
+    await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
+    const fingerprints = await getCursorSessionFingerprints(
+      sessions.map((session) => session.sessionId),
+    );
+    for (const session of sessions) {
+      const fingerprint = fingerprints.get(session.sessionId);
+      if (fingerprint) session.sourceFingerprint = fingerprint;
+    }
+
+    sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    if (sdkSnapshotError) snapshotErrors.push(sdkSnapshotError);
+    if (snapshotErrors.length) {
+      throw new SqliteSnapshotRequiredError(snapshotErrors[0].message, sessions);
+    }
+    return sessions;
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) {
+      const partial = new Map(
+        [...sessions, ...error.sessions].map((session) => [
+          `${session.sessionId}::${session.filePath}`,
+          session,
+        ]),
+      );
+      throw new SqliteSnapshotRequiredError(error.message, [...partial.values()]);
+    }
+    throw error;
+  } finally {
+    // Finish the parallel index before the readonly scope cleans up its snapshots.
+    await sdkAgentsPromise;
+  }
 }
 
 /**

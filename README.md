@@ -207,6 +207,67 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 "Generate an interactive replay of this session and open it"
 ```
 
+### CLI workflows
+
+Find a session, inspect evidence, and export only the format you need:
+
+```bash
+npx vibe-replay sessions --query "build" --any --brief --json
+npx vibe-replay inspect <session-id> --json
+npx vibe-replay inspect <session-id> --query "EUSAGE" --json
+npx vibe-replay diagnose <session-id> --query "EUSAGE" --json
+npx vibe-replay export <session-id> --format markdown --stdout > session.md
+npx vibe-replay export <session-id> --format html --output ./replay
+npx vibe-replay share <session-id> --dry-run --json
+npx vibe-replay share ./replay --visibility unlisted --json
+```
+
+References accept full IDs, unique prefixes of at least four characters, and source paths.
+Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
+selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+Copied Cursor/Grok JSONL can share generic wake tags and custom tool payloads.
+When the source lacks provider-specific identity, pass `--provider cursor` or
+`--provider grok-bot`; missing tool IDs are not a reliable identity signal.
+Copied SQLite databases use their own contents, with a session marker required
+when they contain multiple sessions. Cursor SDK database copies also need the
+agent's JSONL transcript beside the database (or its `agent-transcripts` folder)
+to supply user prompts. Provider inference uses a bounded read-only `sqlite3` query
+when available; without it, databases above 32 MiB require `--provider` to skip
+loading another WASM snapshot solely for detection. Checkpointed WAL-mode copies work without sidecar files. Copies with pending WAL
+must be checkpointed in the source application before stdout export or sharing
+preflight: even readonly SQLite can change an existing shared-memory sidecar.
+Native queries use a private temporary copy, validate source stability before querying,
+and delete the copy afterward. An immutable URI never points at the live database.
+Pending rollback journals also require the source transaction or recovery to finish.
+Committed PERSIST journals with zeroed headers remain readable.
+Healthy Hermes profiles remain available when another profile needs a checkpoint;
+coverage reports the incomplete discovery.
+`doctor --json` reports provider coverage and compatibility failures. Search output
+marks partial discovery, and empty results include recovery suggestions.
+
+`inspect --scene <index>` reads an exact 0-based scene; `--offset` and `--limit`
+bound larger content slices. `diagnose` separates model API errors, tool failures,
+compactions, and matching text evidence; it does not infer root causes from an error
+string alone. Metadata search does not search tool results: use `inspect --query`
+after selecting a session.
+
+`export` supports `markdown`, `json`, and `html`, defaulting to Markdown with no
+preview images. Files go under `~/.vibe-replay/<slug>/exports` unless `--output` is
+provided. `--stdout` emits only Markdown or replay JSON and creates no files,
+including discovery caches and telemetry. SSH stdout exports use already staged
+sessions; run `sessions --refresh` first if the session is not staged.
+File exports include a redaction report. `--github` remains available for the
+Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
+replay with its editor overlays and annotations when available; an explicit source
+path reparses the source, while an explicit `replay.json` uses that saved snapshot.
+
+Sharing preflight performs no upload and reports the effective payload's size,
+visibility, potential-secret count, and cloud/local mode. SSH preflight reads only
+already staged sessions, without connecting or refreshing the remote cache; run
+`sessions --refresh` first if the requested remote session is not staged. Check that report and
+review the content before sharing. JSON share results include `uploaded` and `mode`
+so a local HTML fallback is distinguishable from a cloud URL.
+
 ## Features
 
 - **Local-first** — one command and no account required for local replays; sign in only when you want cloud publishing or synced insights

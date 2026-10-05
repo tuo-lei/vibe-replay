@@ -5,6 +5,7 @@
  * The SVG renders natively on GitHub (CSS animations, no JS needed).
  */
 
+import { codexStripTwoPass } from "@vibe-replay/provider-codex/constants";
 import type { ReplaySession, Scene } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "../clean-prompt.js";
 
@@ -28,7 +29,7 @@ export function generateGitHubMarkdown(
   opts: GitHubFormatOptions = {},
 ): string {
   const { meta } = session;
-  const phases = extractPhases(session.scenes);
+  const phases = extractPhases(session.scenes, meta.provider);
   const filesChanged = collectFilesChanged(session.scenes);
   const toolStats = computeToolStats(session.scenes);
   const duration = formatDuration(meta.stats.durationMs);
@@ -50,7 +51,7 @@ export function generateGitHubMarkdown(
   }
 
   // ── Header ──
-  lines.push("### AI Coding Session");
+  lines.push(`### AI Coding Session: ${escMd(condensedTitle)}`);
   lines.push("");
 
   // Stats line
@@ -135,7 +136,7 @@ export function generateGitHubMarkdown(
  * Renders natively on GitHub (CSS @keyframes animation).
  */
 export function generateGitHubSvg(session: ReplaySession, opts: GitHubFormatOptions = {}): string {
-  const phases = extractPhases(session.scenes);
+  const phases = extractPhases(session.scenes, session.meta.provider);
   const frames = buildSvgFrames(session, phases, opts);
   return renderSvg(frames, session, opts);
 }
@@ -245,14 +246,26 @@ type GroupedAction =
   | { kind: "search"; description: string }
   | { kind: "text"; summary: string };
 
-export function extractPhases(scenes: Scene[]): Phase[] {
+export function extractPhases(scenes: Scene[], provider?: string): Phase[] {
   const phases: Phase[] = [];
   let current: { prompt: string; rawActions: RawAction[]; scenes: Scene[] } | null = null;
 
   for (const scene of scenes) {
-    if (scene.type === "user-prompt") {
+    const automation =
+      provider === "codex" &&
+      scene.type === "context-injection" &&
+      scene.injectionType === "automation";
+    if (scene.type === "user-prompt" || automation) {
       // Skip system-generated messages (e.g. <bash-stdout>, <task-notification>)
-      if (isSystemGeneratedMessage(scene.content)) continue;
+      const cleaned = provider === "codex" ? codexStripTwoPass(scene.content) : scene.content;
+      const instruction = automation
+        ? cleaned.match(/<instructions>([\s\S]*?)<\/instructions>/)?.[1]?.trim() || cleaned
+        : cleaned;
+      const prompt =
+        automation && !instruction.startsWith("Automation:")
+          ? `Automation: ${instruction}`
+          : instruction;
+      if (!prompt || isSystemGeneratedMessage(prompt)) continue;
       if (current) {
         phases.push({
           prompt: current.prompt,
@@ -260,7 +273,7 @@ export function extractPhases(scenes: Scene[]): Phase[] {
           scenes: current.scenes,
         });
       }
-      current = { prompt: scene.content, rawActions: [], scenes: [] };
+      current = { prompt, rawActions: [], scenes: [] };
       continue;
     }
 

@@ -8,9 +8,10 @@ import type {
   ProviderParseResult,
   TokenUsage,
 } from "@vibe-replay/provider-contract";
-import type { SubAgent, UsageEvent } from "@vibe-replay/types";
+import type { SessionDiagnostic, SubAgent, UsageEvent } from "@vibe-replay/types";
 import { normalizeSubAgentType } from "@vibe-replay/provider-contract";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
+import { prepareOpencodeStorage, opencodeMessageOrder } from "./storage.js";
 import { attributeOpencodeMcpTool, loadOpencodeMcpServerNames } from "./mcp-servers.js";
 import { isOpencodeBuiltinTool, mapOpencodeToolArgs, mapOpencodeToolName } from "./tool-mapping.js";
 import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
@@ -38,6 +39,7 @@ interface OpencodePart {
     status?: string;
     input?: unknown;
     output?: string;
+    images?: string[];
     metadata?: {
       diff?: string;
       /** `task` parts record the spawned child session here. */
@@ -94,6 +96,12 @@ interface MessageMeta {
     cache?: { read?: number; write?: number };
   };
   finish?: string;
+  /** Transient v2 adapter fields; old status-less compactions remain compatible. */
+  _v2Message?: boolean;
+  _v2SkillName?: string;
+  _v2Compaction?: boolean;
+  _compactionStatus?: string;
+  _compactionReason?: string;
   /** opencode persists the message's own cost estimate on assistant messages. */
   cost?: number;
   /** Structured failure record present when `finish === "error"`. */
@@ -185,6 +193,7 @@ export function parseSessionFromDb(
   sessionInfo?: SessionInfo,
   dbPath?: string,
 ): ProviderParseResult {
+  prepareOpencodeStorage(db, sessionId);
   const session = firstValue(db, `SELECT * FROM session WHERE id = ?`, {
     sid: sessionId,
   }) as SessionMetaRow | null;
@@ -195,7 +204,7 @@ export function parseSessionFromDb(
       SELECT id, session_id, data
       FROM message
       WHERE session_id = ?
-      ORDER BY time_created ASC
+      ORDER BY ${opencodeMessageOrder(db)}
     `,
     { sid: sessionId },
   ) as OpencodeMessageRow[];
@@ -206,6 +215,8 @@ export function parseSessionFromDb(
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
   const compactions: Compaction[] = [];
+  const diagnostics: SessionDiagnostic[] = [];
+  let runningCompactions = 0;
   const tokenByModel = new Map<string, TokenUsage>();
   const skillsUsed = new Set<string>();
   const skillActivations: string[] = [];
@@ -265,12 +276,40 @@ export function parseSessionFromDb(
     const timestamp = toIsoMs(timestampMs);
     if (timestamp) {
       allTimestamps.push(timestamp);
-      if (!startTime) startTime = timestamp;
-      endTime = timestamp;
+      for (const bound of [meta.time?.created, meta.time?.completed]) {
+        const value = toIsoMs(bound);
+        if (!value) continue;
+        if (!startTime || value < startTime) startTime = value;
+        if (!endTime || value > endTime) endTime = value;
+      }
     }
 
-    // Per-model token aggregation (opencode records usage on assistant messages).
-    if (meta.role === "assistant") {
+    if (meta._v2SkillName) {
+      skillsUsed.add(meta._v2SkillName);
+      skillActivations.push(meta._v2SkillName);
+      continue;
+    }
+    if (meta._v2Message && meta.role === "assistant" && meta.modelID) model = meta.modelID;
+    if (meta._v2Compaction) {
+      if (meta._compactionStatus === "running") runningCompactions++;
+      if (
+        timestamp &&
+        (meta._compactionStatus === "completed" || meta._compactionStatus === "failed")
+      )
+        diagnostics.push({
+          kind: "compaction",
+          outcome: meta._compactionStatus === "failed" ? "failed" : "succeeded",
+          timestamp,
+          confidence: "exact",
+          trigger: meta._compactionReason === "manual" ? "manual" : "unknown",
+          entryId: message.id,
+          provider: "opencode",
+          ...(meta.modelID ? { model: meta.modelID } : {}),
+          ...(meta._compactionStatus === "failed" ? errorTypeFromMeta(meta.error) : {}),
+        });
+    }
+    // Compaction request usage is separate from the context size and human turns.
+    if (meta.role === "assistant" || meta._v2Compaction) {
       const usage = usageFromMeta(meta.tokens);
       if (usage) {
         if (meta.modelID) {
@@ -281,15 +320,16 @@ export function parseSessionFromDb(
         const completed = meta.time?.completed;
         const durationMs =
           created && completed && completed > created ? completed - created : undefined;
-        usageByMessageId.set(message.id, {
-          usage,
-          ...(meta.modelID ? { model: meta.modelID } : {}),
-          contextTokens:
-            (meta.tokens?.input || 0) +
-            (meta.tokens?.cache?.read || 0) +
-            (meta.tokens?.cache?.write || 0),
-          ...(durationMs ? { durationMs } : {}),
-        });
+        if (meta.role === "assistant")
+          usageByMessageId.set(message.id, {
+            usage,
+            ...(meta.modelID ? { model: meta.modelID } : {}),
+            contextTokens:
+              (meta.tokens?.input || 0) +
+              (meta.tokens?.cache?.read || 0) +
+              (meta.tokens?.cache?.write || 0),
+            ...(durationMs ? { durationMs } : {}),
+          });
       }
       if (typeof meta.cost === "number" && Number.isFinite(meta.cost)) {
         messageCostSum += meta.cost;
@@ -422,6 +462,14 @@ export function parseSessionFromDb(
     ...(mcpServersUsed.size > 0 ? { mcpServersUsed: [...mcpServersUsed].sort() } : {}),
     ...(subAgentSummary.length > 0 ? { subAgentSummary } : {}),
     ...(apiErrors.length > 0 ? { apiErrors } : {}),
+    ...(diagnostics.length > 0 ? { diagnostics } : {}),
+    ...(runningCompactions
+      ? {
+          diagnosticNotes: [
+            `${runningCompactions} OpenCode compaction record(s) are still running; they are not counted as completed compactions.`,
+          ],
+        }
+      : {}),
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),
   };
@@ -527,6 +575,7 @@ function assistantBlocksFromParts(
           name: mapOpencodeToolName(toolName),
           input,
           ...(hasResult ? { _hasResult: true, _result: result } : { _hasResult: false }),
+          ...(hasResult && state.images?.length ? { _images: state.images } : {}),
           ...(isError ? { _isError: true } : {}),
           ...(isPending ? { _isPendingMarker: true } : {}),
           ...(durationMs ? { _durationMs: durationMs } : {}),
@@ -602,13 +651,14 @@ function buildSubAgentFromChildSession(
   block: Extract<ContentBlock, { type: "tool_use" }>,
   warnings: NonNullable<ProviderParseResult["parseWarnings"]>,
 ): SubAgent | undefined {
+  prepareOpencodeStorage(db, call.sessionId);
   const childMessages = rowValues(
     db,
     `
       SELECT id, session_id, data
       FROM message
       WHERE session_id = ?
-      ORDER BY time_created ASC
+      ORDER BY ${opencodeMessageOrder(db)}
     `,
     { sid: call.sessionId },
   ) as OpencodeMessageRow[];
