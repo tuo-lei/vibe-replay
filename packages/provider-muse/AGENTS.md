@@ -15,7 +15,9 @@ default `~/agents`):
 - `{"type":"compaction_checkpoint", "compaction_id", "trigger", "summary"}` —
   context compactions. The `summary` is a full pre-compaction conversation
   summary and is intentionally **not** replayed (too large); it only feeds
-  `compactions[]` metadata.
+  `compactions[]` metadata. Note `created_at` here is **epoch seconds as a
+  number**, unlike the ISO strings on `item`/`session_header` records — the
+  parser normalizes it to ISO.
 
 ## Item kinds
 

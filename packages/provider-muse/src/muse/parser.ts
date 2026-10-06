@@ -44,7 +44,9 @@ interface MuseRecord {
   type: string;
   seq?: number;
   source?: string;
-  created_at?: string;
+  // `created_at` is an ISO string on `item`/`session_header` records, but the
+  // runtime writes epoch seconds (number) on `compaction_checkpoint` records.
+  created_at?: string | number;
   session_id?: string;
   agent_id?: string;
   item?: MuseItem;
@@ -92,6 +94,22 @@ function parseJsonObject(raw: string | undefined): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/**
+ * Normalize a record's `created_at` to an ISO string. `item` and
+ * `session_header` records carry ISO strings, but `compaction_checkpoint`
+ * records carry epoch seconds as a number — passing that through would put a
+ * raw number into `compactions[].timestamp` / `endTime` and poison the
+ * session duration math.
+ */
+function normalizeRecordTimestamp(record: MuseRecord): string | undefined {
+  const raw = record.created_at;
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return new Date(raw < 1e12 ? raw * 1000 : raw).toISOString();
+  }
+  return undefined;
 }
 
 function firstTextBlockText(turn: ParsedTurn | undefined): string {
@@ -174,9 +192,10 @@ export function parseMuseLines(
     const recordSource = typeof record.source === "string" ? record.source : undefined;
     if (record.type === "session_header") {
       if (typeof record.session_id === "string") sessionId = record.session_id;
-      if (typeof record.created_at === "string") {
-        headerCreatedAt = record.created_at;
-        timestamps.push(record.created_at);
+      const headerTimestamp = normalizeRecordTimestamp(record);
+      if (headerTimestamp) {
+        headerCreatedAt = headerTimestamp;
+        timestamps.push(headerTimestamp);
       }
       continue;
     }
@@ -184,7 +203,7 @@ export function parseMuseLines(
       // The checkpoint timestamp marks when compaction ran (the session was
       // still alive), so it counts toward endTime/duration just like it does
       // for the discovery scan's lastTimestamp.
-      const checkpointTimestamp = record.created_at ?? now();
+      const checkpointTimestamp = normalizeRecordTimestamp(record) ?? now();
       compactions.push({
         timestamp: checkpointTimestamp,
         trigger: record.trigger ?? "unknown",
@@ -199,7 +218,7 @@ export function parseMuseLines(
     if (!item || typeof item.type !== "string") {
       continue;
     }
-    const timestamp = typeof record.created_at === "string" ? record.created_at : undefined;
+    const timestamp = normalizeRecordTimestamp(record);
     if (timestamp) timestamps.push(timestamp);
 
     switch (item.type) {
