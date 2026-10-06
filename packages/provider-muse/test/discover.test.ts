@@ -154,6 +154,30 @@ describe("discoverMuseSessions", () => {
     expect(sessions[0].editCountEst).toBeUndefined();
   });
 
+  it("normalizes numeric compaction checkpoint timestamps into lastTimestamp", async () => {
+    // The runtime writes created_at as epoch seconds on compaction_checkpoint
+    // records; without meta, the session timestamp falls back to lastTimestamp.
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-test-numeric-checkpoint";
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "Hello" }),
+      JSON.stringify({
+        type: "compaction_checkpoint",
+        compaction_id: 1,
+        trigger: "threshold",
+        created_at: 1789420895, // 2026-09-14T21:21:35Z
+      }),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].compactionCount).toBe(1);
+    expect(sessions[0].timestamp).toBe("2026-09-14T21:21:35.000Z");
+  });
+
   it("estimates wall-clock duration from the first/last record timestamps", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
     tempDirs.push(root);

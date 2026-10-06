@@ -103,11 +103,12 @@ function parseJsonObject(raw: string | undefined): Record<string, unknown> {
  * raw number into `compactions[].timestamp` / `endTime` and poison the
  * session duration math.
  */
-function normalizeRecordTimestamp(record: MuseRecord): string | undefined {
+export function normalizeRecordTimestamp(record: { created_at?: unknown }): string | undefined {
   const raw = record.created_at;
   if (typeof raw === "string") return raw;
   if (typeof raw === "number" && Number.isFinite(raw)) {
-    return new Date(raw < 1e12 ? raw * 1000 : raw).toISOString();
+    const date = new Date(raw < 1e12 ? raw * 1000 : raw);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
   }
   return undefined;
 }

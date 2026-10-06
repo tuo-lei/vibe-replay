@@ -198,6 +198,29 @@ describe("parseMuseLines", () => {
     expect(typeof parsed.endTime).toBe("string");
   });
 
+  it("falls back to now() for out-of-range numeric timestamps instead of throwing", () => {
+    const parsed = parseMuseLines(
+      [
+        header(),
+        item({ type: "message", role: "user", text: "Hello" }, "2026-09-18T10:01:00Z"),
+        JSON.stringify({
+          type: "compaction_checkpoint",
+          compaction_id: 1,
+          trigger: "threshold",
+          created_at: 1e30, // finite, but outside the JS Date range
+          summary: "summary",
+        }),
+      ],
+      { now: () => "2026-09-18T10:06:00Z" },
+    );
+
+    expect(parsed.compactions).toHaveLength(1);
+    expect(parsed.compactions![0]).toMatchObject({
+      timestamp: "2026-09-18T10:06:00Z",
+      trigger: "threshold",
+    });
+  });
+
   it("collects warnings for malformed lines and skips unknown record types", () => {
     const parsed = parseMuseLines([
       header(),
