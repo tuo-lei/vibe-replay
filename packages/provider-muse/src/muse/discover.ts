@@ -6,7 +6,7 @@ import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import { FILE_EDIT_TOOLS } from "@vibe-replay/provider-core/utils";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { getMuseAgentsDirs, readMuseSessionMeta } from "./config.js";
-import { isRuntimeInjectionSource } from "./parser.js";
+import { isRuntimeInjectionSource, normalizeRecordTimestamp } from "./parser.js";
 import { mapMuseToolName } from "./tool-mapping.js";
 
 const PROMPT_SCAN_LIMIT = 2;
@@ -95,9 +95,10 @@ function scanLine(state: MuseScanState, line: string): void {
   } catch {
     return; // Malformed lines become parser warnings, not discovery failures.
   }
-  if (typeof record.created_at === "string") {
-    if (!state.firstTimestamp) state.firstTimestamp = record.created_at;
-    state.lastTimestamp = record.created_at;
+  const createdAt = normalizeRecordTimestamp(record);
+  if (createdAt) {
+    if (!state.firstTimestamp) state.firstTimestamp = createdAt;
+    state.lastTimestamp = createdAt;
   }
   if (record.type === "session_header") {
     state.headerFound = true;

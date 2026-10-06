@@ -27,7 +27,8 @@ parser support).
 be merged by the task itself once the Codex auto-review is addressed and CI
 is green. Never ask Lei to merge. If the Codex review has not appeared 30
 minutes after opening the PR and CI is fully green, you may merge and say
-so in your report.
+so in your report. Reaffirmed by Lei on 2026-10-05 after Codex asked to
+remove the 30-minute exception in PR #702's review: keep the exception.
 
 ## Procedure
 
