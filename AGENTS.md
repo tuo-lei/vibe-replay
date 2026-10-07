@@ -100,7 +100,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **Always use pnpm** — never npm/yarn
 - **TypeScript strict mode**, ESM throughout
 - **oxlint** for linting, **oxfmt** for formatting. The lefthook pre-commit hook runs both on staged files for every agent. Claude Code additionally fixes each file right after editing it; other agents should run `pnpm lint` themselves before finishing.
-- **Before commit**: run `pnpm lint:check` and fix any errors. Do NOT commit code that fails lint.
+- **Before commit**: run `pnpm lint:check` and fix any errors or warnings (it uses `--deny-warnings`). Do NOT commit code that fails lint.
 - **Before PR**: run `pnpm verify`. Keep its stages sequential; concurrent full checks can cause integration-test timeouts.
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation
