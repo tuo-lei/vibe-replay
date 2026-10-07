@@ -1193,6 +1193,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         loading={loading}
         loadingSources={loadingSources}
         sources={sources}
+        replayCount={replays.length}
         error={error}
         failures={[
           ...failedProviders

@@ -9,6 +9,7 @@ interface DashboardStartupProps {
   loading: boolean;
   loadingSources: boolean;
   sources: SourceSession[];
+  replayCount: number;
   error: string | null;
   failures: string[];
   onRetry: () => void;
@@ -20,6 +21,7 @@ export function DashboardStartup({
   loading,
   loadingSources,
   sources,
+  replayCount,
   error,
   failures,
   onRetry,
@@ -156,11 +158,19 @@ export function DashboardStartup({
               {failed &&
                 sources.length > 0 &&
                 ` ${sources.length.toLocaleString()} sessions are available.`}
+              {failed &&
+                sources.length === 0 &&
+                replayCount > 0 &&
+                ` ${replayCount.toLocaleString()} saved ${replayCount === 1 ? "replay is" : "replays are"} available.`}
             </p>
             <div className="dashboard-startup-actions">
-              {(!failed || sources.length > 0) && (
+              {(!failed || sources.length > 0 || replayCount > 0) && (
                 <button type="button" onClick={onContinue}>
-                  {failed ? "Continue with available sessions" : "Open dashboard"}
+                  {failed
+                    ? sources.length > 0
+                      ? "Continue with available sessions"
+                      : "Continue with saved replays"
+                    : "Open dashboard"}
                 </button>
               )}
               <button type="button" onClick={onRetry}>

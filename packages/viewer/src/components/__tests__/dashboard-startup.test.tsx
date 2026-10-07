@@ -8,6 +8,7 @@ const props = {
   loading: true,
   loadingSources: true,
   sources: [],
+  replayCount: 0,
   error: null,
   failures: [],
   onRetry: vi.fn(),
@@ -59,6 +60,21 @@ describe("DashboardStartup", () => {
     expect(screen.getByText("Fix keyboard navigation")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("value")).toBe("8");
     expect(screen.getByRole("progressbar").getAttribute("max")).toBe("30");
+  });
+  it("lets users access saved replays when source discovery fails", () => {
+    render(
+      <DashboardStartup
+        {...props}
+        loading={false}
+        loadingSources={false}
+        failures={["Cursor"]}
+        replayCount={2}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("2 saved replays are available.");
+    fireEvent.click(screen.getByRole("button", { name: "Continue with saved replays" }));
+    expect(props.onContinue).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
   it("stops progress on failures and exposes retry", () => {
     render(<DashboardStartup {...props} loading={false} error="Discovery failed" />);

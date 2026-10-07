@@ -29,11 +29,13 @@ const source = {
 let sourceCache: unknown;
 let replayCache: unknown;
 let fallback: unknown;
+let freshReplays: unknown;
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   sourceCache = null;
   replayCache = null;
   fallback = { sessions: [source] };
+  freshReplays = [];
   MockEventSource.instances = [];
   vi.stubGlobal("EventSource", MockEventSource);
   fetchMock = vi.fn(async (url: string) => {
@@ -46,7 +48,7 @@ beforeEach(() => {
             ? { running: false }
             : url === "/api/sources"
               ? fallback
-              : [];
+              : freshReplays;
     return { ok: true, json: async () => data };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -135,6 +137,18 @@ describe("dashboard cold start", () => {
     expect(result.current.sources).toEqual([source]);
     expect(result.current.failedProviders).toEqual(["cursor"]);
     expect(result.current.startupActive).toBe(true);
+  });
+  it("keeps freshly loaded replays usable after all sources fail", async () => {
+    freshReplays = [{ slug: "saved-replay" }];
+    const { result } = renderHook(() => useDashboardData());
+    const es = await stream();
+    act(() => es.send({ type: "complete", sessions: [], failedProviders: ["cursor"] }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.replays).toEqual(freshReplays);
+    expect(result.current.startupActive).toBe(true);
+    act(() => result.current.dismissStartup());
+    expect(result.current.startupActive).toBe(false);
+    expect(result.current.replays).toEqual(freshReplays);
   });
   it("closes the stream and detaches handlers when leaving Home", async () => {
     const { unmount } = renderHook(() => useDashboardData());
