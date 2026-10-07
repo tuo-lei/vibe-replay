@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
+import { mkdir, rmdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   killProcessTree,
   isPortFree,
+  mkdirClaimWithRetry,
   parsePort,
   readPortOverride,
   reserveFreePort,
@@ -200,4 +204,56 @@ describe("dev port utilities", () => {
     },
     DESCENDANT_PROCESS_TEST_TIMEOUT,
   );
+});
+
+describe("port claim mkdir retry", () => {
+  const epermError = () =>
+    Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+
+  it("retries transient EPERM and succeeds once mkdir works", async () => {
+    let calls = 0;
+    const mkdirFn = async () => {
+      calls++;
+      if (calls < 3) throw epermError();
+    };
+    await mkdirClaimWithRetry("/nonexistent/claim", { mkdirFn, delays: [1, 1] });
+    expect(calls).toBe(3);
+  });
+
+  it("throws the last EPERM after retries are exhausted", async () => {
+    let calls = 0;
+    const mkdirFn = async () => {
+      calls++;
+      throw epermError();
+    };
+    await expect(
+      mkdirClaimWithRetry("/nonexistent/claim", { mkdirFn, delays: [1, 1, 1] }),
+    ).rejects.toMatchObject({ code: "EPERM" });
+    expect(calls).toBe(4);
+  });
+
+  it("does not retry non-EPERM errors", async () => {
+    let calls = 0;
+    const mkdirFn = async () => {
+      calls++;
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    };
+    await expect(mkdirClaimWithRetry("/nonexistent/claim", { mkdirFn })).rejects.toMatchObject({
+      code: "EACCES",
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("still yields the claim (returns null) when the claim dir already exists", async () => {
+    const port = 50_000 + Math.floor(Math.random() * 10_000);
+    const claimPath = join(tmpdir(), `vibe-replay-port-${port}.claim`);
+    await mkdir(claimPath);
+    try {
+      await expect(reservePort(port, "API port")).rejects.toThrow(
+        `API port ${port} is already reserved by another dev process`,
+      );
+    } finally {
+      await rmdir(claimPath);
+    }
+  });
 });
