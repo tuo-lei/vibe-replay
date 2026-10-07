@@ -38,7 +38,6 @@ import {
   SHARE_VISIBILITIES,
   ShareError,
   printLocalShareFallback,
-  requireReplayDir,
   shareReplay,
   type ShareVisibility,
 } from "./share.js";
@@ -306,9 +305,12 @@ program
         if (program.getOptionValueSource(key) === "cli")
           throw new Error(`--${key} is not supported by ${commandName}`);
       }
-      if (commandName !== "sessions" && program.getOptionValueSource("session") === "cli")
+      if (
+        !["sessions", "live"].includes(commandName) &&
+        program.getOptionValueSource("session") === "cli"
+      )
         throw new Error(
-          `Use a positional session reference with ${commandName}; --session is supported by sessions and replay generation`,
+          `Use a positional session reference with ${commandName}; --session is supported by sessions, live, and replay generation`,
         );
     }
     if (
@@ -1028,6 +1030,12 @@ interface WorkflowOptions {
   format?: string;
   output?: string;
   stdout?: boolean;
+  source?: boolean;
+  snapshot?: boolean;
+  revision?: string;
+  field?: "text" | "input" | "result";
+  textOffset?: number;
+  textLimit?: number;
 }
 
 function workflowInteger(value: string): number {
@@ -1043,12 +1051,28 @@ function workflowCommand(name: string, description: string): Command {
     .description(description)
     .argument(
       "<session>",
-      "Session ID, unique short ID, source path, replay directory, or replay.json",
+      "Session ID, unique short ID, source path, replay directory, or replay JSON file",
     )
     .option("-p, --provider <name>", "Provider filter for session references")
     .option("--target <id>", "Select an SSH target ID, or local")
     .option("--refresh", "Bypass the discovery cache")
+    .option("--source", "Parse the current source session")
+    .option("--snapshot", "Require the saved replay snapshot, including edits")
+    .option("--revision <hash>", "Require this content revision before reading or exporting")
     .option("--json", "Print a machine-readable result");
+}
+
+function printContentProvenance(
+  provenance: Awaited<ReturnType<typeof loadCliSession>>["provenance"] | undefined,
+): void {
+  if (provenance) {
+    console.log(
+      `Content: ${provenance.origin} | ${provenance.sceneCount} scenes | revision ${provenance.revision}`,
+    );
+    const generator = provenance.generator;
+    if (generator)
+      console.log(`Generated: ${generator.generatedAt} (${generator.name} ${generator.version})`);
+  }
 }
 
 function printWorkflowResult(payload: unknown, json = false): void {
@@ -1056,22 +1080,35 @@ function printWorkflowResult(payload: unknown, json = false): void {
     console.log(JSON.stringify(payload, null, 2));
     return;
   }
-  const data = payload as ReturnType<typeof inspectSession>;
+  const data = payload as ReturnType<typeof inspectSession> & {
+    provenance?: Awaited<ReturnType<typeof loadCliSession>>["provenance"];
+  };
   if (data.title) console.log(`${data.title} (${data.sessionId})`);
   if (data.stats)
     console.log(
       `${data.provider} | ${data.stats.userPrompts} prompts | ${data.stats.toolCalls} tools | ${data.stats.sceneCount} scenes`,
     );
+  printContentProvenance(data.provenance);
   if ("scenes" in data && data.scenes)
-    for (const scene of data.scenes)
-      console.log(`\n[scene ${scene.index}] ${scene.type}\n${scene.text}`);
+    for (const scene of data.scenes) {
+      console.log(`\n[scene ${scene.index}] ${scene.type}\n${scene.content?.value ?? scene.text}`);
+      for (const [field, info] of Object.entries(scene.fields)) {
+        if (scene.content && scene.content.field !== field) continue;
+        if (!info.truncated) continue;
+        console.log(
+          `  ${field} excerpt: chars ${info.offset}–${info.end} of ${info.length}. Read from start with --scene ${scene.index} --field ${field} --text-offset 0${info.nextOffset !== undefined ? `; continue with --text-offset ${info.nextOffset}` : ""}.`,
+        );
+      }
+    }
   else if ("prompts" in data && data.prompts) {
     for (const prompt of data.prompts) console.log(`\n[scene ${prompt.index}] ${prompt.text}`);
     if (data.lastResponse)
       console.log(`\n[scene ${data.lastResponse.index}] Last response\n${data.lastResponse.text}`);
   } else console.log(JSON.stringify(payload, null, 2));
   if ("truncated" in data && data.truncated)
-    console.log("\nMore scenes available; use --offset or --scene to continue.");
+    console.log(
+      `\nMore ${data.query ? "matches" : "scenes"} available; ${data.query ? "keep --query and " : ""}use --offset ${data.nextOffset} --revision ${data.revision} to continue.`,
+    );
 }
 
 workflowCommand(
@@ -1080,24 +1117,35 @@ workflowCommand(
 )
   .option("-q, --query <text>", "Find exact text in session content and tool results")
   .option("--scene <index>", "Read one exact 0-based scene", workflowInteger)
-  .option("--offset <index>", "Read content starting at this scene", workflowInteger)
+  .option("--offset <index>", "Read or search from this 0-based scene (inclusive)", workflowInteger)
+  .option("--field <name>", "Read text, input, or result from --scene")
+  .option(
+    "--text-offset <index>",
+    "Read the scene field from this character offset",
+    workflowInteger,
+  )
+  .option("--text-limit <number>", "Maximum characters from --scene (1–10000)", workflowInteger)
   .option("--limit <number>", "Maximum entries (1–100)", workflowInteger, 12)
   .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
     if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
     if (opts.query !== undefined && !opts.query.trim()) throw new Error("--query cannot be empty");
-    if (
-      [opts.query !== undefined, opts.scene !== undefined, opts.offset !== undefined].filter(
-        Boolean,
-      ).length > 1
-    )
-      throw new Error("Use one of --query, --scene, or --offset");
-    const { replay } = await loadCliSession(ref, {
+    if (opts.scene !== undefined && (opts.query !== undefined || opts.offset !== undefined))
+      throw new Error("Use --scene on its own, or combine --query with --offset");
+    const textPaging =
+      opts.field !== undefined || opts.textOffset !== undefined || opts.textLimit !== undefined;
+    if (textPaging && opts.scene === undefined)
+      throw new Error("--field and --text-* require --scene");
+    if (opts.field !== undefined && !["text", "input", "result"].includes(opts.field))
+      throw new Error("--field must be text, input, or result");
+    if (opts.textLimit !== undefined && (!opts.textLimit || opts.textLimit > 10000))
+      throw new Error("--text-limit must be between 1 and 10000");
+    const { replay, provenance } = await loadCliSession(ref, {
       ...opts,
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
     if (opts.scene !== undefined && opts.scene >= replay.scenes.length)
       throw new Error(`Scene index must be below ${replay.scenes.length}`);
-    printWorkflowResult(inspectSession(replay, opts), opts.json);
+    printWorkflowResult({ ...inspectSession(replay, opts), provenance }, opts.json);
   });
 
 workflowCommand(
@@ -1109,11 +1157,14 @@ workflowCommand(
   .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
     if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
     if (opts.query !== undefined && !opts.query.trim()) throw new Error("--query cannot be empty");
-    const { replay } = await loadCliSession(ref, {
+    const { replay, provenance } = await loadCliSession(ref, {
       ...opts,
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
-    printWorkflowResult(diagnoseSession(replay, opts.query, opts.limit), opts.json);
+    printWorkflowResult(
+      { ...diagnoseSession(replay, opts.query, opts.limit), provenance },
+      opts.json,
+    );
   });
 
 workflowCommand("export", "Export a session as Markdown, replay JSON, or standalone HTML")
@@ -1127,7 +1178,7 @@ workflowCommand("export", "Export a session as Markdown, replay JSON, or standal
       throw new Error(
         "--stdout supports markdown/json and cannot be combined with --json or --output",
       );
-    const { replay, outputDir, publicationDir } = await loadCliSession(ref, {
+    const { replay, outputDir, publicationDir, provenance } = await loadCliSession(ref, {
       ...opts,
       preferReplay: true,
       readOnly: opts.stdout,
@@ -1142,14 +1193,17 @@ workflowCommand("export", "Export a session as Markdown, replay JSON, or standal
       return;
     }
     printWorkflowResult(
-      await exportSession(
-        replay,
-        opts.output
-          ? expandUserPath(opts.output)
-          : (await import("node:path")).join(outputDir, "exports"),
-        opts.format!,
-        publicationDir,
-      ),
+      {
+        ...(await exportSession(
+          replay,
+          opts.output
+            ? expandUserPath(opts.output)
+            : (await import("node:path")).join(outputDir, "exports"),
+          opts.format!,
+          publicationDir,
+        )),
+        provenance,
+      },
       opts.json,
     );
   });
@@ -1345,7 +1399,7 @@ program
   .description(
     "Share a replay via cloud (unlisted link, 7 days). Without login, opens the local HTML instead.",
   )
-  .argument("[path]", "Session reference, source path, replay directory, or replay.json")
+  .argument("[path]", "Session reference, source path, replay directory, or replay JSON file")
   .option("-p, --provider <name>", "Provider filter for session references")
   .option("--visibility <type>", `Visibility: ${SHARE_VISIBILITIES.join(", ")}`, "unlisted")
   .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
@@ -1356,6 +1410,9 @@ program
   .option("--json", "Print a structured result")
   .option("--target <id>", "Select an SSH target ID, or local")
   .option("--refresh", "Bypass the discovery cache")
+  .option("--source", "Parse the current source session")
+  .option("--snapshot", "Require the saved replay snapshot, including edits")
+  .option("--revision <hash>", "Require this content revision before sharing")
   .action(
     async (
       pathArg: string | undefined,
@@ -1367,6 +1424,9 @@ program
         json?: boolean;
         target?: string;
         refresh?: boolean;
+        source?: boolean;
+        snapshot?: boolean;
+        revision?: string;
       },
       command: Command,
     ) => {
@@ -1391,37 +1451,32 @@ program
 
       let outputDir: string;
       let shareSourceDir: string | undefined;
+      let provenance: Awaited<ReturnType<typeof loadCliSession>>["provenance"] | undefined;
+      let shareSession: ReplaySession | undefined;
 
       if (pathArg) {
         try {
-          const candidate = expandUserPath(pathArg);
+          const loaded = await loadCliSession(pathArg, {
+            ...opts,
+            preferReplay: true,
+            readOnly: opts.dryRun,
+            provider: normalizeCommandProviderOption(opts.provider, command),
+          });
+          provenance = loaded.provenance;
+          shareSession = loaded.replay;
+          if (opts.dryRun) {
+            printWorkflowResult(
+              { ...sharePreflight(loaded.replay, visibility, !!loadAuthToken()), provenance },
+              opts.json,
+            );
+            return;
+          }
           const { existsSync } = await import("node:fs");
-          const { basename } = await import("node:path");
-          const isReplay =
-            existsSync(join(candidate, "replay.json")) ||
-            (basename(candidate) === "replay.json" && existsSync(candidate));
-          if (isReplay) {
-            outputDir = requireReplayDir(candidate);
-            await loadCliSession(outputDir, {
-              target: opts.target,
-              provider: normalizeCommandProviderOption(opts.provider, command),
-            });
+          if (loaded.publicationDir && existsSync(expandUserPath(pathArg))) {
+            outputDir = loaded.publicationDir;
           } else {
-            const loaded = await loadCliSession(pathArg, {
-              ...opts,
-              preferReplay: true,
-              readOnly: opts.dryRun,
-              provider: normalizeCommandProviderOption(opts.provider, command),
-            });
             shareSourceDir = loaded.publicationDir;
             outputDir = join(loaded.outputDir, "share");
-            if (opts.dryRun) {
-              printWorkflowResult(
-                sharePreflight(loaded.replay, visibility, !!loadAuthToken()),
-                opts.json,
-              );
-              return;
-            }
             await generateOutput(loaded.replay, outputDir);
           }
         } catch (err: unknown) {
@@ -1429,8 +1484,10 @@ program
           throw new Error(message, { cause: err });
         }
       } else {
-        if (opts.json || opts.dryRun)
-          throw new Error("share --json and --dry-run require a session reference or replay path");
+        if (opts.json || opts.dryRun || opts.source || opts.snapshot || opts.revision)
+          throw new Error(
+            "share --json, --dry-run, and content selection require a session reference or replay path",
+          );
         const replayBaseDir = join(homedir(), ".vibe-replay");
         const entries = await readdir(replayBaseDir).catch(() => [] as string[]);
         const replays: { name: string; value: string; time: string }[] = [];
@@ -1476,6 +1533,7 @@ program
         });
       }
 
+      if (!opts.json) printContentProvenance(provenance);
       const loggedIn = !!loadAuthToken();
       if (opts.dryRun) {
         printWorkflowResult(
@@ -1486,8 +1544,13 @@ program
       }
       if (!loggedIn) {
         try {
-          const result = await shareReplay(outputDir, { loggedIn: false, open: !opts.json });
-          if (opts.json) console.log(JSON.stringify({ ...result, uploaded: false }, null, 2));
+          const result = await shareReplay(outputDir, {
+            loggedIn: false,
+            open: !opts.json,
+            session: shareSession,
+          });
+          if (opts.json)
+            console.log(JSON.stringify({ ...result, uploaded: false, provenance }, null, 2));
           else if (result.mode === "local-fallback") printLocalShareFallback(result);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -1498,7 +1561,11 @@ program
 
       const spinner = opts.json ? undefined : ora("Uploading to cloud...").start();
       try {
-        const result = await shareReplay(outputDir, { loggedIn: true, visibility });
+        const result = await shareReplay(outputDir, {
+          loggedIn: true,
+          visibility,
+          session: shareSession,
+        });
         if (result.mode !== "cloud") {
           spinner?.fail("Unexpected local fallback while logged in");
           process.exit(1);
@@ -1516,7 +1583,9 @@ program
         }
         spinner?.succeed("Uploaded!");
         if (opts.json) {
-          console.log(JSON.stringify({ ...result, uploaded: true, visibility }, null, 2));
+          console.log(
+            JSON.stringify({ ...result, uploaded: true, visibility, provenance }, null, 2),
+          );
           return;
         }
         console.log();
@@ -1530,9 +1599,14 @@ program
         spinner?.fail(message);
         if (/not logged in|session expired/i.test(message)) {
           try {
-            const fallback = await shareReplay(outputDir, { loggedIn: false, open: !opts.json });
+            const fallback = await shareReplay(outputDir, {
+              loggedIn: false,
+              open: !opts.json,
+              session: shareSession,
+            });
             if (fallback.mode === "local-fallback") {
-              if (opts.json) console.log(JSON.stringify({ ...fallback, uploaded: false }, null, 2));
+              if (opts.json)
+                console.log(JSON.stringify({ ...fallback, uploaded: false, provenance }, null, 2));
               else printLocalShareFallback(fallback);
               return;
             }
@@ -1559,85 +1633,86 @@ program
   .command("live")
   .description("Watch a running AI coding session live in the browser")
   .option("-p, --provider <name>", "Provider name (default: auto-detect)")
-  .option("-s, --session <sessionId>", "Specific session ID to watch")
-  .action(async (opts: { provider?: string; session?: string }, command: Command) => {
-    const { join: pathJoin } = await import("node:path");
-    const { homedir } = await import("node:os");
-    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+  .argument("[session]", "Session ID, unique short ID, or discovered source path")
+  .option("-s, --session <sessionId>", "Specific session ID or unique short ID to watch")
+  .option("--refresh", "Bypass the discovery cache")
+  .action(
+    async (
+      ref: string | undefined,
+      opts: { provider?: string; session?: string; refresh?: boolean },
+      command: Command,
+    ) => {
+      const { join: pathJoin } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
 
-    console.log(chalk.bold.cyan("\n  vibe-replay live") + chalk.dim(` v${CLI_VERSION}\n`));
+      console.log(chalk.bold.cyan("\n  vibe-replay live") + chalk.dim(` v${CLI_VERSION}\n`));
 
-    let target: { provider: string; sessionId: string; title?: string } | null = null;
+      let target: { provider: string; sessionId: string; title?: string } | null = null;
 
-    if (opts.session) {
-      // Explicit session id — find which provider owns it
-      const providerHint = normalizeCommandProviderOption(opts.provider, command);
-      const providers = providerHint
-        ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
-        : getAllProviders();
-      for (const provider of providers) {
-        try {
-          const sessions = await provider.discover();
-          const match = sessions.find((s) => s.sessionId === opts.session);
-          if (match) {
-            target = { provider: match.provider, sessionId: match.sessionId, title: match.title };
-            break;
+      const flagRef = opts.session || program.opts().session;
+      if (ref && flagRef) throw new Error("Use a positional reference or --session, not both");
+      if (ref || flagRef) {
+        const provider = normalizeCommandProviderOption(opts.provider, command);
+        const discovery = await discoverCliSessions({ provider, refresh: opts.refresh });
+        const match = resolveSessionReference(discovery.sessions, ref || flagRef, { provider });
+        if (match.location?.kind === "ssh")
+          throw new Error("Remote Live mode is disabled; choose a local session");
+        if (match.transcriptStatus)
+          throw new Error(`Session transcript is ${match.transcriptStatus}`);
+        target = { provider: match.provider, sessionId: match.sessionId, title: match.title };
+      } else {
+        // Auto-pick most-recently-active session across providers
+        const ora = (await import("ora")).default;
+        const spinner = ora("Finding the most recent session...").start();
+        const all: SessionInfo[] = [];
+        const providerHint = normalizeCommandProviderOption(opts.provider, command);
+        const providers = providerHint
+          ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
+          : getAllProviders();
+        for (const provider of providers) {
+          try {
+            const sessions = await provider.discover();
+            all.push(
+              ...sessions.filter(
+                (session) => session.location?.kind !== "ssh" && !session.transcriptStatus,
+              ),
+            );
+          } catch {
+            // best-effort
           }
-        } catch {
-          // best-effort across providers
+        }
+        if (all.length === 0) {
+          spinner.fail("No AI coding sessions found");
+          console.log(chalk.dim("  Start a Claude Code or Cursor session, then run again.\n"));
+          process.exit(1);
+        }
+        all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const top = all[0]!;
+        target = { provider: top.provider, sessionId: top.sessionId, title: top.title };
+        const ageMs = Date.now() - new Date(top.timestamp).getTime();
+        const ageLabel =
+          ageMs < 60_000
+            ? `${Math.max(1, Math.round(ageMs / 1000))}s ago`
+            : ageMs < 3_600_000
+              ? `${Math.round(ageMs / 60_000)}m ago`
+              : `${Math.round(ageMs / 3_600_000)}h ago`;
+        spinner.succeed(`${top.title || top.sessionId.slice(0, 8)} (${top.provider}, ${ageLabel})`);
+        if (ageMs > LIVE_STALENESS_WARNING_MS) {
+          console.log(
+            chalk.yellow(
+              `  ⚠ Last activity was ${ageLabel} — the session may not be running anymore.`,
+            ),
+          );
+          console.log(chalk.dim("    The viewer will still update if Claude writes new turns.\n"));
         }
       }
-      if (!target) {
-        console.log(chalk.red(`  ✗ Session not found: ${opts.session}\n`));
-        process.exit(1);
-      }
-    } else {
-      // Auto-pick most-recently-active session across providers
-      const ora = (await import("ora")).default;
-      const spinner = ora("Finding the most recent session...").start();
-      const all: SessionInfo[] = [];
-      const providerHint = normalizeCommandProviderOption(opts.provider, command);
-      const providers = providerHint
-        ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
-        : getAllProviders();
-      for (const provider of providers) {
-        try {
-          const sessions = await provider.discover();
-          all.push(...sessions);
-        } catch {
-          // best-effort
-        }
-      }
-      if (all.length === 0) {
-        spinner.fail("No AI coding sessions found");
-        console.log(chalk.dim("  Start a Claude Code or Cursor session, then run again.\n"));
-        process.exit(1);
-      }
-      all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      const top = all[0]!;
-      target = { provider: top.provider, sessionId: top.sessionId, title: top.title };
-      const ageMs = Date.now() - new Date(top.timestamp).getTime();
-      const ageLabel =
-        ageMs < 60_000
-          ? `${Math.max(1, Math.round(ageMs / 1000))}s ago`
-          : ageMs < 3_600_000
-            ? `${Math.round(ageMs / 60_000)}m ago`
-            : `${Math.round(ageMs / 3_600_000)}h ago`;
-      spinner.succeed(`${top.title || top.sessionId.slice(0, 8)} (${top.provider}, ${ageLabel})`);
-      if (ageMs > LIVE_STALENESS_WARNING_MS) {
-        console.log(
-          chalk.yellow(
-            `  ⚠ Last activity was ${ageLabel} — the session may not be running anymore.`,
-          ),
-        );
-        console.log(chalk.dim("    The viewer will still update if Claude writes new turns.\n"));
-      }
-    }
 
-    await startServer(replayBaseDir, {
-      openLive: { provider: target.provider, sessionId: target.sessionId },
-    });
-  });
+      await startServer(replayBaseDir, {
+        openLive: { provider: target.provider, sessionId: target.sessionId },
+      });
+    },
+  );
 
 // E2E-encrypted remote session sharing through the Cloudflare relay.
 // Prints a capability URL; anyone opening it can browse this machine's
