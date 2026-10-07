@@ -146,6 +146,34 @@ function portClaimPath(port) {
   return join(tmpdir(), `vibe-replay-port-${port}.claim`);
 }
 
+/**
+ * Number of `mkdir` retries (with backoff) when creating a port claim hits a
+ * transient EPERM. On Windows, antivirus/file locks can briefly hold the temp
+ * directory and make `mkdir` throw EPERM (errno -4048) even though nothing is
+ * actually wrong; without a retry the whole launcher startup fails.
+ */
+export const PORT_CLAIM_MKDIR_RETRY_DELAYS_MS = [50, 100, 200, 400];
+
+/**
+ * `mkdir` with bounded retries on transient EPERM. EEXIST and any other error
+ * propagate immediately; only EPERM is retried, and only up to
+ * `delays.length` times. `mkdirFn`/`delays` are injectable for tests.
+ */
+export async function mkdirClaimWithRetry(
+  claimPath,
+  { mkdirFn = mkdir, delays = PORT_CLAIM_MKDIR_RETRY_DELAYS_MS } = {},
+) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await mkdirFn(claimPath);
+      return;
+    } catch (error) {
+      if (error?.code !== "EPERM" || attempt >= delays.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 /** Validate a user-supplied TCP port. Port 0 is intentionally not accepted. */
 export function parsePort(value, label = "Port") {
   if (value === undefined || value === null || value === "") return undefined;
@@ -215,7 +243,7 @@ function closeLockServer(server) {
 async function tryAcquirePortClaim(port) {
   const claimPath = portClaimPath(port);
   try {
-    await mkdir(claimPath);
+    await mkdirClaimWithRetry(claimPath);
   } catch (error) {
     if (error?.code === "EEXIST") return null;
     throw error;
