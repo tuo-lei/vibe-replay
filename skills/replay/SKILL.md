@@ -107,6 +107,16 @@ npx vibe-replay inspect <session-id> --scene <index> --json
 npx vibe-replay diagnose <session-id> --query "<error>" --json
 ```
 
+Inspect/diagnose default to the current source; export/share prefer the saved replay.
+Use `--source` or `--snapshot` consistently when citing scene indices across commands.
+Record `provenance.revision` and pass `--revision <hash>` on subsequent reads/exports
+so a changed source or a different saved snapshot cannot silently change the evidence.
+For search continuation, retain `--query` and use the returned `nextOffset` with
+`--offset`. Check each scene's field truncation flags; long tool results are read
+with `--scene <index> --field result --text-offset <offset> --text-limit 2000`,
+following `content.nextOffset`. `content.value` is the exact bounded page. Replay
+JSON handoffs accept renamed files without borrowing neighboring replay sidecars.
+
 `--provider` and `--target` disambiguate references. Metadata search does not search tool results. `doctor --json` distinguishes missing histories from incompatible provider storage; search JSON includes discovery coverage and `--refresh` bypasses its short cache.
 For a copied JSONL that reports ambiguous Cursor/Grok formats, use the known source provider with `--provider cursor` or `--provider grok-bot`. Generic wake tags plus id-less custom tools fit both formats; do not guess from missing IDs.
 

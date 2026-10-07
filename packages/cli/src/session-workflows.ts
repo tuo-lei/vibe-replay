@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import type { ReplaySession, Scene, SessionInfo } from "./types.js";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./provider-discovery.js";
@@ -28,6 +29,9 @@ export interface SessionReferenceOptions {
   target?: string;
   refresh?: boolean;
   readOnly?: boolean;
+  source?: boolean;
+  snapshot?: boolean;
+  revision?: string;
 }
 
 export async function discoverCliSessions(options: SessionReferenceOptions = {}) {
@@ -530,12 +534,128 @@ export async function resolveCliSessionInfo(
   };
 }
 
+export function contentRevision(replay: ReplaySession): string {
+  // Scene addresses depend on effective content, not parse time, local paths, or metadata.
+  // JSON key ordering must not make a copied/reformatted replay a different revision.
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([key, item]) => [key, stable(item)]),
+      );
+    return value;
+  };
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        stable({
+          sessionId: replay.meta.sessionId,
+          provider: replay.meta.provider,
+          scenes: replay.scenes,
+          annotations: replay.annotations || [],
+        }),
+      ),
+    )
+    .digest("hex");
+}
+
+function validateReplay(value: unknown): asserts value is ReplaySession {
+  const replay = value as ReplaySession | undefined;
+  if (
+    !replay ||
+    typeof replay.meta?.sessionId !== "string" ||
+    !replay.meta.sessionId ||
+    typeof replay.meta.provider !== "string" ||
+    !Array.isArray(replay.scenes) ||
+    replay.scenes.some(
+      (scene) =>
+        !scene ||
+        typeof scene !== "object" ||
+        (scene.type === "tool-call"
+          ? typeof scene.toolName !== "string" ||
+            !scene.input ||
+            typeof scene.input !== "object" ||
+            (scene.result !== undefined && typeof scene.result !== "string")
+          : ![
+              "user-prompt",
+              "automation-trigger",
+              "compaction-summary",
+              "context-injection",
+              "thinking",
+              "text-response",
+            ].includes(scene.type) ||
+            !("content" in scene) ||
+            typeof scene.content !== "string"),
+    )
+  )
+    throw new Error("Invalid replay JSON: expected session metadata and valid scenes");
+}
+
+async function readStandaloneReplay(path: string): Promise<ReplaySession | undefined> {
+  if (!existsSync(path) || !(await stat(path)).isFile()) return;
+  const file = await open(path, "r");
+  let head: string;
+  try {
+    const buffer = Buffer.alloc(64 * 1024);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    head = buffer.toString("utf-8", 0, bytesRead);
+  } finally {
+    await file.close();
+  }
+  if (!/^\s*\{/.test(head) || (extname(path) !== ".json" && !/"(?:meta|scenes)"\s*:/.test(head)))
+    return;
+  const raw = await readFile(path, "utf-8");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return;
+  } // Source JSONL and provider JSON continue through provider inference.
+  if (!value || typeof value !== "object" || !("meta" in value) || !("scenes" in value)) return;
+  validateReplay(value);
+  return value;
+}
+
+function loadedSession(
+  replay: ReplaySession,
+  outputDir: string,
+  publicationDir: string | undefined,
+  origin: "source" | "snapshot",
+  options: SessionReferenceOptions,
+  discovery?: Awaited<ReturnType<typeof discoverCliSessions>>,
+) {
+  const revision = contentRevision(replay);
+  if (options.revision !== undefined && options.revision !== revision)
+    throw new Error(
+      `Content revision mismatch: expected ${options.revision}, loaded ${revision}. Select --source or --snapshot, or inspect the exact exported JSON.`,
+    );
+  return {
+    replay,
+    outputDir,
+    publicationDir,
+    discovery,
+    provenance: {
+      origin,
+      revision,
+      sceneCount: replay.scenes.length,
+      generator: replay.meta.generator
+        ? {
+            name: replay.meta.generator.name,
+            version: replay.meta.generator.version,
+            generatedAt: replay.meta.generator.generatedAt,
+          }
+        : undefined,
+    },
+  };
+}
+
 export async function readEffectiveReplay(outputDir: string): Promise<ReplaySession> {
   const replay = JSON.parse(
     await readFile(join(outputDir, "replay.json"), "utf-8"),
   ) as ReplaySession;
-  if (!replay?.meta?.sessionId || !Array.isArray(replay.scenes))
-    throw new Error("Invalid replay.json: expected session metadata and scenes");
+  validateReplay(replay);
   const overlays = await loadOverlays(dirname(outputDir), basename(outputDir), undefined, false);
   const annotations = await loadAnnotations(
     dirname(outputDir),
@@ -554,61 +674,85 @@ export async function readEffectiveReplay(outputDir: string): Promise<ReplaySess
   );
 }
 
+async function findSavedReplay(ref: string, options: SessionReferenceOptions, exactOnly = false) {
+  const base = join(homedir(), ".vibe-replay");
+  type SavedMatch = { replay: ReplaySession; outputDir: string; publicationDir: string };
+  const exactMatches: SavedMatch[] = [];
+  const prefixMatches: SavedMatch[] = [];
+  for (const slug of await readdir(base).catch(() => [] as string[])) {
+    try {
+      const replay = await readEffectiveReplay(join(base, slug));
+      if (options.provider && replay.meta.provider !== options.provider) continue;
+      if (
+        options.target &&
+        (replay.meta.location?.kind === "ssh" ? replay.meta.location.id : "local") !==
+          options.target
+      )
+        continue;
+      const ids = exactOnly ? [replay.meta.sessionId] : [replay.meta.sessionId, slug];
+      const match = { replay, outputDir: join(base, slug), publicationDir: join(base, slug) };
+      if (ids.includes(ref)) exactMatches.push(match);
+      else if (ref.length >= 4 && ids.some((id) => id.startsWith(ref))) prefixMatches.push(match);
+    } catch {
+      /* Unrelated files are not replay references. */
+    }
+  }
+  const matches = exactMatches.length || exactOnly ? exactMatches : prefixMatches;
+  if (matches.length === 1)
+    return loadedSession(
+      matches[0].replay,
+      matches[0].outputDir,
+      matches[0].publicationDir,
+      "snapshot",
+      options,
+    );
+  if (matches.length > 1)
+    throw new SessionReferenceError(
+      "ambiguous",
+      `Ambiguous saved replay reference '${ref}'; use its replay.json path`,
+    );
+}
+
 export async function loadCliSession(
   ref: string,
   options: SessionReferenceOptions & { preferReplay?: boolean } = {},
 ) {
+  if (options.source && options.snapshot) throw new Error("Use only one of --source or --snapshot");
+  const preferReplay = options.snapshot || (!options.source && options.preferReplay);
   const path = resolve(expandUserPath(ref));
   const replayDir = existsSync(join(path, "replay.json"))
     ? path
     : basename(path) === "replay.json" && existsSync(path)
       ? dirname(path)
       : undefined;
-  if (replayDir) {
-    const replay = await readEffectiveReplay(replayDir);
+  const standalone = replayDir ? undefined : await readStandaloneReplay(path);
+  if (replayDir || standalone) {
+    if (options.source)
+      throw new Error("--source requires a source session reference, not a replay JSON");
+    const replay = standalone || (await readEffectiveReplay(replayDir!));
     if (options.provider && replay.meta.provider !== options.provider)
       throw new Error(`Replay provider is '${replay.meta.provider}', not '${options.provider}'`);
     const target = replay.meta.location?.kind === "ssh" ? replay.meta.location.id : "local";
     if (options.target && target !== options.target)
       throw new Error(`Replay belongs to target '${target}', not '${options.target}'`);
-    return { replay, outputDir: replayDir, publicationDir: replayDir };
+    // Standalone handoffs never inherit another replay's directory sidecars or publication URL.
+    return loadedSession(replay, replayDir || dirname(path), replayDir, "snapshot", options);
+  }
+  if (options.snapshot && !pathExists(ref)) {
+    const saved = await findSavedReplay(ref, options);
+    if (saved) return saved;
   }
   let source: Awaited<ReturnType<typeof resolveCliSource>>;
   try {
     source = await resolveCliSource(ref, options);
   } catch (error) {
-    if (!(error instanceof SessionReferenceError) || error.code !== "not-found") throw error;
-    const base = join(homedir(), ".vibe-replay");
-    const matches: { replay: ReplaySession; outputDir: string; publicationDir: string }[] = [];
-    for (const slug of await readdir(base).catch(() => [] as string[])) {
-      try {
-        const replay = await readEffectiveReplay(join(base, slug));
-        if (options.provider && replay.meta.provider !== options.provider) continue;
-        if (
-          options.target &&
-          (replay.meta.location?.kind === "ssh" ? replay.meta.location.id : "local") !==
-            options.target
-        )
-          continue;
-        if (
-          [replay.meta.sessionId, slug].some(
-            (id) => id === ref || (ref.length >= 4 && id.startsWith(ref)),
-          )
-        )
-          matches.push({ replay, outputDir: join(base, slug), publicationDir: join(base, slug) });
-      } catch {
-        /* Unrelated files are not replay references. */
-      }
-    }
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1)
-      throw new SessionReferenceError(
-        "ambiguous",
-        `Ambiguous saved replay reference '${ref}'; use its replay.json path`,
-      );
+    if (options.source || !(error instanceof SessionReferenceError) || error.code !== "not-found")
+      throw error;
+    const saved = await findSavedReplay(ref, options);
+    if (saved) return saved;
     throw error;
   }
-  if (options.preferReplay && !pathExists(ref) && source.info) {
+  if (preferReplay && (options.snapshot || !pathExists(ref)) && source.info) {
     const info = source.info;
     const ids = [...new Set([info.sessionId, ...(info.sessionIds || [])])];
     const exactId = ids.find((id) => id === ref);
@@ -640,15 +784,14 @@ export async function loadCliSession(
       ) {
         if ((!existing.meta.title || existing.meta.title === existing.meta.slug) && info.title)
           existing.meta.title = info.title;
-        return {
-          replay: existing,
-          outputDir: savedDir,
-          publicationDir: savedDir,
-          discovery: source.discovery,
-        };
+        return loadedSession(existing, savedDir, savedDir, "snapshot", options, source.discovery);
       }
     }
   }
+  if (options.snapshot && source.info)
+    throw new Error(
+      "No saved snapshot found; pass its replay JSON path or generate a replay first",
+    );
   if (source.info?.transcriptStatus)
     throw new Error(
       source.info.hasSdk && source.info.sourceDatabasePath
@@ -659,6 +802,17 @@ export async function loadCliSession(
   const parsed = await withReadOnlySqlite(!!options.readOnly, () =>
     getProvider(source.provider)!.parse(source.paths, source.info),
   );
+  if (options.snapshot) {
+    const saved = await findSavedReplay(
+      parsed.sessionId,
+      { ...options, provider: source.provider, target: "local" },
+      true,
+    );
+    if (saved) return saved;
+    throw new Error(
+      "No saved snapshot found; pass its replay JSON path or generate a replay first",
+    );
+  }
   const replay = transformToReplay(
     parsed,
     source.provider,
@@ -683,14 +837,25 @@ export async function loadCliSession(
     { provider: source.provider, sessionId: replay.meta.sessionId },
   );
   const outputDir = join(homedir(), ".vibe-replay", slug);
-  return { replay, outputDir, publicationDir: undefined, discovery: source.discovery };
+  return loadedSession(replay, outputDir, undefined, "source", options, source.discovery);
+}
+
+function excerptDetails(text: string, max: number, query?: string, offset?: number) {
+  const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : 0;
+  const start = offset ?? Math.max(0, at - Math.floor(max / 3));
+  const end = Math.min(text.length, start + max);
+  return {
+    value: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
+    truncated: start > 0 || end < text.length,
+    length: text.length,
+    offset: start,
+    end,
+    nextOffset: end < text.length ? end : undefined,
+  };
 }
 
 function excerpt(text: string, max: number, query?: string): string {
-  const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : 0;
-  const start = Math.max(0, at - Math.floor(max / 3));
-  const value = text.slice(start, start + max);
-  return `${start ? "…" : ""}${value}${start + max < text.length ? "…" : ""}`;
+  return excerptDetails(text, max, query).value;
 }
 
 function sceneText(scene: Scene): string {
@@ -703,34 +868,91 @@ function sceneText(scene: Scene): string {
 
 export function inspectSession(
   replay: ReplaySession,
-  options: { query?: string; scene?: number; offset?: number; limit?: number } = {},
+  options: {
+    query?: string;
+    scene?: number;
+    offset?: number;
+    limit?: number;
+    field?: "text" | "input" | "result";
+    textOffset?: number;
+    textLimit?: number;
+  } = {},
 ) {
   const limit = options.limit ?? 12;
   const content =
     options.query !== undefined || options.scene !== undefined || options.offset !== undefined;
   const query = options.query?.trim();
   const indexed = replay.scenes.map((scene, index) => ({ scene, index }));
+  const eligible = indexed.slice(options.offset || 0);
   const matches =
     options.scene !== undefined
       ? indexed.filter((s) => s.index === options.scene)
       : query
-        ? indexed.filter((s) => sceneText(s.scene).toLowerCase().includes(query.toLowerCase()))
-        : indexed.slice(options.offset || 0);
-  const scenes = matches.slice(0, limit).map(({ scene, index }) => ({
-    index,
-    type: scene.type,
-    timestamp: scene.timestamp,
-    text: excerpt(sceneText(scene), 2000, query),
-    ...(scene.type === "tool-call"
-      ? {
-          toolName: scene.toolName,
-          isError: scene.isError,
-          hasResult: scene.hasResult,
-          input: excerpt(JSON.stringify(scene.input), 1000, query),
-          result: excerpt(scene.result || "", 2000, query),
-        }
-      : {}),
-  }));
+        ? eligible.filter((s) => sceneText(s.scene).toLowerCase().includes(query.toLowerCase()))
+        : eligible;
+  const scenes = matches.slice(0, limit).map(({ scene, index }) => {
+    const field = options.field || "text";
+    if (field !== "text" && scene.type !== "tool-call")
+      throw new Error(`Scene ${index} has no ${field} field; use --field text`);
+    const values = {
+      text: sceneText(scene),
+      ...(scene.type === "tool-call"
+        ? {
+            input: JSON.stringify(scene.input),
+            result: scene.result || "",
+          }
+        : {}),
+    };
+    const paging =
+      options.textOffset !== undefined ||
+      options.textLimit !== undefined ||
+      options.field !== undefined;
+    const selected = values[field];
+    if (selected === undefined) throw new Error(`Scene ${index} has no ${field} field`);
+    if (paging && (options.textOffset || 0) > selected.length)
+      throw new Error(`--text-offset must be at most ${selected.length}`);
+    const windows = Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [
+        key,
+        excerptDetails(
+          value,
+          paging && key === field ? (options.textLimit ?? 2000) : key === "input" ? 1000 : 2000,
+          paging && key === field ? undefined : query,
+          paging && key === field ? (options.textOffset ?? 0) : undefined,
+        ),
+      ]),
+    );
+    return {
+      index,
+      type: scene.type,
+      timestamp: scene.timestamp,
+      text: windows.text.value,
+      textTruncated: windows.text.truncated,
+      fields: Object.fromEntries(
+        Object.entries(windows).map(([key, { value: _value, ...info }]) => [key, info]),
+      ),
+      ...(paging
+        ? {
+            content: {
+              field,
+              ...windows[field],
+              value: selected.slice(windows[field].offset, windows[field].end),
+            },
+          }
+        : {}),
+      ...(scene.type === "tool-call"
+        ? {
+            toolName: scene.toolName,
+            isError: scene.isError,
+            hasResult: scene.hasResult,
+            input: windows.input.value,
+            result: windows.result.value,
+            inputTruncated: windows.input.truncated,
+            resultTruncated: windows.result.truncated,
+          }
+        : {}),
+    };
+  });
   const tools: Record<string, number> = {};
   for (const scene of replay.scenes)
     if (scene.type === "tool-call" && !scene.isToolContainer)
@@ -742,6 +964,7 @@ export function inspectSession(
   const { turnStats, ...stats } = replay.meta.stats;
   const responses = indexed.filter((s) => s.scene.type === "text-response");
   return {
+    revision: contentRevision(replay),
     sessionId: replay.meta.sessionId,
     slug: replay.meta.slug,
     title: replay.meta.title,
@@ -756,7 +979,13 @@ export function inspectSession(
     parseWarnings: replay.meta.parseWarnings,
     diagnosticNotes: replay.meta.diagnosticNotes,
     ...(content
-      ? { query, matchCount: matches.length, scenes, truncated: matches.length > scenes.length }
+      ? {
+          query,
+          matchCount: matches.length,
+          scenes,
+          truncated: matches.length > scenes.length,
+          nextOffset: matches.length > scenes.length ? scenes.at(-1)!.index + 1 : undefined,
+        }
       : {
           prompts: indexed
             .filter((s) => s.scene.type === "user-prompt")
@@ -788,6 +1017,7 @@ export function diagnoseSession(replay: ReplaySession, query?: string, limit = 1
       : [],
   );
   return {
+    revision: contentRevision(replay),
     sessionId: replay.meta.sessionId,
     title: replay.meta.title,
     apiErrorCount: replay.meta.apiErrors?.length || 0,

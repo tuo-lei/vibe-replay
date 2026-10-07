@@ -245,8 +245,16 @@ coverage reports the incomplete discovery.
 `doctor --json` reports provider coverage and compatibility failures. Search output
 marks partial discovery, and empty results include recovery suggestions.
 
-`inspect --scene <index>` reads an exact 0-based scene; `--offset` and `--limit`
-bound larger content slices. `diagnose` separates model API errors, tool failures,
+`inspect --scene <index>` reads an exact 0-based scene. Search pages accept
+`--query` together with `--offset` (an inclusive scene index); use the returned
+`nextOffset` to continue without repeating matches. `--limit` bounds entries.
+Each scene's `fields` describes its excerpt's character range, original length,
+and next offset; `textTruncated`, `inputTruncated`, and `resultTruncated` mark
+omitted characters separately from the top-level `truncated` flag for omitted
+scenes. To read a long scene losslessly, use `--scene <index> --field result
+--text-offset 0 --text-limit 2000`, then follow `content.nextOffset`. Fields are
+`text`, `input`, or `result`; offsets count JavaScript UTF-16 characters and each
+page is capped at 10,000 characters. JSON `content.value` is the exact page. `diagnose` separates model API errors, tool failures,
 compactions, and matching text evidence; it does not infer root causes from an error
 string alone. Metadata search does not search tool results: use `inspect --query`
 after selecting a session.
@@ -259,7 +267,24 @@ sessions; run `sessions --refresh` first if the session is not staged.
 File exports include a redaction report. `--github` remains available for the
 Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
 replay with its editor overlays and annotations when available; an explicit source
-path reparses the source, while an explicit `replay.json` uses that saved snapshot.
+path reparses the source, while an explicit replay JSON uses that saved snapshot.
+Replay JSON files are recognized by their contents, so a handoff renamed to
+`incident.json` also works. A standalone renamed file does not inherit neighboring
+replay edits, annotations, or publication links; exported JSON already includes
+its effective edits and annotations.
+
+Use `--source` to require the current source or `--snapshot` to require the saved
+snapshot across inspect, diagnose, export, and share. Result metadata includes
+`provenance.origin`, `sceneCount`, a content `revision`, and recorded generator
+information. A revision binds effective scenes and annotations, independent of
+generation time and JSON key order. Pass `--revision <hash>` on subsequent reads,
+exports, or shares to reject changed content. Source and snapshot revisions may
+differ even for the same session ID; `--refresh` refreshes discovery, not a saved
+snapshot. Stdout exports remain clean Markdown or ReplaySession JSON.
+
+`live <session-id>` and `live --session <session-id>` accept full IDs or unique
+prefixes and resolve ambiguity explicitly. Live mode requires a local discovered
+session; SSH Live mode is disabled.
 
 Sharing preflight performs no upload and reports the effective payload's size,
 visibility, potential-secret count, and cloud/local mode. SSH preflight reads only

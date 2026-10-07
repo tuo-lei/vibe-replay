@@ -44,7 +44,7 @@ export interface ShareReplayDeps {
   openHtml?: (htmlPath: string) => Promise<boolean>;
   publishCloud?: (
     outputDir: string,
-    opts?: { visibility?: ShareVisibility },
+    opts?: { visibility?: ShareVisibility; session?: ReplaySession },
   ) => Promise<{ url: string; expiresAt: string }>;
 }
 
@@ -80,6 +80,7 @@ export function requireReplayDir(pathArg: string): string {
 export async function ensureLocalReplayHtml(
   outputDir: string,
   generate: (session: ReplaySession, outputDir: string) => Promise<string> = generateOutput,
+  effectiveSession?: ReplaySession,
 ): Promise<string> {
   const jsonPath = replayJsonPath(outputDir);
   if (!existsSync(jsonPath)) {
@@ -87,15 +88,19 @@ export async function ensureLocalReplayHtml(
   }
 
   const originalContent = await readFile(jsonPath, "utf-8");
-  const session = JSON.parse(originalContent) as ReplaySession;
-  const slug = basename(outputDir);
-  const baseDir = dirname(outputDir);
-  const overlays = await loadOverlays(baseDir, slug, undefined, false);
-  const annotations = await loadAnnotations(baseDir, slug, undefined, false);
-  if (annotations.length > 0 || existsSync(join(outputDir, "annotations.json")))
-    session.annotations = annotations;
-
-  const shareable = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
+  let shareable: ReplaySession;
+  if (effectiveSession) {
+    shareable = sessionForExternalOutput(effectiveSession);
+  } else {
+    const session = JSON.parse(originalContent) as ReplaySession;
+    const slug = basename(outputDir);
+    const baseDir = dirname(outputDir);
+    const overlays = await loadOverlays(baseDir, slug, undefined, false);
+    const annotations = await loadAnnotations(baseDir, slug, undefined, false);
+    if (annotations.length > 0 || existsSync(join(outputDir, "annotations.json")))
+      session.annotations = annotations;
+    shareable = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
+  }
   try {
     return await generate(shareable, outputDir);
   } finally {
@@ -125,6 +130,8 @@ export async function shareReplay(
     loggedIn: boolean;
     visibility?: ShareVisibility;
     open?: boolean;
+    /** Exact effective snapshot resolved and revision-checked by the CLI. */
+    session?: ReplaySession;
   } & ShareReplayDeps,
 ): Promise<ShareResult> {
   if (!existsSync(replayJsonPath(outputDir))) {
@@ -133,13 +140,16 @@ export async function shareReplay(
 
   if (options.loggedIn) {
     const publish = options.publishCloud ?? publishCloudWithOverlays;
-    const result = await publish(outputDir, { visibility: options.visibility });
+    const result = await publish(outputDir, {
+      visibility: options.visibility,
+      ...(options.session ? { session: options.session } : {}),
+    });
     return { mode: "cloud", url: result.url, expiresAt: result.expiresAt };
   }
 
   const ensureHtml =
     options.ensureHtml ??
-    ((dir) => ensureLocalReplayHtml(dir, options.generateHtml ?? generateOutput));
+    ((dir) => ensureLocalReplayHtml(dir, options.generateHtml ?? generateOutput, options.session));
   const htmlPath = await ensureHtml(outputDir);
   const shouldOpen = options.open !== false && process.env.VIBE_REPLAY_NO_AUTO_OPEN !== "1";
   let opened = false;
