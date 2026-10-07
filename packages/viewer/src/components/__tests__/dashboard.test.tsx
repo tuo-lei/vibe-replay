@@ -7,6 +7,7 @@ import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 import Dashboard, {
   buildSessionScanIndex,
   contextFootprintSummary,
+  fetchScanResults,
   findSessionScanData,
   getSessionRangeTimestamp,
   sessionExplorerCountLabel,
@@ -261,6 +262,38 @@ describe("session scan result matching", () => {
     const index = buildSessionScanIndex([result]);
 
     expect(findSessionScanData({ provider: "cursor", slug: "unique-slug" }, index)).toBe(result);
+  });
+});
+
+describe("fetchScanResults", () => {
+  it("does not cache a failed response", async () => {
+    const results = [
+      {
+        provider: "cursor",
+        slug: "s",
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+        editCount: 0,
+        filesModified: [],
+        promptCount: 0,
+        toolCallCount: 0,
+      },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results, revision: 2 }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Force-refresh first so a payload cached by an earlier test is dropped.
+    expect(await fetchScanResults(true)).toBeNull();
+    expect(await fetchScanResults()).toMatchObject({ results, revision: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Leave the module-level cache empty for later tests.
+    fetchMock.mockRejectedValueOnce(new Error("network disabled in test"));
+    await fetchScanResults(true);
   });
 });
 
