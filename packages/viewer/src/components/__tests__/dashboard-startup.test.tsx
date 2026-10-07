@@ -187,3 +187,26 @@ it("prefers current discovery previews over a cached session during refresh", ()
   expect(screen.getByText("Newly discovered session")).toBeTruthy();
   expect(screen.queryByText("Old cached session")).toBeNull();
 });
+
+it("describes concurrent reads without suggesting one provider is being read at a time", () => {
+  render(
+    <DashboardStartup
+      {...props}
+      progress={{
+        type: "progress",
+        phase: "discovering",
+        scanned: 30,
+        providers: ["codex", "pi", "cursor"],
+        previews: [],
+        providerStates: [
+          { provider: "codex", detected: true, status: "reading" },
+          { provider: "pi", detected: true, status: "reading" },
+          { provider: "cursor", detected: true, status: "ready", sessionCount: 30 },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByText("Reading sessions from 2 sources…")).toBeTruthy();
+  expect(screen.getAllByText("Reading…")).toHaveLength(2);
+  expect(screen.getByText("1 / 3 sources read")).toBeTruthy();
+});

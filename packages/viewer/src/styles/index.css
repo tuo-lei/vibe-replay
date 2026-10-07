@@ -142,15 +142,8 @@
 .dashboard-startup-provider.is-reading .dashboard-startup-provider-state {
   color: var(--blue);
 }
-.dashboard-startup-provider.is-reading .dashboard-startup-provider-icon::after {
-  content: "";
-  position: absolute;
-  inset: -5px;
-  border: 1px solid var(--blue);
-  border-left-color: transparent;
-  border-bottom-color: transparent;
-  border-radius: 20px;
-  animation: startup-source-reading 1.6s ease-in-out infinite;
+.dashboard-startup-provider.is-reading .dashboard-startup-provider-icon > span:first-child {
+  animation: startup-source-reading 1.8s ease-in-out infinite;
 }
 .dashboard-startup-steps {
   display: flex;
@@ -289,8 +282,12 @@
   }
 }
 @keyframes startup-source-reading {
+  0%,
+  100% {
+    opacity: 1;
+  }
   50% {
-    opacity: 0.2;
+    opacity: 0.5;
   }
 }
 @keyframes startup-session-in {

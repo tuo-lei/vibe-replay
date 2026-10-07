@@ -146,3 +146,90 @@ describe("early provider feedback", () => {
     });
   });
 });
+
+describe("parallel provider discovery", () => {
+  it.each([30, 500])(
+    "streams %i fast sessions while another source is blocked, preserving final priority",
+    async (count) => {
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const streamed: string[] = [];
+      const states: string[] = [];
+      let activeObservers = 0;
+      let peakObservers = 0;
+      const slow = provider("claude-desktop", async () => {
+        await blocked;
+        return [session("claude-desktop", "shared")];
+      });
+      const fast = provider("claude-code", async () => [
+        session("claude-code", "shared"),
+        ...Array.from({ length: count - 1 }, (_, index) => session("claude-code", `fast-${index}`)),
+      ]);
+      const run = discoverProvidersSafely(
+        [slow, fast],
+        async (entry) => {
+          activeObservers++;
+          peakObservers = Math.max(peakObservers, activeObservers);
+          await Promise.resolve();
+          streamed.push(entry.sessionId);
+          activeObservers--;
+        },
+        {
+          onProvider: (state) => {
+            states.push(`${state.provider}:${state.status}`);
+          },
+        },
+      );
+      try {
+        await vi.waitFor(() => expect(streamed).toHaveLength(count));
+        expect(states).toContain("claude-desktop:reading");
+        expect(states).toContain("claude-code:ready");
+        expect(states).not.toContain("claude-desktop:ready");
+      } finally {
+        release();
+      }
+      const result = await run;
+      expect(result.sessions).toHaveLength(count);
+      expect(result.sessions[0]).toMatchObject({ provider: "claude-desktop", sessionId: "shared" });
+      expect(result.coverage.map((entry) => entry.provider)).toEqual([
+        "claude-desktop",
+        "claude-code",
+      ]);
+      expect(peakObservers).toBe(1);
+      expect(streamed).toHaveLength(count + 1);
+    },
+  );
+
+  it("runs all sources concurrently, preserving failure coverage and read-only options", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started: string[] = [];
+    const sources = ["cursor", "pi", "codex"].map((name) =>
+      provider(
+        name,
+        vi.fn(async () => {
+          started.push(name);
+          await blocked;
+          if (name !== "pi") throw new Error("no such table: session");
+          return [session(name, "healthy")];
+        }),
+      ),
+    );
+    const run = discoverProvidersSafely(sources, undefined, { readOnly: true });
+    try {
+      await vi.waitFor(() => expect(started).toEqual(["cursor", "pi", "codex"]));
+    } finally {
+      release();
+    }
+    const result = await run;
+    expect(result.failedProviders).toEqual(["cursor", "codex"]);
+    expect(result.sessions.map((entry) => entry.sessionId)).toEqual(["healthy"]);
+    expect(result.coverage.map((entry) => entry.status)).toEqual(["failed", "ready", "failed"]);
+    for (const source of sources)
+      expect(source.discover).toHaveBeenCalledExactlyOnceWith({ readOnly: true });
+  });
+});
