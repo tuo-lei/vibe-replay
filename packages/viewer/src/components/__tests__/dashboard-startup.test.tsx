@@ -85,3 +85,52 @@ describe("DashboardStartup", () => {
     expect(screen.queryByRole("button", { name: /Continue/ })).toBeNull();
   });
 });
+
+it("shows detected provider icons and reading states before any session is available", () => {
+  render(
+    <DashboardStartup
+      {...props}
+      progress={{
+        type: "progress",
+        phase: "discovering",
+        scanned: 0,
+        providers: ["codex", "pi"],
+        previews: [],
+        providerStates: [
+          { provider: "codex", detected: true, status: "reading" },
+          { provider: "pi", detected: true, status: "found" },
+          { provider: "cursor", detected: false, status: "empty", sessionCount: 0 },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Found 2 session sources" })).toBeTruthy();
+  expect(screen.getByText("Codex")).toBeTruthy();
+  expect(screen.getByText("Pi")).toBeTruthy();
+  expect(screen.queryByText("Cursor")).toBeNull();
+  expect(screen.getByText("Reading Codex sessions…")).toBeTruthy();
+  expect(screen.getByText("0 / 2 sources read")).toBeTruthy();
+  expect(screen.getByText("vibe-replay")).toBeTruthy();
+  expect(screen.getByText("Replay the work. Discover the patterns.")).toBeTruthy();
+});
+
+it("does not count an unavailable source as successfully read", () => {
+  render(
+    <DashboardStartup
+      {...props}
+      progress={{
+        type: "progress",
+        phase: "discovering",
+        scanned: 0,
+        providers: ["cursor", "pi"],
+        previews: [],
+        providerStates: [
+          { provider: "cursor", detected: true, status: "failed", sessionCount: 0 },
+          { provider: "pi", detected: true, status: "reading" },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByText("Unavailable")).toBeTruthy();
+  expect(screen.getByText("0 / 2 sources read")).toBeTruthy();
+});

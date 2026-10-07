@@ -358,12 +358,22 @@ export interface SourceDiscoveryPreview {
   location?: SessionLocation;
 }
 
+/** Local storage presence is not proof that an application is still installed. */
+export interface SourceProviderProgress {
+  provider: string;
+  detected: boolean;
+  status: "found" | "reading" | "ready" | "empty" | "failed";
+  /** Raw records from this provider, before cross-provider/session merging. */
+  sessionCount?: number;
+}
+
 export interface SourceDiscoveryProgress {
   type: "progress";
   phase: "discovering" | "preparing";
   /** Provider records read before cross-provider/session merging; not a unique-session total. */
   scanned: number;
   providers: string[];
+  providerStates?: SourceProviderProgress[];
   previews: SourceDiscoveryPreview[];
   /** Prepared catalog records; total is only supplied after discovery and merging finish. */
   prepared?: number;

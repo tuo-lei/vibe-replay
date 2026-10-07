@@ -1,7 +1,11 @@
 import { homedir } from "node:os";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { SourceDiscoveryPreview, SourceDiscoveryProgress } from "@vibe-replay/types";
+import type {
+  SourceDiscoveryPreview,
+  SourceDiscoveryProgress,
+  SourceProviderProgress,
+} from "@vibe-replay/types";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { cleanPromptText, previewPrompt } from "../clean-prompt.js";
 import { getProvider } from "../providers/index.js";
@@ -73,6 +77,7 @@ interface SourcesRouteDeps {
   ) => Promise<string[]>;
   discoverAllProviders: (
     subscriber?: (session: SessionInfo) => Promise<void> | void,
+    providerSubscriber?: (state: SourceProviderProgress) => Promise<void> | void,
   ) => Promise<SafeProviderDiscoveryResult>;
   buildSourcesResult: (
     merged: SessionInfo[],
@@ -277,6 +282,7 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
         let scanned = 0;
         let lastProgressAt = 0;
         const providers = new Set<string>();
+        const providerStates = new Map<string, SourceProviderProgress>();
         let previews: SourceDiscoveryPreview[] = [];
         const preview = (session: SessionInfo | SourceSummaryRecord): SourceDiscoveryPreview => ({
           provider: session.provider,
@@ -296,29 +302,44 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
         const sendProgress = async (progress: SourceDiscoveryProgress) => {
           if (stream.aborted) return;
           try {
-            await stream.writeSSE({ data: JSON.stringify(progress) });
+            await stream.writeSSE({
+              data: JSON.stringify({ ...progress, providerStates: [...providerStates.values()] }),
+            });
           } catch {
             // A closed browser must not interrupt discovery or catalog caching.
           }
         };
-        const discovery = await discoverAllProviders(async (session) => {
-          scanned++;
-          providers.add(session.provider);
-          const next = preview(session);
-          previews = [
-            ...previews.filter(
-              (entry) =>
-                entry.provider !== next.provider ||
-                entry.sessionId !== next.sessionId ||
-                entry.slug !== next.slug ||
-                entry.location?.id !== next.location?.id,
-            ),
-            next,
-          ]
-            .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-            .slice(0, 3);
-          if (scanned === 1 || Date.now() - lastProgressAt >= 120) {
-            lastProgressAt = Date.now();
+        const discovery = await discoverAllProviders(
+          async (session) => {
+            scanned++;
+            providers.add(session.provider);
+            const next = preview(session);
+            previews = [
+              ...previews.filter(
+                (entry) =>
+                  entry.provider !== next.provider ||
+                  entry.sessionId !== next.sessionId ||
+                  entry.slug !== next.slug ||
+                  entry.location?.id !== next.location?.id,
+              ),
+              next,
+            ]
+              .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+              .slice(0, 3);
+            if (scanned === 1 || Date.now() - lastProgressAt >= 120) {
+              lastProgressAt = Date.now();
+              await sendProgress({
+                type: "progress",
+                phase: "discovering",
+                scanned,
+                providers: [...providers],
+                previews,
+              });
+            }
+          },
+          async (state) => {
+            providerStates.set(state.provider, state);
+            if (state.detected) providers.add(state.provider);
             await sendProgress({
               type: "progress",
               phase: "discovering",
@@ -326,8 +347,8 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
               providers: [...providers],
               previews,
             });
-          }
-        });
+          },
+        );
         setLatestSourceFailures(discovery.failedProviders);
 
         const merged = mergeSameSessions(discovery.sessions);

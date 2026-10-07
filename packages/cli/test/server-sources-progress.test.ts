@@ -1,3 +1,4 @@
+import type { SourceProviderProgress } from "@vibe-replay/types";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { registerSourceRoutes } from "../src/server-routes/sources.js";
@@ -25,7 +26,11 @@ function session(index: number): SessionInfo {
     title: "T".repeat(500),
   };
 }
-function setup(sessions: SessionInfo[], failedProviders: string[] = []) {
+function setup(
+  sessions: SessionInfo[],
+  failedProviders: string[] = [],
+  states: SourceProviderProgress[] = [],
+) {
   const records: SourceSummaryRecord[] = sessions.map((entry) => ({
     ...entry,
     existingReplay: null,
@@ -40,7 +45,8 @@ function setup(sessions: SessionInfo[], failedProviders: string[] = []) {
     readSourcesCatalogCache: async () => null,
     writeDiscoveredSourcesCatalog: write,
     getStaleSourceProviders: async () => [],
-    discoverAllProviders: async (subscriber) => {
+    discoverAllProviders: async (subscriber, providerSubscriber) => {
+      for (const state of states) await providerSubscriber?.(state);
       for (const entry of sessions) await subscriber?.(entry);
       return { sessions, failedProviders, coverage: [] };
     },
@@ -113,4 +119,26 @@ describe("source discovery progress", () => {
       stale: true,
     });
   });
+});
+
+it("streams provider discovery before the first session record", async () => {
+  const states: SourceProviderProgress[] = [
+    { provider: "codex", detected: true, status: "found" },
+    { provider: "pi", detected: true, status: "found" },
+    { provider: "codex", detected: true, status: "reading" },
+  ];
+  const { app } = setup([session(0)], [], states);
+  const response = await app.request("/api/sources/stream");
+  const messages = events(await response.text());
+  expect(messages[0]).toMatchObject({
+    type: "progress",
+    phase: "discovering",
+    scanned: 0,
+    providers: ["codex"],
+    previews: [],
+    providerStates: [states[0]],
+  });
+  expect(messages[2].providerStates).toEqual([states[2], states[1]]);
+  expect(messages[2].scanned).toBe(0);
+  expect(messages.at(-1).sessions).toHaveLength(1);
 });

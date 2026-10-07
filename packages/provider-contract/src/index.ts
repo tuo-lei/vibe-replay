@@ -301,6 +301,8 @@ export interface ProviderDiscoveryOptions {
 export interface Provider {
   name: string;
   displayName: string;
+  /** Lightweight, read-only probe for local session storage; discovery remains authoritative. */
+  detect?(): Promise<boolean>;
   discover(options?: ProviderDiscoveryOptions): Promise<SessionInfo[]>;
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
 }

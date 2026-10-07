@@ -487,11 +487,11 @@ async function findRolloutFiles(dir: string): Promise<string[]> {
   return out;
 }
 
-function getCodexHome(): string {
+export function getCodexHome(): string {
   return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
 
-function getStateDbPath(codexHome = getCodexHome()): string {
+export function getStateDbPath(codexHome = getCodexHome()): string {
   const sqliteHome = process.env.CODEX_SQLITE_HOME || codexHome;
   return join(sqliteHome, STATE_DB_FILENAME);
 }

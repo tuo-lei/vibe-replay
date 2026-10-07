@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
-import type { SourceDiscoveryProgress } from "@vibe-replay/types";
+import type { SourceDiscoveryProgress, SourceProviderProgress } from "@vibe-replay/types";
 import type { SourceSession } from "../types";
+import { VibeReplayBrand } from "./VibeReplayBrand";
 import { ProviderBadge } from "./dashboard/DashboardShared";
 import { projectDisplayName, providerDisplayName, sourceDisplayTitle } from "./dashboard-utils";
 
@@ -39,14 +40,34 @@ export function DashboardStartup({
   }, []);
 
   const failed = Boolean(error || failures.length);
+  const providerStates: SourceProviderProgress[] =
+    progress?.providerStates ??
+    (progress?.providers ?? []).map((provider) => ({
+      provider,
+      detected: true,
+      status: "ready" as const,
+    }));
+  const foundProviders = providerStates.filter((state) => state.detected);
+  const shownProviders = providerStates.filter(
+    (state) => state.detected || state.status === "failed",
+  );
+  const reading = providerStates.find((state) => state.status === "reading" && state.detected);
+  const completed = foundProviders.filter((state) =>
+    ["ready", "empty"].includes(state.status),
+  ).length;
   const title = loading
-    ? "Bringing your sessions together"
+    ? progress?.phase === "preparing" || !loadingSources
+      ? "Your sessions, coming together"
+      : foundProviders.length
+        ? `Found ${foundProviders.length} session ${foundProviders.length === 1 ? "source" : "sources"}`
+        : progress?.scanned
+          ? "Reading your session history"
+          : "Finding your coding tools…"
     : failed
       ? "Some sessions are unavailable"
       : "No sessions yet";
   const previews = sources.length ? sources.slice(0, 3) : (progress?.previews ?? []).slice(0, 3);
-  // Put the first real session in the clear middle row; surrounding rows fade into the background.
-  const rows = [previews[1], previews[0], previews[2]];
+  const latest = previews[0];
   const total = progress?.total ?? 0;
   const prepared = Math.min(total, Math.max(0, progress?.prepared ?? 0));
   const determinate = loadingSources && progress?.phase === "preparing" && total > 0;
@@ -56,7 +77,9 @@ export function DashboardStartup({
       ? `${prepared.toLocaleString()} of ${total.toLocaleString()} sessions prepared`
       : progress?.scanned
         ? `${progress.scanned.toLocaleString()} session ${progress.scanned === 1 ? "record" : "records"} found`
-        : "Finding your recent work";
+        : reading
+          ? `Reading ${providerDisplayName(reading.provider)} sessions…`
+          : "Checking local session storage…";
 
   return (
     <dialog
@@ -67,68 +90,61 @@ export function DashboardStartup({
     >
       <div className="dashboard-startup-center">
         <div className="dashboard-startup-brand">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <rect x="3" y="4" width="18" height="16" rx="3" />
-            <path d="m7 9 3 3-3 3m6 0h4" />
-          </svg>
-          <span>vibe-replay</span>
+          <VibeReplayBrand />
         </div>
-        <h1 id="startup-title" tabIndex={-1}>
-          {title}
-        </h1>
-        {(loading || previews.length > 0) && (
-          <div className="dashboard-startup-sessions" aria-hidden="true">
-            {rows.map((preview, index) => (
-              <div
-                key={index}
-                className={`dashboard-startup-row ${index === 1 ? "is-current" : ""}`}
-              >
-                {preview ? (
-                  <ProviderBadge provider={preview.provider} />
-                ) : (
-                  <span className="dashboard-startup-placeholder-icon skeleton" />
-                )}
-                <div className="dashboard-startup-copy">
-                  {preview ? (
-                    <div
-                      className="dashboard-startup-session"
-                      key={`${preview.provider}:${preview.sessionId ?? preview.slug}:${preview.location?.id ?? "local"}`}
-                    >
-                      <div className="truncate">
-                        {sourceDisplayTitle({
-                          ...preview,
-                          fileSize: 0,
-                          lineCount: 0,
-                          filePaths: [],
-                          existingReplay: null,
-                        })}
-                      </div>
-                      <div className="dashboard-startup-meta truncate">
-                        {providerDisplayName(preview.provider)} ·{" "}
-                        {projectDisplayName(preview.project)}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <span className="dashboard-startup-placeholder-title skeleton" />
-                      <span className="dashboard-startup-placeholder-meta skeleton" />
-                    </>
-                  )}
+        <p className="dashboard-startup-tagline">Your AI coding history, brought to life.</p>
+        <h1 id="startup-title">{title}</h1>
+        {shownProviders.length > 0 && (
+          <ul className="dashboard-startup-providers" aria-label="Session source discovery">
+            {shownProviders.map((state) => (
+              <li className={`dashboard-startup-provider is-${state.status}`} key={state.provider}>
+                <div className="dashboard-startup-provider-icon" aria-hidden="true">
+                  <ProviderBadge provider={state.provider} />
+                  {state.status === "ready" || state.status === "empty" ? (
+                    <span className="dashboard-startup-provider-check">✓</span>
+                  ) : state.status === "failed" ? (
+                    <span className="dashboard-startup-provider-check">!</span>
+                  ) : null}
                 </div>
-              </div>
+                <span className="dashboard-startup-provider-name">
+                  {providerDisplayName(state.provider)}
+                </span>
+                <span className="dashboard-startup-provider-state">
+                  {state.status === "found"
+                    ? "Found"
+                    : state.status === "reading"
+                      ? "Reading…"
+                      : state.status === "failed"
+                        ? "Unavailable"
+                        : state.status === "empty"
+                          ? "No sessions"
+                          : state.sessionCount === undefined
+                            ? "Read"
+                            : `${state.sessionCount.toLocaleString()} records`}
+                </span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
         {loading ? (
           <>
+            <ol className="dashboard-startup-steps" aria-label="Library setup">
+              <li className={foundProviders.length ? "is-done" : "is-active"}>Find sources</li>
+              <li
+                className={
+                  progress?.phase === "preparing" || !loadingSources
+                    ? "is-done"
+                    : foundProviders.length
+                      ? "is-active"
+                      : ""
+                }
+              >
+                Read sessions
+              </li>
+              <li className={progress?.phase === "preparing" || !loadingSources ? "is-active" : ""}>
+                Build library
+              </li>
+            </ol>
             <progress
               className="sr-only"
               aria-label="Preparing your session library"
@@ -145,8 +161,18 @@ export function DashboardStartup({
               />
             </div>
             <output className="dashboard-startup-status" aria-live="polite">
-              {status}
+              <span>{status}</span>
+              {loadingSources && progress?.phase === "discovering" && foundProviders.length > 0 && (
+                <span>
+                  {completed} / {foundProviders.length} sources read
+                </span>
+              )}
             </output>
+            {reading && progress?.scanned ? (
+              <p className="dashboard-startup-reading">
+                Reading {providerDisplayName(reading.provider)} sessions…
+              </p>
+            ) : null}
           </>
         ) : (
           <>
@@ -179,8 +205,38 @@ export function DashboardStartup({
             </div>
           </>
         )}
+        {latest && loading && (
+          <div className="dashboard-startup-latest" aria-hidden="true">
+            <ProviderBadge provider={latest.provider} compact />
+            <div className="dashboard-startup-copy">
+              <p className="dashboard-startup-latest-label">Latest session found</p>
+              <p
+                className="dashboard-startup-session truncate"
+                key={`${latest.provider}:${latest.sessionId ?? latest.slug}:${latest.location?.id ?? "local"}`}
+              >
+                {sourceDisplayTitle({
+                  ...latest,
+                  fileSize: 0,
+                  lineCount: 0,
+                  filePaths: [],
+                  existingReplay: null,
+                })}
+              </p>
+              <p className="dashboard-startup-meta truncate">
+                {projectDisplayName(latest.project)}
+              </p>
+            </div>
+          </div>
+        )}
+        <div className="dashboard-startup-value">
+          <p>Replay the work. Discover the patterns.</p>
+          <span>
+            Turn sessions into shareable replays. Find patterns with Insights. Get answers with Ask
+            Replay.
+          </span>
+        </div>
+        {loading && <p className="dashboard-startup-auto">Opens automatically when ready</p>}
       </div>
-      {loading && <p className="dashboard-startup-auto">Opens automatically when ready</p>}
     </dialog>
   );
 }
