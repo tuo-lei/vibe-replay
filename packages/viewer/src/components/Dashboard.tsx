@@ -2276,6 +2276,7 @@ function SessionsPanel() {
   });
   const activeGenerationRequestRef = useRef<number | null>(null);
   const nextGenerationRequestIdRef = useRef(0);
+  const sourcesRequestIdRef = useRef(0);
   // When another panel (Projects → Timeline / Hot Files) opens a session via
   // the `vibe-open-session` event, route the slug into the popup. Two paths:
   //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
@@ -2389,6 +2390,11 @@ function SessionsPanel() {
   };
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
+    // Refresh can be clicked while an earlier load is still discovering. Only
+    // the newest call may write state, or a slower superseded response would
+    // replace newer sessions and clear the loading state of the active call.
+    const requestId = ++sourcesRequestIdRef.current;
+    const isCurrent = () => sourcesRequestIdRef.current === requestId;
     setLoading(true);
     setError(null);
     setRefreshError(null);
@@ -2398,12 +2404,14 @@ function SessionsPanel() {
     const archive = await fetch("/api/archived", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { slugs: [] }))
       .catch(() => ({ slugs: [] as string[] }));
+    if (!isCurrent()) return;
     setArchivedSlugs(new Set(archive.slugs));
 
     let servedFromCache = false;
     const cached = await fetch("/api/sources/cached", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
+    if (!isCurrent()) return;
     setFailedRemoteSources(remoteSourceFailureLabels(cached));
     const cachedData = parseCachedList<SourceSession>(cached);
     const shouldSkipRefresh = !opts?.forceRefresh && !shouldRefreshCachedList(cachedData);
@@ -2430,20 +2438,24 @@ function SessionsPanel() {
         cleanupPeriodDays?: number;
         failedProviders?: unknown;
       };
+      if (!isCurrent()) return;
       setSources(fresh.sessions);
       setFailedRemoteSources(remoteSourceFailureLabels(fresh));
       if (fresh.cleanupPeriodDays != null) setCleanupPeriodDays(fresh.cleanupPeriodDays);
       setLastRefreshedAt(new Date().toISOString());
       setStaleCachedAt(null);
     } catch (err) {
+      if (!isCurrent()) return;
       if (!servedFromCache) {
         setError(getFriendlyErrorMessage(err) || "Failed to load sessions");
       } else {
         setRefreshError("Failed to refresh latest sessions. Showing cached data.");
       }
     } finally {
-      setRefreshing(false);
-      setLoading(false);
+      if (isCurrent()) {
+        setRefreshing(false);
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -2458,7 +2470,11 @@ function SessionsPanel() {
   };
 
   useEffect(() => {
+    const sourcesRequests = sourcesRequestIdRef;
     void loadSources();
+    return () => {
+      sourcesRequests.current++;
+    };
   }, [loadSources]);
 
   useEffect(() => {
