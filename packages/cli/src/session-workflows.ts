@@ -674,7 +674,7 @@ export async function readEffectiveReplay(outputDir: string): Promise<ReplaySess
   );
 }
 
-async function findSavedReplay(ref: string, options: SessionReferenceOptions) {
+async function findSavedReplay(ref: string, options: SessionReferenceOptions, exactOnly = false) {
   const base = join(homedir(), ".vibe-replay");
   type SavedMatch = { replay: ReplaySession; outputDir: string; publicationDir: string };
   const exactMatches: SavedMatch[] = [];
@@ -689,7 +689,7 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions) {
           options.target
       )
         continue;
-      const ids = [replay.meta.sessionId, slug];
+      const ids = exactOnly ? [replay.meta.sessionId] : [replay.meta.sessionId, slug];
       const match = { replay, outputDir: join(base, slug), publicationDir: join(base, slug) };
       if (ids.includes(ref)) exactMatches.push(match);
       else if (ref.length >= 4 && ids.some((id) => id.startsWith(ref))) prefixMatches.push(match);
@@ -697,7 +697,7 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions) {
       /* Unrelated files are not replay references. */
     }
   }
-  const matches = exactMatches.length ? exactMatches : prefixMatches;
+  const matches = exactMatches.length || exactOnly ? exactMatches : prefixMatches;
   if (matches.length === 1)
     return loadedSession(
       matches[0].replay,
@@ -788,7 +788,7 @@ export async function loadCliSession(
       }
     }
   }
-  if (options.snapshot)
+  if (options.snapshot && source.info)
     throw new Error(
       "No saved snapshot found; pass its replay JSON path or generate a replay first",
     );
@@ -802,6 +802,17 @@ export async function loadCliSession(
   const parsed = await withReadOnlySqlite(!!options.readOnly, () =>
     getProvider(source.provider)!.parse(source.paths, source.info),
   );
+  if (options.snapshot) {
+    const saved = await findSavedReplay(
+      parsed.sessionId,
+      { ...options, provider: source.provider, target: "local" },
+      true,
+    );
+    if (saved) return saved;
+    throw new Error(
+      "No saved snapshot found; pass its replay JSON path or generate a replay first",
+    );
+  }
   const replay = transformToReplay(
     parsed,
     source.provider,

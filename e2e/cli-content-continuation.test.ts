@@ -339,3 +339,45 @@ it.each([id, "abcd1234"])("keeps Live reference %s local when SSH has the same I
     }
   }
 });
+
+it("selects saved content for a transcript copied outside discovery roots", async () => {
+  const outside = join(root, "incident-source.jsonl");
+  await writeFile(outside, await readFile(source));
+  const before = await Promise.all(
+    [outside, join(saved, "replay.json")].map((path) => readFile(path)),
+  );
+  const current = JSON.parse((await run(["inspect", outside, "--json"])).stdout);
+  expect(current.provenance).toMatchObject({ origin: "source", revision, sceneCount: 4 });
+  const expected = JSON.parse((await run(["inspect", id, "--snapshot", "--json"])).stdout);
+  for (const command of ["inspect", "diagnose", "export", "share"]) {
+    const extra =
+      command === "export"
+        ? ["--format", "json", "--stdout"]
+        : command === "share"
+          ? ["--dry-run", "--json"]
+          : ["--json"];
+    const data = JSON.parse((await run([command, outside, "--snapshot", ...extra])).stdout);
+    if (command === "export") {
+      expect(data.scenes).toHaveLength(2);
+      expect(data.scenes[0].content).toBe("Saved edited request");
+    } else expect(data.provenance).toEqual(expected.provenance);
+  }
+  expect(
+    await Promise.all([outside, join(saved, "replay.json")].map((path) => readFile(path))),
+  ).toEqual(before);
+});
+
+it("requires the parsed source identity to match a saved session exactly", async () => {
+  const outside = join(root, "different-source.jsonl");
+  const lines = (await readFile(source, "utf-8")).split("\n");
+  const metadata = JSON.parse(lines[0]);
+  metadata.payload.id = "abcd1234";
+  lines[0] = JSON.stringify(metadata);
+  await writeFile(outside, lines.join("\n"));
+  const current = JSON.parse((await run(["inspect", outside, "--source", "--json"])).stdout);
+  expect(current.sessionId).toBe("abcd1234");
+  await expect(run(["inspect", outside, "--snapshot", "--json"])).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("No saved snapshot found"),
+  });
+});
