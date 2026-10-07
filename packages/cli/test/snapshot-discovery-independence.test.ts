@@ -48,3 +48,34 @@ it("resolves an explicitly requested snapshot without touching unavailable sourc
   ).rejects.toThrow("Source storage unavailable");
   expect(await readFile(join(dir, "replay.json"), "utf-8")).toBe(raw);
 });
+
+it("prefers exact saved IDs and slugs while rejecting ambiguous prefixes and exact collisions", async () => {
+  const save = async (slug: string, sessionId: string) => {
+    const dir = join(home, ".vibe-replay", slug);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "replay.json"),
+      JSON.stringify({
+        meta: { sessionId, provider: "codex" },
+        scenes: [{ type: "user-prompt", content: sessionId }],
+      }),
+    );
+  };
+  await save("exact-id-copy", "abcd");
+  await save("abcd-more", "abcd-more-session");
+  await save("exact-slug", "different-session");
+  await save("exact-slug-more", "another-session");
+  const options = { snapshot: true, readOnly: true };
+  expect((await loadCliSession("abcd", options)).replay.meta.sessionId).toBe("abcd");
+  expect((await loadCliSession("exact-slug", options)).replay.meta.sessionId).toBe(
+    "different-session",
+  );
+  expect((await loadCliSession("abcd-more-s", options)).replay.meta.sessionId).toBe(
+    "abcd-more-session",
+  );
+  await expect(loadCliSession("exact-sl", options)).rejects.toThrow(
+    "Ambiguous saved replay reference",
+  );
+  await save("duplicate-exact-id", "abcd");
+  await expect(loadCliSession("abcd", options)).rejects.toThrow("Ambiguous saved replay reference");
+});

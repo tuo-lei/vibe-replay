@@ -676,7 +676,9 @@ export async function readEffectiveReplay(outputDir: string): Promise<ReplaySess
 
 async function findSavedReplay(ref: string, options: SessionReferenceOptions) {
   const base = join(homedir(), ".vibe-replay");
-  const matches: { replay: ReplaySession; outputDir: string; publicationDir: string }[] = [];
+  type SavedMatch = { replay: ReplaySession; outputDir: string; publicationDir: string };
+  const exactMatches: SavedMatch[] = [];
+  const prefixMatches: SavedMatch[] = [];
   for (const slug of await readdir(base).catch(() => [] as string[])) {
     try {
       const replay = await readEffectiveReplay(join(base, slug));
@@ -687,16 +689,15 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions) {
           options.target
       )
         continue;
-      if (
-        [replay.meta.sessionId, slug].some(
-          (id) => id === ref || (ref.length >= 4 && id.startsWith(ref)),
-        )
-      )
-        matches.push({ replay, outputDir: join(base, slug), publicationDir: join(base, slug) });
+      const ids = [replay.meta.sessionId, slug];
+      const match = { replay, outputDir: join(base, slug), publicationDir: join(base, slug) };
+      if (ids.includes(ref)) exactMatches.push(match);
+      else if (ref.length >= 4 && ids.some((id) => id.startsWith(ref))) prefixMatches.push(match);
     } catch {
       /* Unrelated files are not replay references. */
     }
   }
+  const matches = exactMatches.length ? exactMatches : prefixMatches;
   if (matches.length === 1)
     return loadedSession(
       matches[0].replay,
