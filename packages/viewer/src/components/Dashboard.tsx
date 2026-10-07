@@ -112,7 +112,7 @@ let scanResultsCache: ScanResultsPayload | null = null;
 let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
 let scanResultsRequestVersion = 0;
 
-function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | null> {
+export function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | null> {
   if (forceRefresh) {
     scanResultsCache = null;
     scanResultsFetchPromise = null;
@@ -128,6 +128,9 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
       // in flight. Do not let the older response repopulate the module cache
       // or overwrite the caller's newly indexed facet data.
       if (requestVersion !== scanResultsRequestVersion) return null;
+      // A failed response must not occupy the 30s cache, or one transient
+      // server error would hide newly indexed usage until it expires.
+      if (!data) return null;
       const payload: ScanResultsPayload = {
         results: data?.results ?? null,
         finishedAt: data?.finishedAt,
