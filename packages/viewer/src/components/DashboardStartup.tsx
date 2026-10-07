@@ -59,8 +59,12 @@ export function DashboardStartup({
     }));
   const reading =
     loading && loadingSources
-      ? providerStates.find((state) => state.status === "reading" && state.detected)
-      : undefined;
+      ? providerStates.filter((state) => state.status === "reading" && state.detected)
+      : [];
+  const readingLabel =
+    reading.length === 1
+      ? `Reading ${providerDisplayName(reading[0].provider)} sessions…`
+      : `Reading sessions from ${reading.length} sources…`;
   const completed = foundProviders.filter((state) =>
     ["ready", "empty"].includes(state.status),
   ).length;
@@ -86,8 +90,8 @@ export function DashboardStartup({
       ? `${prepared.toLocaleString()} of ${total.toLocaleString()} sessions prepared`
       : progress?.scanned
         ? `${progress.scanned.toLocaleString()} session ${progress.scanned === 1 ? "record" : "records"} found`
-        : reading
-          ? `Reading ${providerDisplayName(reading.provider)} sessions…`
+        : reading.length
+          ? readingLabel
           : "Checking local session storage…";
 
   return (
@@ -179,10 +183,8 @@ export function DashboardStartup({
                 </span>
               )}
             </output>
-            {reading && progress?.scanned ? (
-              <p className="dashboard-startup-reading">
-                Reading {providerDisplayName(reading.provider)} sessions…
-              </p>
+            {reading.length > 0 && progress?.scanned ? (
+              <p className="dashboard-startup-reading">{readingLabel}</p>
             ) : null}
           </>
         ) : (

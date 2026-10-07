@@ -31,9 +31,6 @@ export async function discoverProvidersSafely(
     onProvider?: (state: SourceProviderProgress) => Promise<void> | void;
   },
 ): Promise<SafeProviderDiscoveryResult> {
-  const allSessions: SessionInfo[] = [];
-  const failedProviders: string[] = [];
-  const coverage: ProviderDiscoveryCoverage[] = [];
   // SSH discovery is independent from local provider reads. Starting it now
   // hides the connection latency behind Cursor/local filesystem discovery.
   const remotePromise = discoverConfiguredRemoteSessions(
@@ -69,61 +66,79 @@ export async function discoverProvidersSafely(
       }),
     );
 
-  for (const provider of providers) {
-    await emitProvider({
-      provider: provider.name,
-      detected: detected.has(provider.name),
-      status: "reading",
-    });
-    let sessions: SessionInfo[];
-    let failed = false;
-    try {
-      sessions = options?.readOnly
-        ? await provider.discover({ readOnly: true })
-        : await provider.discover();
-    } catch (error) {
-      failed = true;
-      failedProviders.push(provider.name);
-      const checkpointError = error instanceof SqliteSnapshotRequiredError;
-      const schemaError =
-        error instanceof Error &&
-        /no such (?:table|column)|unsupported.*schema/i.test(error.message);
-      sessions = checkpointError ? error.sessions : [];
-      coverage.push({
+  let sessionQueue = Promise.resolve();
+  // Each source reads independently; a slow database must not hold back other providers.
+  const outcomes = await Promise.allSettled(
+    providers.map(async (provider) => {
+      let providerCoverage: ProviderDiscoveryCoverage | undefined;
+      await emitProvider({
         provider: provider.name,
-        status: "failed",
-        sessionCount: sessions.length,
-        errorCode: checkpointError
-          ? "checkpoint-required"
-          : schemaError
-            ? "schema-incompatible"
-            : "read-failed",
-        message: checkpointError
-          ? "Read-only workflows require a checkpointed database. Checkpoint in the source application or use a saved replay."
-          : schemaError
-            ? "The installed provider storage format is incompatible. Update Vibe Replay or report the schema mismatch."
-            : "Provider discovery failed. Run with VIBE_REPLAY_DEBUG=1 for local diagnostics.",
+        detected: detected.has(provider.name),
+        status: "reading",
       });
-      if (process.env.VIBE_REPLAY_DEBUG) {
-        console.error(`[vibe-replay] ${provider.name} discovery failed:`, error);
+      let sessions: SessionInfo[];
+      let failed = false;
+      try {
+        sessions = options?.readOnly
+          ? await provider.discover({ readOnly: true })
+          : await provider.discover();
+      } catch (error) {
+        failed = true;
+        const checkpointError = error instanceof SqliteSnapshotRequiredError;
+        const schemaError =
+          error instanceof Error &&
+          /no such (?:table|column)|unsupported.*schema/i.test(error.message);
+        sessions = checkpointError ? error.sessions : [];
+        providerCoverage = {
+          provider: provider.name,
+          status: "failed",
+          sessionCount: sessions.length,
+          errorCode: checkpointError
+            ? "checkpoint-required"
+            : schemaError
+              ? "schema-incompatible"
+              : "read-failed",
+          message: checkpointError
+            ? "Read-only workflows require a checkpointed database. Checkpoint in the source application or use a saved replay."
+            : schemaError
+              ? "The installed provider storage format is incompatible. Update Vibe Replay or report the schema mismatch."
+              : "Provider discovery failed. Run with VIBE_REPLAY_DEBUG=1 for local diagnostics.",
+        };
+        if (process.env.VIBE_REPLAY_DEBUG) {
+          console.error(`[vibe-replay] ${provider.name} discovery failed:`, error);
+        }
       }
-    }
-    if (!failed)
-      coverage.push({
+      providerCoverage ??= {
         provider: provider.name,
         status: sessions.length ? "ready" : "empty",
         sessionCount: sessions.length,
+      };
+      for (const session of sessions) {
+        // Stream whichever provider finishes first, but never overlap async observers.
+        sessionQueue = sessionQueue.then(async () => {
+          await onSession?.(session);
+        });
+        await sessionQueue;
+      }
+      await emitProvider({
+        provider: provider.name,
+        detected: detected.has(provider.name) || sessions.length > 0,
+        status: failed ? "failed" : sessions.length ? "ready" : "empty",
+        sessionCount: sessions.length,
       });
-    for (const session of sessions) {
-      allSessions.push(session);
-      await onSession?.(session);
-    }
-    await emitProvider({
-      provider: provider.name,
-      detected: detected.has(provider.name) || sessions.length > 0,
-      status: failed ? "failed" : sessions.length ? "ready" : "empty",
-      sessionCount: sessions.length,
-    });
+      return { sessions, failed, coverage: providerCoverage };
+    }),
+  );
+
+  const allSessions: SessionInfo[] = [];
+  const failedProviders: string[] = [];
+  const coverage: ProviderDiscoveryCoverage[] = [];
+  // Preserve registry order for final output, regardless of completion order.
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") throw outcome.reason;
+    allSessions.push(...outcome.value.sessions);
+    coverage.push(outcome.value.coverage);
+    if (outcome.value.failed) failedProviders.push(outcome.value.coverage.provider);
   }
 
   const remote = await remotePromise;
