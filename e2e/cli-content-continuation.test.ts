@@ -237,3 +237,30 @@ it.each([
     }
   }
 });
+
+it("honors explicit snapshot selection for discovered source paths while preserving their default source behavior", async () => {
+  const before = await Promise.all(
+    [source, join(saved, "replay.json")].map((path) => readFile(path)),
+  );
+  for (const command of ["inspect", "diagnose", "export", "share"]) {
+    const extra =
+      command === "export"
+        ? ["--format", "json", "--output", join(root, "source-path-export")]
+        : command === "share"
+          ? ["--dry-run"]
+          : [];
+    const current = JSON.parse((await run([command, source, "--json", ...extra])).stdout);
+    const snapshot = JSON.parse(
+      (await run([command, source, "--snapshot", "--json", ...extra])).stdout,
+    );
+    expect(current.provenance).toMatchObject({ origin: "source", revision, sceneCount: 4 });
+    expect(snapshot.provenance).toMatchObject({ origin: "snapshot", sceneCount: 2 });
+    const byId = JSON.parse(
+      (await run([command, id, "--snapshot", "--provider", "codex", "--json", ...extra])).stdout,
+    );
+    expect(snapshot.provenance.revision).toBe(byId.provenance.revision);
+  }
+  expect(
+    await Promise.all([source, join(saved, "replay.json")].map((path) => readFile(path))),
+  ).toEqual(before);
+});

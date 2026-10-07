@@ -751,7 +751,7 @@ export async function loadCliSession(
     if (saved) return saved;
     throw error;
   }
-  if (preferReplay && !pathExists(ref) && source.info) {
+  if (preferReplay && (options.snapshot || !pathExists(ref)) && source.info) {
     const info = source.info;
     const ids = [...new Set([info.sessionId, ...(info.sessionIds || [])])];
     const exactId = ids.find((id) => id === ref);
