@@ -342,6 +342,94 @@ describe("usage index recovery", () => {
   });
 });
 
+describe("Sessions list loading", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  function sourcesResponse(firstPrompt: string) {
+    return {
+      ok: true,
+      json: async () => ({
+        sessions: [
+          {
+            provider: "claude-code",
+            slug: firstPrompt.toLowerCase().replace(/\s+/g, "-"),
+            project: "~/project",
+            timestamp: new Date().toISOString(),
+            fileSize: 1,
+            lineCount: 1,
+            firstPrompt,
+            filePaths: [],
+            existingReplay: null,
+          },
+        ],
+      }),
+    };
+  }
+
+  /** Holds every `/api/sources` request open until the test settles it. */
+  async function renderWithInitialLoadAndRefreshPending() {
+    window.__VIBE_REPLAY_EDITOR__ = true;
+    window.history.replaceState({}, "", "?tab=sessions");
+    const sourceRequests: Array<ReturnType<typeof deferred<unknown>>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/archived")) {
+          return { ok: true, json: async () => ({ slugs: [] }) };
+        }
+        if (url.endsWith("/api/sources")) {
+          const request = deferred<unknown>();
+          sourceRequests.push(request);
+          return request.promise;
+        }
+        // Rejecting keeps fetchScanResults from caching an empty payload in its
+        // module-level cache, which would leak into later tests.
+        throw new Error("network disabled in test");
+      }),
+    );
+
+    render(<Dashboard />);
+    await waitFor(() => expect(sourceRequests).toHaveLength(1));
+    screen.getByRole("button", { name: "Refresh" }).click();
+    await waitFor(() => expect(sourceRequests).toHaveLength(2));
+    const [initialLoad, refresh] = sourceRequests;
+    return { initialLoad, refresh };
+  }
+
+  it("ignores a superseded load that settles after a manual refresh", async () => {
+    const { initialLoad, refresh } = await renderWithInitialLoadAndRefreshPending();
+
+    refresh.resolve(sourcesResponse("Fresh prompt"));
+    await waitFor(() => expect(screen.getAllByText("Fresh prompt").length).toBeGreaterThan(0));
+
+    initialLoad.resolve(sourcesResponse("Stale prompt"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getAllByText("Fresh prompt").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Stale prompt")).toBeNull();
+  });
+
+  it("keeps waiting for the refresh when the superseded load settles first", async () => {
+    const { initialLoad, refresh } = await renderWithInitialLoadAndRefreshPending();
+
+    initialLoad.resolve(sourcesResponse("Stale prompt"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Stale prompt")).toBeNull();
+    expect(screen.queryByText("No AI sessions found")).toBeNull();
+
+    refresh.resolve(sourcesResponse("Fresh prompt"));
+    await waitFor(() => expect(screen.getAllByText("Fresh prompt").length).toBeGreaterThan(0));
+    expect(screen.queryByText("Stale prompt")).toBeNull();
+  });
+});
+
 describe("Replays usage facets", () => {
   it("loads scan usage and filters replays by tool and MCP server", async () => {
     window.__VIBE_REPLAY_EDITOR__ = true;
