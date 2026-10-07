@@ -75,7 +75,7 @@ export function DashboardStartup({
     : failed
       ? "Some sessions are unavailable"
       : "No sessions yet";
-  const previews = sources.length ? sources.slice(0, 3) : (progress?.previews ?? []).slice(0, 3);
+  const previews = (progress?.previews.length ? progress.previews : sources).slice(0, 3);
   const latest = previews[0];
   const total = progress?.total ?? 0;
   const prepared = Math.min(total, Math.max(0, progress?.prepared ?? 0));

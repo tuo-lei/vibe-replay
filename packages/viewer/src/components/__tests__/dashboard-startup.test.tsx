@@ -157,3 +157,33 @@ it("stops provider reading feedback when discovery ends with a stream error", ()
   expect(screen.queryByRole("progressbar")).toBeNull();
   expect(document.querySelector(".dashboard-startup-provider.is-reading")).toBeNull();
 });
+
+it("prefers current discovery previews over a cached session during refresh", () => {
+  const cached = {
+    provider: "codex",
+    slug: "cached",
+    project: "~/project",
+    timestamp: "",
+    firstPrompt: "Old cached session",
+    title: "Old cached session",
+    fileSize: 0,
+    lineCount: 0,
+    filePaths: [],
+    existingReplay: null,
+  };
+  render(
+    <DashboardStartup
+      {...props}
+      sources={[cached]}
+      progress={{
+        type: "progress",
+        phase: "discovering",
+        scanned: 1,
+        providers: ["codex"],
+        previews: [{ ...cached, slug: "new", title: "Newly discovered session" }],
+      }}
+    />,
+  );
+  expect(screen.getByText("Newly discovered session")).toBeTruthy();
+  expect(screen.queryByText("Old cached session")).toBeNull();
+});

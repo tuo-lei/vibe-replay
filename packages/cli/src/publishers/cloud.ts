@@ -182,7 +182,7 @@ export function getSessionCookieName(apiUrl?: string): string {
 
 export async function publishCloud(
   outputDir: string,
-  opts?: { visibility?: "public" | "unlisted" | "private" },
+  opts?: { visibility?: "public" | "unlisted" | "private"; session?: ReplaySession },
 ): Promise<CloudResult> {
   const auth = loadAuthToken();
   if (!auth) {
@@ -190,7 +190,9 @@ export async function publishCloud(
   }
 
   const jsonPath = join(outputDir, "replay.json");
-  const content = await readFile(jsonPath, "utf-8");
+  const content = opts?.session
+    ? JSON.stringify(sessionForExternalOutput(opts.session))
+    : await readFile(jsonPath, "utf-8");
   const replay = JSON.parse(content);
 
   const sizeBytes = Buffer.byteLength(content, "utf-8");
@@ -245,8 +247,14 @@ export async function publishCloud(
  */
 export async function publishCloudWithOverlays(
   outputDir: string,
-  opts?: { visibility?: "public" | "unlisted" | "private"; targetId?: string },
+  opts?: {
+    visibility?: "public" | "unlisted" | "private";
+    targetId?: string;
+    session?: ReplaySession;
+  },
 ): Promise<CloudResult> {
+  // CLI references already carry the exact effective content validated by --revision.
+  if (opts?.session) return publishCloud(outputDir, opts);
   const slug = basename(outputDir);
   const baseDir = dirname(outputDir);
   const overlays = await loadOverlays(baseDir, slug, opts?.targetId, false);

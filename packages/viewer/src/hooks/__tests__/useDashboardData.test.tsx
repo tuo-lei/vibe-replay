@@ -159,3 +159,29 @@ describe("dashboard cold start", () => {
     expect(es.onerror).toBeNull();
   });
 });
+
+it.each([{ nextSources: [] }, { nextSources: [source] }])(
+  "forces manual discovery past a freshly cached empty catalog (%j)",
+  async ({ nextSources }) => {
+    const { result } = renderHook(() => useDashboardData());
+    const first = await stream();
+    act(() => first.send({ type: "complete", sessions: [], failedProviders: [] }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    sourceCache = { sessions: [], cachedAt: new Date().toISOString() };
+    replayCache = { sessions: [], cachedAt: new Date().toISOString() };
+    act(() => result.current.retry());
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+    expect(result.current.startupActive).toBe(true);
+    expect(result.current.loadingSources).toBe(true);
+    act(() =>
+      MockEventSource.instances[1].send({
+        type: "complete",
+        sessions: nextSources,
+        failedProviders: [],
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sources).toEqual(nextSources);
+    expect(result.current.startupActive).toBe(nextSources.length === 0);
+  },
+);

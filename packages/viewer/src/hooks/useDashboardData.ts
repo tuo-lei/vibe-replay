@@ -30,7 +30,7 @@ export function useDashboardData() {
     [sources],
   );
 
-  const loadData = useCallback(async (signal: AbortSignal) => {
+  const loadData = useCallback(async (signal: AbortSignal, forceSourceRefresh = false) => {
     setLoading(true);
     setLoadingSources(true);
     setLoadingReplays(true);
@@ -53,10 +53,12 @@ export function useDashboardData() {
       const cachedReplays = parseCachedList<SessionSummary>(replaysRes);
       setFailedRemoteSources(remoteSourceFailureLabels(sourcesRes));
       setFailedProviders(cachedSources?.failedProviders ?? []);
-      const hasSnapshot = Boolean(
-        cachedSources?.sessions.length ||
-        Number.isFinite(Date.parse(cachedSources?.cachedAt ?? "")),
-      );
+      const hasSnapshot =
+        !forceSourceRefresh &&
+        Boolean(
+          cachedSources?.sessions.length ||
+          Number.isFinite(Date.parse(cachedSources?.cachedAt ?? "")),
+        );
       setHasCachedSources(hasSnapshot);
 
       if (cachedSources?.sessions.length) setSources(cachedSources.sessions);
@@ -66,7 +68,7 @@ export function useDashboardData() {
         setLoading(false);
       }
 
-      const sourceFresh = !shouldRefreshCachedList(cachedSources);
+      const sourceFresh = !forceSourceRefresh && !shouldRefreshCachedList(cachedSources);
       const replayFresh = isCacheFresh(cachedReplays?.cachedAt);
       const refreshPromises: Promise<void>[] = [];
 
@@ -172,7 +174,7 @@ export function useDashboardData() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadData(controller.signal);
+    void loadData(controller.signal, retryVersion > 0);
     return () => controller.abort();
   }, [loadData, retryVersion]);
 
@@ -249,6 +251,7 @@ export function useDashboardData() {
         failedRemoteSources.length > 0 ||
         sources.length === 0),
     retry: () => {
+      setHasCachedSources(false);
       setStartupDismissed(false);
       setRetryVersion((version) => version + 1);
     },

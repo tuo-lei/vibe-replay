@@ -1,0 +1,383 @@
+import { execFile, spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { afterAll, beforeAll, expect, it } from "vitest";
+
+const exec = promisify(execFile),
+  cli = join(import.meta.dirname, "../packages/cli/dist/index.js");
+let root: string, env: NodeJS.ProcessEnv, source: string, saved: string, revision: string;
+const id = "abcd1234-continuation";
+const log = `${"diagnostic line\n".repeat(400)}EUSAGE at the end`;
+function run(args: string[]) {
+  return exec(process.execPath, [cli, ...args], { env });
+}
+beforeAll(async () => {
+  root = await mkdtemp(join(tmpdir(), "vibe-cli-continuation-"));
+  const sessions = join(root, ".codex", "sessions", "2026", "10", "06");
+  await mkdir(sessions, { recursive: true });
+  source = join(sessions, "rollout-continuation.jsonl");
+  env = {
+    ...process.env,
+    HOME: root,
+    USERPROFILE: root,
+    CODEX_HOME: join(root, ".codex"),
+    CODEX_SQLITE_HOME: join(root, ".codex"),
+    VIBE_REPLAY_CONFIG: join(root, "missing.json"),
+    VIBE_REPLAY_DISABLE_FILE_CACHE: "1",
+    VIBE_REPLAY_TELEMETRY: "0",
+    VIBE_REPLAY_NO_AUTO_OPEN: "1",
+  };
+  await writeFile(
+    source,
+    [
+      { type: "session_meta", payload: { id, cwd: root }, timestamp: "2026-10-06T00:00:00Z" },
+      {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Find EUSAGE" }],
+        },
+      },
+      ...["First EUSAGE", log, "Last EUSAGE"].map((text) => ({
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+      })),
+    ]
+      .map((row) => JSON.stringify(row))
+      .join("\n"),
+  );
+  const fresh = JSON.parse((await run(["export", source, "--format", "json", "--stdout"])).stdout);
+  saved = join(root, ".vibe-replay", fresh.meta.slug);
+  await mkdir(saved, { recursive: true });
+  fresh.scenes = [
+    { type: "user-prompt", content: "Older saved request" },
+    { type: "text-response", content: "Old EUSAGE evidence" },
+  ];
+  fresh.meta.stats.sceneCount = fresh.scenes.length;
+  await writeFile(join(saved, "replay.json"), JSON.stringify(fresh));
+  await writeFile(
+    join(saved, "overlays.json"),
+    JSON.stringify({
+      version: 1,
+      overlays: [{ sceneIndex: 0, modifiedValue: "Saved edited request", updatedAt: "2026-10-06" }],
+    }),
+  );
+  revision = JSON.parse(
+    (await run(["inspect", id, "--provider", "codex", "--source", "--json"])).stdout,
+  ).revision;
+});
+afterAll(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+it("selects source or saved effective content consistently across inspection, diagnosis, export, and preflight", async () => {
+  for (const command of ["inspect", "diagnose", "export", "share"]) {
+    const extra =
+      command === "export"
+        ? ["--format", "json", "--output", join(root, "out")]
+        : command === "share"
+          ? ["--dry-run"]
+          : [];
+    const current = JSON.parse(
+      (
+        await run([
+          command,
+          id,
+          "--provider",
+          "codex",
+          "--source",
+          "--revision",
+          revision,
+          "--json",
+          ...extra,
+        ])
+      ).stdout,
+    );
+    const snapshot = JSON.parse(
+      (await run([command, id, "--provider", "codex", "--snapshot", "--json", ...extra])).stdout,
+    );
+    expect(current.provenance).toMatchObject({ origin: "source", revision, sceneCount: 4 });
+    expect(snapshot.provenance).toMatchObject({ origin: "snapshot", sceneCount: 2 });
+    expect(snapshot.provenance.revision).not.toBe(revision);
+    await expect(
+      run([
+        command,
+        id,
+        "--provider",
+        "codex",
+        "--snapshot",
+        "--revision",
+        revision,
+        "--json",
+        ...extra,
+      ]),
+    ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("revision mismatch") });
+  }
+  const exported = JSON.parse(
+    (await run(["export", id, "--provider", "codex", "--snapshot", "--format", "json", "--stdout"]))
+      .stdout,
+  );
+  expect(exported.scenes[0].content).toBe("Saved edited request");
+  expect(exported.provenance).toBeUndefined();
+  const before = await readFile(join(saved, "replay.json"));
+  await expect(run(["inspect", id, "--source", "--snapshot", "--json"])).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("Use only one"),
+  });
+  expect(await readFile(join(saved, "replay.json"))).toEqual(before);
+});
+
+it("follows search continuation and reads the entire long response with bounded character pages", async () => {
+  const first = JSON.parse(
+    (await run(["inspect", source, "--query", "EUSAGE", "--limit", "2", "--json"])).stdout,
+  );
+  const next = JSON.parse(
+    (
+      await run([
+        "inspect",
+        source,
+        "--query",
+        "EUSAGE",
+        "--offset",
+        String(first.nextOffset),
+        "--revision",
+        first.revision,
+        "--json",
+      ])
+    ).stdout,
+  );
+  expect(first.scenes.map((s: any) => s.index)).toEqual([0, 1]);
+  expect(next.scenes.map((s: any) => s.index)).toEqual([2, 3]);
+  expect(next.truncated).toBe(false);
+  const human = (await run(["inspect", source, "--query", "EUSAGE", "--limit", "1"])).stdout;
+  expect(human).toContain("keep --query and use --offset 1 --revision");
+  let offset = 0,
+    recovered = "";
+  for (;;) {
+    const page = JSON.parse(
+      (
+        await run([
+          "inspect",
+          source,
+          "--scene",
+          "2",
+          "--text-offset",
+          String(offset),
+          "--text-limit",
+          "2000",
+          "--revision",
+          revision,
+          "--json",
+        ])
+      ).stdout,
+    ).scenes[0].content;
+    recovered += page.value;
+    if (page.nextOffset === undefined) break;
+    offset = page.nextOffset;
+  }
+  expect(recovered).toBe(log);
+  await expect(run(["inspect", source, "--text-offset", "1", "--json"])).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("require --scene"),
+  });
+});
+
+it("handles renamed JSON through inspect, export, and share preflight with no writes or unrelated edits", async () => {
+  const path = join(saved, "incident.json");
+  await writeFile(path, (await run(["export", source, "--format", "json", "--stdout"])).stdout);
+  const before = await readdir(saved);
+  const inspected = JSON.parse((await run(["inspect", path, "--json"])).stdout);
+  const shared = JSON.parse((await run(["share", path, "--dry-run", "--json"])).stdout);
+  expect(inspected.provenance).toMatchObject({ origin: "snapshot", revision, sceneCount: 4 });
+  expect(shared.provenance).toEqual(inspected.provenance);
+  const text = (await run(["export", path, "--stdout"])).stdout;
+  expect(text).toContain("Find EUSAGE");
+  expect(text).not.toContain("Saved edited request");
+  expect(await readdir(saved)).toEqual(before);
+});
+
+it.each([
+  ["live", "--session", "abcd1234"],
+  ["live", id],
+  ["--session", id, "live"],
+])("starts the live server for explicit references: %j", async (...args: string[]) => {
+  const child = spawn(process.execPath, [cli, ...args, "--provider", "codex"], { env });
+  let output = "";
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Live server timeout: ${output}`)), 15000);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Live exited ${code}: ${output}`));
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk;
+      });
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+        const match = /http:\/\/localhost:\d+\/\?live=1[^\s]+/.exec(output);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[0]);
+        }
+      });
+    });
+    expect(new URL(url).searchParams.get("sessionId")).toBe(id);
+    const response = await fetch(url);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("<html");
+  } finally {
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await exited;
+    }
+  }
+});
+
+it("honors explicit snapshot selection for discovered source paths while preserving their default source behavior", async () => {
+  const before = await Promise.all(
+    [source, join(saved, "replay.json")].map((path) => readFile(path)),
+  );
+  for (const command of ["inspect", "diagnose", "export", "share"]) {
+    const extra =
+      command === "export"
+        ? ["--format", "json", "--output", join(root, "source-path-export")]
+        : command === "share"
+          ? ["--dry-run"]
+          : [];
+    const current = JSON.parse((await run([command, source, "--json", ...extra])).stdout);
+    const snapshot = JSON.parse(
+      (await run([command, source, "--snapshot", "--json", ...extra])).stdout,
+    );
+    expect(current.provenance).toMatchObject({ origin: "source", revision, sceneCount: 4 });
+    expect(snapshot.provenance).toMatchObject({ origin: "snapshot", sceneCount: 2 });
+    const byId = JSON.parse(
+      (await run([command, id, "--snapshot", "--provider", "codex", "--json", ...extra])).stdout,
+    );
+    expect(snapshot.provenance.revision).toBe(byId.provenance.revision);
+  }
+  expect(
+    await Promise.all([source, join(saved, "replay.json")].map((path) => readFile(path))),
+  ).toEqual(before);
+});
+
+it.each([id, "abcd1234"])("keeps Live reference %s local when SSH has the same ID", async (ref) => {
+  const cacheDir = join(root, ".vibe-replay", "cache");
+  await mkdir(cacheDir, { recursive: true });
+  const { version } = JSON.parse(
+    await readFile(join(import.meta.dirname, "../packages/cli/package.json"), "utf-8"),
+  );
+  const local = {
+    provider: "codex",
+    sessionId: id,
+    slug: "abcd1234",
+    project: root,
+    cwd: root,
+    version: "",
+    timestamp: "2026-10-06T00:00:00Z",
+    lineCount: 5,
+    fileSize: 100,
+    filePath: source,
+    filePaths: [source],
+    firstPrompt: "Find EUSAGE",
+  };
+  await writeFile(
+    join(cacheDir, "cli-discovery-v1-codex.json"),
+    JSON.stringify({
+      envelopeVersion: 1,
+      appVersion: version,
+      updatedAt: new Date().toISOString(),
+      data: {
+        sessions: [
+          local,
+          {
+            ...local,
+            filePath: "/ssh/session.jsonl",
+            filePaths: ["/ssh/session.jsonl"],
+            location: { kind: "ssh", id: "remote-dev", label: "Remote dev" },
+          },
+        ],
+        failedProviders: [],
+        coverage: [],
+      },
+    }),
+  );
+  const child = spawn(process.execPath, [cli, "live", "--session", ref, "--provider", "codex"], {
+    env: { ...env, VIBE_REPLAY_DISABLE_FILE_CACHE: "0" },
+  });
+  let output = "";
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Live collision timeout: ${output}`)), 15000);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Live exited ${code}: ${output}`));
+      });
+      const collect = (chunk: Buffer) => {
+        output += chunk;
+        const match = /http:\/\/localhost:\d+\/\?live=1[^\s]+/.exec(output);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[0]);
+        }
+      };
+      child.stdout.on("data", collect);
+      child.stderr.on("data", collect);
+    });
+    expect(new URL(url).searchParams.get("sessionId")).toBe(id);
+    expect((await fetch(url)).status).toBe(200);
+    expect(output).not.toContain("Ambiguous session reference");
+  } finally {
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await exited;
+    }
+  }
+});
+
+it("selects saved content for a transcript copied outside discovery roots", async () => {
+  const outside = join(root, "incident-source.jsonl");
+  await writeFile(outside, await readFile(source));
+  const before = await Promise.all(
+    [outside, join(saved, "replay.json")].map((path) => readFile(path)),
+  );
+  const current = JSON.parse((await run(["inspect", outside, "--json"])).stdout);
+  expect(current.provenance).toMatchObject({ origin: "source", revision, sceneCount: 4 });
+  const expected = JSON.parse((await run(["inspect", id, "--snapshot", "--json"])).stdout);
+  for (const command of ["inspect", "diagnose", "export", "share"]) {
+    const extra =
+      command === "export"
+        ? ["--format", "json", "--stdout"]
+        : command === "share"
+          ? ["--dry-run", "--json"]
+          : ["--json"];
+    const data = JSON.parse((await run([command, outside, "--snapshot", ...extra])).stdout);
+    if (command === "export") {
+      expect(data.scenes).toHaveLength(2);
+      expect(data.scenes[0].content).toBe("Saved edited request");
+    } else expect(data.provenance).toEqual(expected.provenance);
+  }
+  expect(
+    await Promise.all([outside, join(saved, "replay.json")].map((path) => readFile(path))),
+  ).toEqual(before);
+});
+
+it("requires the parsed source identity to match a saved session exactly", async () => {
+  const outside = join(root, "different-source.jsonl");
+  const lines = (await readFile(source, "utf-8")).split("\n");
+  const metadata = JSON.parse(lines[0]);
+  metadata.payload.id = "abcd1234";
+  lines[0] = JSON.stringify(metadata);
+  await writeFile(outside, lines.join("\n"));
+  const current = JSON.parse((await run(["inspect", outside, "--source", "--json"])).stdout);
+  expect(current.sessionId).toBe("abcd1234");
+  await expect(run(["inspect", outside, "--snapshot", "--json"])).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("No saved snapshot found"),
+  });
+});
