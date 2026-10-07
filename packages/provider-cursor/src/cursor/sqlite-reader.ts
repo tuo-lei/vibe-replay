@@ -173,7 +173,7 @@ let cachedComposerHeaders:
     }
   | undefined;
 
-function globalStateDbCandidates(
+export function globalStateDbCandidates(
   platform: NodeJS.Platform = process.platform,
   home = homedir(),
   env: NodeJS.ProcessEnv = process.env,

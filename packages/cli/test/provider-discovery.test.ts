@@ -87,3 +87,62 @@ describe("discoverProvidersSafely", () => {
     ).rejects.toThrow("SSE stream closed");
   });
 });
+
+describe("early provider feedback", () => {
+  it("reports all detected roots before the first slow discovery completes", async () => {
+    const states: string[] = [];
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = {
+      ...provider("codex", async () => {
+        await slow;
+        return [session("codex", "one")];
+      }),
+      detect: async () => true,
+    };
+    const second = { ...provider("pi", async () => []), detect: async () => true };
+    const absent = { ...provider("cursor", async () => []), detect: async () => false };
+    const run = discoverProvidersSafely([first, second, absent], undefined, {
+      onProvider: (state) => {
+        states.push(`${state.provider}:${state.status}:${state.detected}`);
+      },
+    });
+    await vi.waitFor(() => expect(states).toContain("codex:reading:true"));
+    expect(states).toContain("codex:found:true");
+    expect(states).toContain("pi:found:true");
+    expect(states).not.toContain("cursor:found:true");
+    expect(states).not.toContain("codex:ready:true");
+    release();
+    const result = await run;
+    expect(result.sessions).toHaveLength(1);
+    expect(states).toContain("codex:ready:true");
+    expect(states).toContain("pi:empty:true");
+    expect(states).toContain("cursor:empty:false");
+  });
+
+  it("uses actual sessions if a probe fails and ignores progress observer errors", async () => {
+    const source = {
+      ...provider("pi", async () => [session("pi", "one")]),
+      detect: async () => {
+        throw new Error("probe unavailable");
+      },
+    };
+    const observer = vi.fn((state) => {
+      if (state.status === "reading") throw new Error("closed browser");
+    });
+    const result = await discoverProvidersSafely([source], undefined, {
+      onProvider: observer,
+      readOnly: true,
+    });
+    expect(result.sessions).toHaveLength(1);
+    expect(result.failedProviders).toEqual([]);
+    expect(observer).toHaveBeenLastCalledWith({
+      provider: "pi",
+      detected: true,
+      status: "ready",
+      sessionCount: 1,
+    });
+  });
+});

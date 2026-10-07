@@ -15,7 +15,8 @@ import { injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import { withBundledSampleIfEmpty } from "./bundled-sample.js";
-import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./provider-discovery.js";
+import { discoverProvidersSafely } from "./provider-discovery.js";
+import { createSharedProviderDiscovery } from "./shared-provider-discovery.js";
 import { getApiUrl } from "./publishers/cloud.js";
 import { mergeSameSessions } from "./session-merge.js";
 import { getRemoteHome } from "./remote.js";
@@ -270,46 +271,12 @@ export async function startServer(
   let lastDiscoveredMergedSessions: SessionInfo[] = [];
   let latestSourceFailures: string[] | undefined;
   let remoteConfigChangedAt: number | undefined;
-  type DiscoverySubscriber = (session: SessionInfo) => Promise<void> | void;
-  let localDiscoveryRun: {
-    promise: Promise<SafeProviderDiscoveryResult>;
-    subscribers: Set<DiscoverySubscriber>;
-  } | null = null;
-
-  /** Share one local/SSH provider discovery across the dashboard and scanner. */
-  const discoverAllProviders = (
-    subscriber?: DiscoverySubscriber,
-  ): Promise<SafeProviderDiscoveryResult> => {
-    let run = localDiscoveryRun;
-    if (!run) {
-      const subscribers = new Set<DiscoverySubscriber>();
-      const promise = discoverProvidersSafely(getAllProviders(), async (session) => {
-        await Promise.all(
-          [...subscribers].map(async (listener) => {
-            try {
-              await listener(session);
-            } catch {
-              // A disconnected SSE client must not abort discovery for everyone else.
-            }
-          }),
-        );
-      }).finally(() => {
-        if (localDiscoveryRun?.promise === promise) localDiscoveryRun = null;
-      });
-      run = { promise, subscribers };
-      localDiscoveryRun = run;
-    }
-
-    if (subscriber) run.subscribers.add(subscriber);
-    const activeRun = run;
-    return activeRun.promise
-      .then(async (result) => ({
-        ...result,
-        sessions: await withBundledSampleIfEmpty(result.sessions),
-      }))
-      .finally(() => {
-        if (subscriber) activeRun.subscribers.delete(subscriber);
-      });
+  const sharedDiscovery = createSharedProviderDiscovery((onSession, onProvider) =>
+    discoverProvidersSafely(getAllProviders(), onSession, { onProvider }),
+  );
+  const discoverAllProviders = async (...subscribers: Parameters<typeof sharedDiscovery>) => {
+    const result = await sharedDiscovery(...subscribers);
+    return { ...result, sessions: await withBundledSampleIfEmpty(result.sessions) };
   };
 
   const enrichCursorStatsInBackground = (

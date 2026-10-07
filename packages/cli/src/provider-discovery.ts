@@ -1,3 +1,4 @@
+import type { SourceProviderProgress } from "@vibe-replay/types";
 import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
 import { deduplicateSessionsByProvider } from "./providers/index.js";
@@ -25,7 +26,10 @@ export interface SafeProviderDiscoveryResult {
 export async function discoverProvidersSafely(
   providers: Provider[],
   onSession?: (session: SessionInfo) => Promise<void> | void,
-  options?: { readOnly?: boolean },
+  options?: {
+    readOnly?: boolean;
+    onProvider?: (state: SourceProviderProgress) => Promise<void> | void;
+  },
 ): Promise<SafeProviderDiscoveryResult> {
   const allSessions: SessionInfo[] = [];
   const failedProviders: string[] = [];
@@ -42,7 +46,35 @@ export async function discoverProvidersSafely(
     return { sessions: [], failedTargets: ["unknown"] };
   });
 
+  const detected = new Set<string>();
+  const emitProvider = async (state: SourceProviderProgress) => {
+    try {
+      await options?.onProvider?.(state);
+    } catch {
+      // Progress observers cannot turn healthy storage into a provider failure.
+    }
+  };
+  // All cheap probes finish before the first potentially slow transcript/database read.
+  if (options?.onProvider)
+    await Promise.all(
+      providers.map(async (provider) => {
+        try {
+          if (await provider.detect?.()) {
+            detected.add(provider.name);
+            await emitProvider({ provider: provider.name, detected: true, status: "found" });
+          }
+        } catch {
+          // A probe is best-effort; always try authoritative discovery below.
+        }
+      }),
+    );
+
   for (const provider of providers) {
+    await emitProvider({
+      provider: provider.name,
+      detected: detected.has(provider.name),
+      status: "reading",
+    });
     let sessions: SessionInfo[];
     let failed = false;
     try {
@@ -86,6 +118,12 @@ export async function discoverProvidersSafely(
       allSessions.push(session);
       await onSession?.(session);
     }
+    await emitProvider({
+      provider: provider.name,
+      detected: detected.has(provider.name) || sessions.length > 0,
+      status: failed ? "failed" : sessions.length ? "ready" : "empty",
+      sessionCount: sessions.length,
+    });
   }
 
   const remote = await remotePromise;

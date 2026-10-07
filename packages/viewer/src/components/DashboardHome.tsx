@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DashboardStartup } from "./DashboardStartup";
+import { useDashboardData } from "../hooks/useDashboardData";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionLocation, SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
@@ -8,17 +10,14 @@ import {
   fetchWithRetry,
   archiveSessionKey,
   formatCompactDuration,
-  isCacheFresh,
   navigateTo,
   normalizeTitleText,
-  parseCachedList,
   projectDisplayName,
+  providerDisplayName,
   replaySuggestedTitle,
-  remoteSourceFailureLabels,
   rollupTopProjects,
   sameSessionLocation,
   sessionIdentityKey,
-  shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
   type TopProjectEntry,
   sourceSuggestedTitle,
@@ -111,197 +110,6 @@ function formatGenerationElapsed(ms: number): string {
 }
 
 // ─── Data Fetching ───────────────────────────────────────────────────
-
-function useDashboardData() {
-  const [sources, setSources] = useState<SourceSession[]>([]);
-  const [replays, setReplays] = useState<SessionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingSources, setLoadingSources] = useState(true);
-  const [loadingReplays, setLoadingReplays] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [failedRemoteSources, setFailedRemoteSources] = useState<string[]>([]);
-  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
-  const wasEnrichingRef = useRef(false);
-  const lastSourcesCachedAtRef = useRef<string | undefined>(undefined);
-  const hasCursorSources = useMemo(
-    () => sources.some((source) => source.provider === "cursor"),
-    [sources],
-  );
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setLoadingSources(true);
-    setLoadingReplays(true);
-    setError(null);
-
-    try {
-      const [sourcesRes, replaysRes] = await Promise.all([
-        fetch("/api/sources/cached", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-        fetch("/api/sessions/cached", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-      ]);
-
-      const cachedSources = parseCachedList<SourceSession>(sourcesRes);
-      const cachedReplays = parseCachedList<SessionSummary>(replaysRes);
-      setFailedRemoteSources(remoteSourceFailureLabels(sourcesRes));
-
-      if (cachedSources?.sessions.length) setSources(cachedSources.sessions);
-      if (cachedReplays?.sessions.length) setReplays(cachedReplays.sessions);
-
-      if (cachedSources?.sessions.length || cachedReplays?.sessions.length) {
-        setLoading(false);
-      }
-
-      const sourceFresh = !shouldRefreshCachedList(cachedSources);
-      const replayFresh = isCacheFresh(cachedReplays?.cachedAt);
-      const refreshPromises: Promise<void>[] = [];
-
-      if (sourceFresh) setLoadingSources(false);
-      if (replayFresh) setLoadingReplays(false);
-
-      if (!sourceFresh) {
-        // Use SSE stream for discovery with progress reporting
-        refreshPromises.push(
-          new Promise<void>((resolve) => {
-            const es = new EventSource("/api/sources/stream");
-            es.onmessage = (evt) => {
-              try {
-                const msg = JSON.parse(evt.data);
-                if (msg.type === "complete") {
-                  setSources(msg.sessions);
-                  setFailedRemoteSources(remoteSourceFailureLabels(msg));
-                  es.close();
-                  resolve();
-                } else if (msg.type === "error") {
-                  if (!cachedSources?.sessions.length) {
-                    setError(msg.message || "Failed to load sessions");
-                  }
-                  es.close();
-                  resolve();
-                }
-              } catch {
-                // ignore parse errors
-              }
-            };
-            es.onerror = () => {
-              // SSE failed — fall back to regular fetch
-              es.close();
-              fetchWithRetry("/api/sources")
-                .then((r) => {
-                  if (!r.ok) throw new Error("Failed to load sources");
-                  return r.json();
-                })
-                .then((data: { sessions: SourceSession[]; failedProviders?: unknown }) => {
-                  setSources(data.sessions);
-                  setFailedRemoteSources(remoteSourceFailureLabels(data));
-                })
-                .catch((err) => {
-                  if (!cachedSources?.sessions.length) {
-                    setError(err instanceof Error ? err.message : "Failed to load sessions");
-                  }
-                })
-                .finally(() => resolve());
-            };
-          }).finally(() => setLoadingSources(false)),
-        );
-      }
-
-      if (!replayFresh) {
-        refreshPromises.push(
-          fetchWithRetry("/api/sessions")
-            .then((r) => {
-              if (!r.ok) throw new Error("Failed to load replays");
-              return r.json();
-            })
-            .then((data: SessionSummary[]) => setReplays(data))
-            .catch((err) => {
-              if (!cachedReplays?.sessions.length) {
-                setError(err instanceof Error ? err.message : "Failed to load replays");
-              }
-            })
-            .finally(() => setLoadingReplays(false)),
-        );
-      }
-
-      if (refreshPromises.length > 0) await Promise.allSettled(refreshPromises);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    if (!loadingSources && !hasCursorSources && !wasEnrichingRef.current) return;
-
-    let cancelled = false;
-    let timer: number | undefined;
-
-    const maybeRefreshSourcesFromCache = async () => {
-      const payload = await fetch("/api/sources/cached", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
-      const cached = parseCachedList<SourceSession>(payload);
-      if (
-        !cancelled &&
-        cached?.sessions.length &&
-        cached.cachedAt !== lastSourcesCachedAtRef.current
-      ) {
-        lastSourcesCachedAtRef.current = cached.cachedAt;
-        setSources(cached.sessions);
-      }
-    };
-
-    const poll = async () => {
-      const status = await fetch("/api/sources/enrichment-status", { cache: "no-store" })
-        .then((r) => (r.ok ? (r.json() as Promise<SourcesEnrichmentStatus>) : null))
-        .catch(() => null);
-      if (!status || cancelled) return;
-      setEnrichmentStatus(status);
-
-      if (status.running) {
-        wasEnrichingRef.current = true;
-        await maybeRefreshSourcesFromCache();
-      } else if (wasEnrichingRef.current) {
-        wasEnrichingRef.current = false;
-        await maybeRefreshSourcesFromCache();
-        if (timer) {
-          window.clearInterval(timer);
-          timer = undefined;
-        }
-      }
-    };
-
-    void poll();
-    timer = window.setInterval(() => {
-      void poll();
-    }, 2500);
-
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [hasCursorSources, loadingSources]);
-
-  return {
-    sources,
-    setSources,
-    replays,
-    loading,
-    loadingSources,
-    loadingReplays,
-    enrichmentStatus,
-    error,
-    failedRemoteSources,
-  };
-}
 
 // ─── Compute Insights ────────────────────────────────────────────────
 
@@ -980,6 +788,11 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     enrichmentStatus,
     error,
     failedRemoteSources,
+    failedProviders,
+    discoveryProgress,
+    startupActive,
+    retry,
+    dismissStartup,
   } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { userInsights } = useScanInsightsContext();
@@ -1373,72 +1186,24 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     const hrs = Math.floor(mins / 60);
     return `${hrs}h ago`;
   })();
-  if (loading && !sources.length && !replays.length) {
+  if (startupActive) {
     return (
-      <div className="flex-1 overflow-auto animate-in fade-in duration-500">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-          <SessionLoadingBanner
-            title="Fetching sessions"
-            description="Loading cached sessions first, then enriching recent details in place."
-          />
-          {/* Overview + activity skeleton */}
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-4">
-            <div className="grid grid-cols-4 gap-6">
-              {Array.from({ length: 4 }, (_, i) => (
-                <div key={i} className="space-y-2">
-                  <div className="h-8 w-20 skeleton rounded" />
-                  <div className="h-3 w-14 skeleton rounded" />
-                </div>
-              ))}
-            </div>
-            {/* Heatmap placeholder */}
-            <div className="space-y-1.5 pt-2">
-              {Array.from({ length: 3 }, (_, i) => (
-                <div key={i} className="h-3 skeleton rounded" />
-              ))}
-            </div>
-            <div className="h-9 skeleton rounded" />
-          </div>
-          {/* Sessions + Replays skeleton */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {Array.from({ length: 2 }, (_, col) => (
-              <div
-                key={col}
-                className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="h-3 w-28 skeleton rounded" />
-                  <div className="h-3 w-14 skeleton rounded" />
-                </div>
-                {Array.from({ length: 5 }, (_, i) => (
-                  <div key={i} className="flex items-center gap-3 px-1 py-1">
-                    <div className="h-5 w-14 skeleton rounded-full shrink-0" />
-                    <div className="flex-1 space-y-1.5">
-                      <div
-                        className="h-3.5 skeleton rounded"
-                        style={{ width: `${55 + ((i * 19) % 35)}%` }}
-                      />
-                      <div className="h-2.5 w-20 skeleton rounded" />
-                    </div>
-                    <div className="h-3 w-12 skeleton rounded shrink-0" />
-                  </div>
-                ))}
-                <div className="h-8 skeleton rounded" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && sources.length === 0 && replays.length === 0 && failedRemoteSources.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center space-y-2">
-          <div className="text-terminal-red font-mono text-sm">{error}</div>
-        </div>
-      </div>
+      <DashboardStartup
+        progress={discoveryProgress}
+        loading={loading}
+        loadingSources={loadingSources}
+        sources={sources}
+        replayCount={replays.length}
+        error={error}
+        failures={[
+          ...failedProviders
+            .filter((provider) => !provider.startsWith("ssh:"))
+            .map(providerDisplayName),
+          ...failedRemoteSources,
+        ]}
+        onRetry={retry}
+        onContinue={dismissStartup}
+      />
     );
   }
 
@@ -1446,6 +1211,19 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-5 space-y-5">
         <RemoteSourceFailureNotice failures={failedRemoteSources} />
+        {(error || failedProviders.length > 0) && (
+          <output className="block text-terminal-orange text-xs">
+            {error ||
+              `Could not read ${failedProviders.map(providerDisplayName).join(", ")} sessions.`}
+            <button
+              type="button"
+              className="ml-3 text-terminal-blue hover:underline"
+              onClick={retry}
+            >
+              Retry
+            </button>
+          </output>
+        )}
         {deleteError && (
           <div
             role="alert"

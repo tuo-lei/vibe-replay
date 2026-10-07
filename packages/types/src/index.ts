@@ -346,6 +346,40 @@ export function sessionLocationHash(targetId: string): string {
 /** Explains why a discovered source may not have a normal user prompt. */
 export type SessionTranscriptStatus = "no-prompts" | "unreadable";
 
+/** Bounded local-only metadata shown while the dashboard discovers its catalog. */
+export interface SourceDiscoveryPreview {
+  provider: string;
+  sessionId?: string;
+  slug: string;
+  project: string;
+  timestamp: string;
+  title?: string;
+  firstPrompt: string;
+  location?: SessionLocation;
+}
+
+/** Local storage presence is not proof that an application is still installed. */
+export interface SourceProviderProgress {
+  provider: string;
+  detected: boolean;
+  status: "found" | "reading" | "ready" | "empty" | "failed";
+  /** Raw records from this provider, before cross-provider/session merging. */
+  sessionCount?: number;
+}
+
+export interface SourceDiscoveryProgress {
+  type: "progress";
+  phase: "discovering" | "preparing";
+  /** Provider records read before cross-provider/session merging; not a unique-session total. */
+  scanned: number;
+  providers: string[];
+  providerStates?: SourceProviderProgress[];
+  previews: SourceDiscoveryPreview[];
+  /** Prepared catalog records; total is only supplied after discovery and merging finish. */
+  prepared?: number;
+  total?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Scene Overlay System — non-destructive modifications for AI Studio
 // ---------------------------------------------------------------------------

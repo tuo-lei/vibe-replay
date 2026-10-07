@@ -6,6 +6,21 @@ import { pathToFileURL } from "node:url";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+/** Probe source roots without reading transcripts or opening databases. */
+export async function hasAnySourcePath(paths: readonly string[]): Promise<boolean> {
+  const found = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        const entry = await stat(path);
+        return entry.isFile() || entry.isDirectory();
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return found.some(Boolean);
+}
+
 /** UTF-8 byte size without retaining or exposing the underlying content. */
 export function utf8ByteLength(value: string): number {
   return Buffer.byteLength(value, "utf-8");

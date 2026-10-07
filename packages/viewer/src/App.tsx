@@ -1,3 +1,4 @@
+import { VibeReplayBrand } from "./components/VibeReplayBrand";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import { navigateTo } from "./components/dashboard-utils";
@@ -509,9 +510,9 @@ export default function App() {
             <div className="flex items-center gap-2.5 shrink-0">
               <button
                 onClick={() => navigateTo({ view: null, session: null })}
-                className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+                className="hover:opacity-80 transition-opacity rounded focus-visible:outline-2 focus-visible:outline-terminal-blue focus-visible:outline-offset-4"
               >
-                vibe-replay
+                <VibeReplayBrand />
               </button>
               <span className="instant-tooltip inline-flex items-center gap-1 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
                 <span className="w-1 h-1 rounded-full bg-terminal-green animate-pulse" />

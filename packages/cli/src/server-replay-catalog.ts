@@ -233,6 +233,11 @@ export async function buildSourcesResult(
   home: string,
   previousSources: SourceSummaryRecord[] = [],
   cleanupPeriodDays = 0,
+  onProgress?: (
+    source: SourceSummaryRecord,
+    prepared: number,
+    total: number,
+  ) => Promise<void> | void,
 ): Promise<SourceSummaryRecord[]> {
   for (const session of merged) session.project = shortenPath(session.project, home);
 
@@ -286,7 +291,8 @@ export async function buildSourcesResult(
     }
   }
 
-  return merged.map((session) => {
+  const result: SourceSummaryRecord[] = [];
+  for (const session of merged) {
     const previous = pickSourceRecordForSession(session, previousBySessionId, previousByKey);
     const replay = findReplayForSource(session, replayMaps, sourceSlugCounts);
     const promptCount = session.promptCount ?? previous?.promptCount;
@@ -308,7 +314,7 @@ export async function buildSourcesResult(
       session.provider === "cursor" && isCursorPlaceholderTitle(sourceTitle)
         ? normalizeTitle(previewPrompt(session.firstPrompt)) || sourceTitle
         : sourceTitle;
-    return {
+    const source: SourceSummaryRecord = {
       provider: session.provider,
       location: session.location,
       transcriptStatus: session.transcriptStatus,
@@ -357,5 +363,8 @@ export async function buildSourcesResult(
           : (projectIsGitMap.get(session.project) ?? false),
       replay: replay ? cachedReplaySummary(replay) : undefined,
     };
-  });
+    result.push(source);
+    if (onProgress) await onProgress(source, result.length, merged.length);
+  }
+  return result;
 }
