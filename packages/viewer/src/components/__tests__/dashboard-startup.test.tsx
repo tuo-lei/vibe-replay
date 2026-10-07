@@ -134,3 +134,26 @@ it("does not count an unavailable source as successfully read", () => {
   expect(screen.getByText("Unavailable")).toBeTruthy();
   expect(screen.getByText("0 / 2 sources read")).toBeTruthy();
 });
+
+it("stops provider reading feedback when discovery ends with a stream error", () => {
+  render(
+    <DashboardStartup
+      {...props}
+      loading={false}
+      loadingSources={false}
+      error="Discovery interrupted"
+      progress={{
+        type: "progress",
+        phase: "discovering",
+        scanned: 0,
+        providers: ["codex"],
+        previews: [],
+        providerStates: [{ provider: "codex", detected: true, status: "reading" }],
+      }}
+    />,
+  );
+  expect(screen.getByText("Not finished")).toBeTruthy();
+  expect(screen.queryByText("Reading…")).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(document.querySelector(".dashboard-startup-provider.is-reading")).toBeNull();
+});

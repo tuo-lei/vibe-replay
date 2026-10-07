@@ -48,10 +48,19 @@ export function DashboardStartup({
       status: "ready" as const,
     }));
   const foundProviders = providerStates.filter((state) => state.detected);
-  const shownProviders = providerStates.filter(
-    (state) => state.detected || state.status === "failed",
-  );
-  const reading = providerStates.find((state) => state.status === "reading" && state.detected);
+  const shownProviders = providerStates
+    .filter((state) => state.detected || state.status === "failed")
+    .map((state) => ({
+      ...state,
+      status:
+        (!loading || !loadingSources) && ["found", "reading"].includes(state.status)
+          ? ("stopped" as const)
+          : state.status,
+    }));
+  const reading =
+    loading && loadingSources
+      ? providerStates.find((state) => state.status === "reading" && state.detected)
+      : undefined;
   const completed = foundProviders.filter((state) =>
     ["ready", "empty"].includes(state.status),
   ).length;
@@ -114,13 +123,15 @@ export function DashboardStartup({
                     ? "Found"
                     : state.status === "reading"
                       ? "Reading…"
-                      : state.status === "failed"
-                        ? "Unavailable"
-                        : state.status === "empty"
-                          ? "No sessions"
-                          : state.sessionCount === undefined
-                            ? "Read"
-                            : `${state.sessionCount.toLocaleString()} records`}
+                      : state.status === "stopped"
+                        ? "Not finished"
+                        : state.status === "failed"
+                          ? "Unavailable"
+                          : state.status === "empty"
+                            ? "No sessions"
+                            : state.sessionCount === undefined
+                              ? "Read"
+                              : `${state.sessionCount.toLocaleString()} records`}
                 </span>
               </li>
             ))}
