@@ -1655,7 +1655,10 @@ program
       if (ref || flagRef) {
         const provider = normalizeCommandProviderOption(opts.provider, command);
         const discovery = await discoverCliSessions({ provider, refresh: opts.refresh });
-        const match = resolveSessionReference(discovery.sessions, ref || flagRef, { provider });
+        const match = resolveSessionReference(discovery.sessions, ref || flagRef, {
+          provider,
+          target: "local",
+        });
         if (match.location?.kind === "ssh")
           throw new Error("Remote Live mode is disabled; choose a local session");
         if (match.transcriptStatus)

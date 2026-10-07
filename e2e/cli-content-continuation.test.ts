@@ -264,3 +264,78 @@ it("honors explicit snapshot selection for discovered source paths while preserv
     await Promise.all([source, join(saved, "replay.json")].map((path) => readFile(path))),
   ).toEqual(before);
 });
+
+it.each([id, "abcd1234"])("keeps Live reference %s local when SSH has the same ID", async (ref) => {
+  const cacheDir = join(root, ".vibe-replay", "cache");
+  await mkdir(cacheDir, { recursive: true });
+  const { version } = JSON.parse(
+    await readFile(join(import.meta.dirname, "../packages/cli/package.json"), "utf-8"),
+  );
+  const local = {
+    provider: "codex",
+    sessionId: id,
+    slug: "abcd1234",
+    project: root,
+    cwd: root,
+    version: "",
+    timestamp: "2026-10-06T00:00:00Z",
+    lineCount: 5,
+    fileSize: 100,
+    filePath: source,
+    filePaths: [source],
+    firstPrompt: "Find EUSAGE",
+  };
+  await writeFile(
+    join(cacheDir, "cli-discovery-v1-codex.json"),
+    JSON.stringify({
+      envelopeVersion: 1,
+      appVersion: version,
+      updatedAt: new Date().toISOString(),
+      data: {
+        sessions: [
+          local,
+          {
+            ...local,
+            filePath: "/ssh/session.jsonl",
+            filePaths: ["/ssh/session.jsonl"],
+            location: { kind: "ssh", id: "remote-dev", label: "Remote dev" },
+          },
+        ],
+        failedProviders: [],
+        coverage: [],
+      },
+    }),
+  );
+  const child = spawn(process.execPath, [cli, "live", "--session", ref, "--provider", "codex"], {
+    env: { ...env, VIBE_REPLAY_DISABLE_FILE_CACHE: "0" },
+  });
+  let output = "";
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Live collision timeout: ${output}`)), 15000);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Live exited ${code}: ${output}`));
+      });
+      const collect = (chunk: Buffer) => {
+        output += chunk;
+        const match = /http:\/\/localhost:\d+\/\?live=1[^\s]+/.exec(output);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[0]);
+        }
+      };
+      child.stdout.on("data", collect);
+      child.stderr.on("data", collect);
+    });
+    expect(new URL(url).searchParams.get("sessionId")).toBe(id);
+    expect((await fetch(url)).status).toBe(200);
+    expect(output).not.toContain("Ambiguous session reference");
+  } finally {
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await exited;
+    }
+  }
+});
