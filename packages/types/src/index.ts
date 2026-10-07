@@ -346,6 +346,30 @@ export function sessionLocationHash(targetId: string): string {
 /** Explains why a discovered source may not have a normal user prompt. */
 export type SessionTranscriptStatus = "no-prompts" | "unreadable";
 
+/** Bounded local-only metadata shown while the dashboard discovers its catalog. */
+export interface SourceDiscoveryPreview {
+  provider: string;
+  sessionId?: string;
+  slug: string;
+  project: string;
+  timestamp: string;
+  title?: string;
+  firstPrompt: string;
+  location?: SessionLocation;
+}
+
+export interface SourceDiscoveryProgress {
+  type: "progress";
+  phase: "discovering" | "preparing";
+  /** Provider records read before cross-provider/session merging; not a unique-session total. */
+  scanned: number;
+  providers: string[];
+  previews: SourceDiscoveryPreview[];
+  /** Prepared catalog records; total is only supplied after discovery and merging finish. */
+  prepared?: number;
+  total?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Scene Overlay System — non-destructive modifications for AI Studio
 // ---------------------------------------------------------------------------

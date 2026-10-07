@@ -1,6 +1,9 @@
 import { homedir } from "node:os";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { SourceDiscoveryPreview, SourceDiscoveryProgress } from "@vibe-replay/types";
+import { shortenPath } from "@vibe-replay/provider-core/utils";
+import { cleanPromptText, previewPrompt } from "../clean-prompt.js";
 import { getProvider } from "../providers/index.js";
 import {
   loadRemoteSourceConfigs,
@@ -77,6 +80,11 @@ interface SourcesRouteDeps {
     home: string,
     previousSources: SourceSummaryRecord[],
     cleanupPeriodDays: number,
+    onProgress?: (
+      source: SourceSummaryRecord,
+      prepared: number,
+      total: number,
+    ) => Promise<void> | void,
   ) => Promise<SourceSummaryRecord[]>;
   normalizeSessionProjectsForHome: (sessions: SessionInfo[], home: string) => SessionInfo[];
   enrichCursorStatsInBackground: (
@@ -267,17 +275,76 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
     return streamSSE(c, async (stream) => {
       try {
         let scanned = 0;
-        const discovery = await discoverAllProviders(async () => {
+        let lastProgressAt = 0;
+        const providers = new Set<string>();
+        let previews: SourceDiscoveryPreview[] = [];
+        const preview = (session: SessionInfo | SourceSummaryRecord): SourceDiscoveryPreview => ({
+          provider: session.provider,
+          sessionId: session.sessionId,
+          slug: session.slug,
+          project: shortenPath(session.project, homedir()),
+          timestamp: session.timestamp,
+          title: cleanPromptText(typeof session.title === "string" ? session.title : "").slice(
+            0,
+            160,
+          ),
+          firstPrompt: previewPrompt(
+            typeof session.firstPrompt === "string" ? session.firstPrompt : "",
+          ).slice(0, 160),
+          location: session.location,
+        });
+        const sendProgress = async (progress: SourceDiscoveryProgress) => {
+          if (stream.aborted) return;
+          try {
+            await stream.writeSSE({ data: JSON.stringify(progress) });
+          } catch {
+            // A closed browser must not interrupt discovery or catalog caching.
+          }
+        };
+        const discovery = await discoverAllProviders(async (session) => {
           scanned++;
-          if (scanned % 5 === 0 || scanned === 1) {
-            await stream.writeSSE({
-              data: JSON.stringify({ type: "progress", scanned }),
+          providers.add(session.provider);
+          const next = preview(session);
+          previews = [
+            ...previews.filter(
+              (entry) =>
+                entry.provider !== next.provider ||
+                entry.sessionId !== next.sessionId ||
+                entry.slug !== next.slug ||
+                entry.location?.id !== next.location?.id,
+            ),
+            next,
+          ]
+            .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+            .slice(0, 3);
+          if (scanned === 1 || Date.now() - lastProgressAt >= 120) {
+            lastProgressAt = Date.now();
+            await sendProgress({
+              type: "progress",
+              phase: "discovering",
+              scanned,
+              providers: [...providers],
+              previews,
             });
           }
         });
         setLatestSourceFailures(discovery.failedProviders);
 
         const merged = mergeSameSessions(discovery.sessions);
+        const mergedProviders = [...new Set(merged.map((session) => session.provider))];
+        previews = [...merged]
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          .slice(0, 3)
+          .map(preview);
+        await sendProgress({
+          type: "progress",
+          phase: "preparing",
+          scanned,
+          providers: mergedProviders,
+          previews,
+          prepared: 0,
+          total: merged.length,
+        });
         setLastDiscoveredMergedSessions(normalizeSessionProjectsForHome(merged, homedir()));
         const previous = await readSourcesCatalogCache();
         const result = await buildSourcesResult(
@@ -286,6 +353,20 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
           homedir(),
           previous?.sessions || [],
           cleanupPeriodDays,
+          async (_source, prepared, total) => {
+            if (prepared === 1 || prepared === total || Date.now() - lastProgressAt >= 120) {
+              lastProgressAt = Date.now();
+              await sendProgress({
+                type: "progress",
+                phase: "preparing",
+                scanned,
+                providers: mergedProviders,
+                previews,
+                prepared,
+                total,
+              });
+            }
+          },
         );
 
         const catalog = await writeDiscoveredSourcesCatalog(

@@ -1,0 +1,71 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DashboardStartup } from "../DashboardStartup";
+
+const props = {
+  progress: null,
+  loading: true,
+  loadingSources: true,
+  sources: [],
+  error: null,
+  failures: [],
+  onRetry: vi.fn(),
+  onContinue: vi.fn(),
+};
+afterEach(cleanup);
+describe("DashboardStartup", () => {
+  it("uses indeterminate progress until the catalog total is known", () => {
+    render(
+      <DashboardStartup
+        {...props}
+        progress={{
+          type: "progress",
+          phase: "discovering",
+          scanned: 27,
+          providers: ["codex"],
+          previews: [],
+        }}
+      />,
+    );
+    expect(screen.getByRole("progressbar").hasAttribute("value")).toBe(false);
+    expect(screen.getByText("27 session records found")).toBeTruthy();
+    expect(screen.queryByText("0 sessions")).toBeNull();
+  });
+  it("shows real titles and actual preparation counts", () => {
+    render(
+      <DashboardStartup
+        {...props}
+        progress={{
+          type: "progress",
+          phase: "preparing",
+          scanned: 40,
+          prepared: 8,
+          total: 30,
+          providers: ["codex"],
+          previews: [
+            {
+              provider: "codex",
+              slug: "abc",
+              project: "~/vibe-replay",
+              timestamp: "",
+              title: "Fix keyboard navigation",
+              firstPrompt: "prompt",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Fix keyboard navigation")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("8");
+    expect(screen.getByRole("progressbar").getAttribute("max")).toBe("30");
+  });
+  it("stops progress on failures and exposes retry", () => {
+    render(<DashboardStartup {...props} loading={false} error="Discovery failed" />);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Discovery failed");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(props.onRetry).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Continue/ })).toBeNull();
+  });
+});
