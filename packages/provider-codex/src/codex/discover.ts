@@ -1,5 +1,6 @@
 /// <reference path="../sql-js.d.ts" />
 import { createReadStream } from "node:fs";
+import type { BigIntStats } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -53,6 +54,15 @@ export interface CodexSessionMetadata {
   model?: string;
 }
 
+interface RolloutRead {
+  fileStat: BigIntStats | null;
+  info: SessionInfo | null;
+}
+
+function rolloutSignature(fileStat: BigIntStats): string {
+  return [fileStat.dev, fileStat.ino, fileStat.size, fileStat.mtimeNs, fileStat.ctimeNs].join(":");
+}
+
 export async function discoverCodexSessions(
   codexHome = getCodexHome(),
   includeStateDb = true,
@@ -60,10 +70,27 @@ export async function discoverCodexSessions(
 ): Promise<SessionInfo[]> {
   const byId = new Map<string, SessionInfo>();
   const stateMetadata = new Map<string, CodexSessionMetadata>();
+  // State rows and the directory walk often refer to the same rollout. Reuse
+  // only a successful complete read whose source stayed unchanged, and only
+  // within this discovery. Every later discovery still reads current content.
+  const reads = new Map<string, { signature: string; info: SessionInfo }>();
+  const readRollout = async (filePath: string): Promise<RolloutRead> => {
+    const fileStat = await stat(filePath, { bigint: true }).catch(() => null);
+    if (!fileStat?.isFile()) return { fileStat, info: null };
+    const signature = rolloutSignature(fileStat);
+    const cached = reads.get(filePath);
+    if (cached?.signature === signature) return { fileStat, info: cached.info };
+    const info = await extractCodexSessionInfo(filePath, Number(fileStat.size));
+    if (info && info.transcriptStatus !== "unreadable") {
+      const after = await stat(filePath, { bigint: true }).catch(() => null);
+      if (after && rolloutSignature(after) === signature) reads.set(filePath, { signature, info });
+    }
+    return { fileStat, info };
+  };
 
   if (includeStateDb) {
     for (const row of await readThreadRowsFromStateDb(codexHome)) {
-      const info = await sessionInfoFromThreadRow(row, resolveGitRepo);
+      const info = await sessionInfoFromThreadRow(row, resolveGitRepo, readRollout);
       if (info) byId.set(info.sessionId, info);
       if (row.id) stateMetadata.set(row.id, codexMetadataFromThreadRow(row));
     }
@@ -76,9 +103,8 @@ export async function discoverCodexSessions(
   }
 
   for (const filePath of await findRolloutFiles(join(codexHome, "sessions"))) {
-    const fileStat = await stat(filePath).catch(() => null);
+    const { fileStat, info } = await readRollout(filePath);
     if (!fileStat?.isFile()) continue;
-    const info = await extractCodexSessionInfo(filePath, fileStat.size);
     if (!info) continue;
     const stateInfo = stateMetadata.get(info.sessionId);
     const existing = byId.get(info.sessionId);
@@ -126,13 +152,13 @@ export async function readCodexSessionIndex(
 
 async function sessionInfoFromThreadRow(
   row: CodexThreadRow,
-  resolveGitRepo = true,
+  resolveGitRepo: boolean,
+  readRollout: (path: string) => Promise<RolloutRead>,
 ): Promise<SessionInfo | null> {
   if (!row.id) return null;
-  const fileStat = row.rollout_path ? await stat(row.rollout_path).catch(() => null) : null;
-  const extracted = fileStat?.isFile()
-    ? await extractCodexSessionInfo(row.rollout_path, fileStat.size)
-    : undefined;
+  const { fileStat, info: extracted } = row.rollout_path
+    ? await readRollout(row.rollout_path)
+    : { fileStat: null, info: null };
   const transcriptStatus = extracted ? extracted.transcriptStatus : "unreadable";
   const rowFirstPrompt = row.first_user_message
     ? normalizeDiscoveredUserMessage(row.first_user_message)
@@ -170,7 +196,7 @@ async function sessionInfoFromThreadRow(
       toIsoFlexible(row.created_at_ms || row.created_at) ||
       new Date(0).toISOString(),
     lineCount: extracted?.lineCount || 0,
-    fileSize: fileStat?.size || 0,
+    fileSize: Number(fileStat?.size || 0),
     filePath: sourcePath,
     filePaths: sourcePath ? [sourcePath] : [],
     firstPrompt,

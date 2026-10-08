@@ -8,6 +8,7 @@ import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, shortenPath, TOOL_USE_RE } from "@vibe-replay/provider-core/utils";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
+const PROJECT_DISCOVERY_CONCURRENCY = 4;
 
 export async function discoverClaudeCodeSessions(
   projectsDir = CLAUDE_DIR,
@@ -23,10 +24,11 @@ export async function discoverClaudeCodeSessions(
     return sessions;
   }
 
-  for (const projDir of projectDirs) {
+  const discoverProject = async (projDir: string): Promise<SessionInfo[]> => {
+    const projectSessions: SessionInfo[] = [];
     const projPath = join(projectsDir, projDir);
     const projStat = await stat(projPath).catch(() => null);
-    if (!projStat?.isDirectory()) continue;
+    if (!projStat?.isDirectory()) return projectSessions;
 
     const project = decodeProjectDir(projDir);
 
@@ -34,7 +36,7 @@ export async function discoverClaudeCodeSessions(
     try {
       files = await readdir(projPath);
     } catch {
-      continue;
+      return projectSessions;
     }
 
     // Resolve gitRepo once per project dir using the first session's cwd
@@ -56,9 +58,19 @@ export async function discoverClaudeCodeSessions(
           gitRepoResolved = true;
         }
         info.gitRepo = gitRepo;
-        sessions.push(info);
+        projectSessions.push(info);
       }
     }
+    return projectSessions;
+  };
+
+  // Bound streaming readers without changing project/file traversal order or
+  // the first-session cwd used to resolve each project's repository metadata.
+  for (let index = 0; index < projectDirs.length; index += PROJECT_DISCOVERY_CONCURRENCY) {
+    const projects = await Promise.all(
+      projectDirs.slice(index, index + PROJECT_DISCOVERY_CONCURRENCY).map(discoverProject),
+    );
+    for (const projectSessions of projects) sessions.push(...projectSessions);
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

@@ -13,6 +13,11 @@ pnpm build
 
 Requires Node.js >= 22.19.0 and pnpm.
 
+For local discovery/export benchmarks, see
+[the performance measurement notes](docs/performance-session-discovery-export.md).
+The opt-in benchmark reads local histories through read-only guards, prints
+aggregate timings, and removes only its own temporary exports.
+
 If you clone on Windows, enable symlinks so the shared skill directories resolve
 (see [Working with a coding agent](#working-with-a-coding-agent)):
 
