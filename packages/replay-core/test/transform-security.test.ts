@@ -827,6 +827,42 @@ describe("secret redaction in transform", () => {
 // ---------------------------------------------------------------------------
 
 describe("email redaction", () => {
+  it("preserves email matching beside long non-email runs without retrying every suffix", () => {
+    const run = "A".repeat(100_000);
+    const content = `${run}! first.last+tag@example.com ${run}@invalid ${run}@example.org`;
+    const replay = transform(
+      makeParsed([{ role: "user", blocks: [{ type: "text", text: content }] }]),
+    );
+    expect(replay.scenes[0].content).toBe(
+      `${run}! [REDACTED]@example.com ${run}@invalid [REDACTED]@example.org`,
+    );
+  });
+
+  it("keeps legacy leftmost email matches across punctuation and malformed domains", () => {
+    const cases = [
+      "a@b.co@c.org",
+      "...first+tag@example.com",
+      "user@invalid next@example.org",
+      "x@y.c z@example.com",
+      "a@b..com",
+      "a@b.com-tail",
+      "a@b.com.123",
+      "a@@b.com",
+      "中foo@example.com文",
+      "one@example.com/two@example.org",
+    ];
+    for (const content of cases) {
+      const expected = content.replace(
+        /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+        (match) => `[REDACTED]${match.slice(match.indexOf("@"))}`,
+      );
+      const replay = transform(
+        makeParsed([{ role: "user", blocks: [{ type: "text", text: content }] }]),
+      );
+      expect(replay.scenes[0].content).toBe(expected);
+    }
+  });
+
   it("redacts email in user prompt, preserving domain", () => {
     const parsed = makeParsed([
       { role: "user", blocks: [{ type: "text", text: "Email me at alice@example.com" }] },

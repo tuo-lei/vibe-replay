@@ -742,7 +742,9 @@ const SECRET_PATTERNS = [
   // Database connection strings with credentials
   /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis):\/\/[^:]+:[^@]+@[^\s"']+/gi,
   // Email addresses
-  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+  // Only attempt the maximal local-part run. Retrying each suffix cannot
+  // change the match, but makes long base64/tool-output runs quadratic.
+  /(?<![a-zA-Z0-9._%+-])[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
 ];
 
 function redactSubAgentScene(s: Scene): Scene {
