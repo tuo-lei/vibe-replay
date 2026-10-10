@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { scanSession, type ScanInput, type SessionScanResult } from "./scanner.js";
 import { getRemoteHome } from "./remote.js";
@@ -10,6 +11,8 @@ export interface SessionQueryOptions {
   project?: string;
   provider?: string;
   limit?: number;
+  offset?: number;
+  revision?: string;
   scan?: boolean;
   any?: boolean;
   brief?: boolean;
@@ -91,8 +94,18 @@ export async function queryLocalSessions(
   options: SessionQueryOptions = {},
 ): Promise<SessionQueryMatch[]> {
   const limit = normalizeLimit(options.limit);
+  const offset = options.offset || 0;
+  return prepareSessionMatches(
+    filterScoredSessionInfos(sessions, options).slice(offset, offset + limit),
+    options,
+  );
+}
+
+async function prepareSessionMatches(
+  filtered: ScoredSessionInfo[],
+  options: SessionQueryOptions,
+): Promise<SessionQueryMatch[]> {
   const terms = splitTerms(options.query);
-  const filtered = filterScoredSessionInfos(sessions, options).slice(0, limit);
   const matches = filtered.map(({ session, query }) => sessionInfoToMatch(session, terms, query));
 
   if (!options.scan && !options.brief) return matches;
@@ -117,6 +130,48 @@ export async function queryLocalSessions(
       ...(options.brief ? { brief: buildSessionBrief(match, summary) } : {}),
     };
   });
+}
+
+/** Stable list revision prevents a refreshed catalog from skipping or repeating a page. */
+export async function querySessionPage(sessions: SessionInfo[], options: SessionQueryOptions = {}) {
+  const filtered = filterScoredSessionInfos(sessions, options);
+  const revision = createHash("sha256")
+    .update(
+      JSON.stringify({
+        query: options.query || "",
+        project: options.project || "",
+        provider: options.provider || "",
+        any: !!options.any,
+        dedupe: !!options.dedupe,
+        compacted: !!options.compacted,
+        // Pagination binds ordered membership, not live counters or transcript sizes.
+        sessions: filtered.map(({ session }) => sessionPageIdentity(session)),
+      }),
+    )
+    .digest("hex");
+  if (options.revision !== undefined && options.revision !== revision) {
+    const error = new Error(
+      "Session list revision mismatch. Restart from --offset 0 without --revision to use the refreshed catalog.",
+    );
+    Object.assign(error, { code: "revision-mismatch" });
+    throw error;
+  }
+  const offset = options.offset || 0;
+  const limit = normalizeLimit(options.limit);
+  const matches = await prepareSessionMatches(filtered.slice(offset, offset + limit), options);
+  const truncated = offset + matches.length < filtered.length;
+  return {
+    sessions: matches,
+    pagination: {
+      total: filtered.length,
+      returned: matches.length,
+      offset,
+      limit,
+      revision,
+      truncated,
+      ...(truncated ? { nextOffset: offset + matches.length } : {}),
+    },
+  };
 }
 
 export function filterSessionInfos(
@@ -161,10 +216,22 @@ function filterScoredSessionInfos(
         const scoreDelta = b.query.score - a.query.score;
         if (scoreDelta) return scoreDelta;
       }
-      return b.session.timestamp.localeCompare(a.session.timestamp);
+      return (
+        b.session.timestamp.localeCompare(a.session.timestamp) ||
+        sessionPageIdentity(a.session).localeCompare(sessionPageIdentity(b.session))
+      );
     });
 
   return options.dedupe ? dedupeSimilarScoredSessions(filtered) : filtered;
+}
+
+function sessionPageIdentity(session: SessionInfo): string {
+  return JSON.stringify([
+    session.provider,
+    session.location?.kind === "ssh" ? session.location.id : "local",
+    session.sessionId,
+    session.filePath,
+  ]);
 }
 
 export function scanInputFromSession(session: SessionInfo): ScanInput {

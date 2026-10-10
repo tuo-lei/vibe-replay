@@ -109,6 +109,7 @@ npx vibe-replay diagnose <session-id> --query "<error>" --json
 
 Inspect/diagnose default to the current source; export/share prefer the saved replay.
 Use `--source` or `--snapshot` consistently when citing scene indices across commands.
+Session lists expose `pagination`; keep filters and pass `--offset <nextOffset> --revision <hash>` to continue. Diagnostic signals expose separate totals and offsets; continue with `diagnose --offset <nextOffset> --revision <hash> --signal-revision <hash>`. Inspect evidence uses scene offsets instead. Damaged saved sidecars stop CLI reads/export/share; restore a valid backup before proceeding.
 Record `provenance.revision` and pass `--revision <hash>` on subsequent reads/exports
 so a changed source or a different saved snapshot cannot silently change the evidence.
 For search continuation, retain `--query` and use the returned `nextOffset` with
@@ -128,7 +129,7 @@ For a text-only PR summary, use the selected ID and avoid generating images:
 npx vibe-replay export <session-id> --format markdown --json
 ```
 
-This writes `github-summary.md` and `redactions.json` under `~/.vibe-replay/<slug>/exports/`; use the exact paths in the JSON result. Export/share by ID preserves an existing replay snapshot and its editor edits. Pass the explicit source path to regenerate from the current source instead. The review, opt-in cleanup, and PR-append rules below still apply.
+This writes `github-summary.md` and `redactions.json` under `~/.vibe-replay/<slug>/exports/`; use the exact paths in the JSON result. JSON and HTML use separate `replay.redactions.json` and `index.redactions.json` reports, bound to the artifact SHA-256 and content revision. Export/share by ID preserves an existing replay snapshot and its editor edits. Pass the explicit source path to regenerate from the current source instead. The review, opt-in cleanup, and PR-append rules below still apply.
 
 Use `--stdout` for Markdown or JSON without saving output files, discovery caches, or telemetry. Native SQLite queries use a private temporary snapshot, validated against concurrent source changes and deleted after the command; source DB/WAL/SHM files are never modified. SSH stdout exports and sharing preflight read already staged sessions; run `sessions --refresh` first when needed.
 

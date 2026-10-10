@@ -5,7 +5,11 @@ import type { ReplaySession } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export async function generateOutput(session: ReplaySession, outputDir: string): Promise<string> {
+export async function generateOutput(
+  session: ReplaySession,
+  outputDir: string,
+  options: { writeReplayJson?: boolean } = {},
+): Promise<string> {
   await mkdir(outputDir, { recursive: true });
 
   // Load the pre-built viewer HTML
@@ -29,8 +33,10 @@ export async function generateOutput(session: ReplaySession, outputDir: string):
   await writeFile(outputPath, finalHtml, "utf-8");
 
   // Also write the JSON data separately for URL-based loading
-  const jsonPath = join(outputDir, "replay.json");
-  await writeFile(jsonPath, JSON.stringify(session), "utf-8");
+  if (options.writeReplayJson !== false) {
+    const jsonPath = join(outputDir, "replay.json");
+    await writeFile(jsonPath, JSON.stringify(session), "utf-8");
+  }
 
   return outputPath;
 }
