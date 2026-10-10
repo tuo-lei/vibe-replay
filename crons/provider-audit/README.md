@@ -120,6 +120,20 @@ atomically update small current pointers. Publish a pointer only if its immutabl
 file and corresponding ledger event exist. On crash, reconcile pointers from
 the ledger and immutable observations; discard incomplete temporary files only
 after proving they belong to the abandoned attempt. Never replace ledger/history.
+Ledger records are newline-terminated JSON frames with a sequence number and
+digest of their canonical event payload. Before reconciliation, validate every
+complete frame and its immutable observation reference under the exclusive lock.
+A missing final newline is an uncommitted trailing frame, not corruption of the
+validated prefix. First save those trailing bytes and their digest/offset to an
+exclusive, owner-only recovery file and fsync it. Only then truncate the ledger
+to the last validated newline and fsync it; append a recovery event identifying
+the preserved fragment, then reconcile/retry the abandoned observation. This
+exception removes only an uncommitted tail, never a complete historical record.
+Make recovery idempotent using the original ledger offset and fragment digest;
+an interruption must not duplicate events or advance a slot twice. A malformed
+complete frame, invalid digest/reference, or failure to preserve the fragment
+is `blocked-state`; never salvage by deleting committed records or replacing
+the ledger. Recovery files contain only existing privacy-safe ledger bytes.
 Partial observations have their own coverage; they do not replace comparable
 full baselines. Only this attempt releases its own lock. No age-based automatic
 lock breaking; a live job can exceed the normal budget during shutdown.
@@ -201,6 +215,12 @@ missing sources. Partial runs can still supply useful new confirmed findings,
 but cannot end with an unqualified "clean". Notify only newly actionable
 fingerprints or changed blockers; retain quiet weekly outcomes and unchanged
 benign/rejected signatures locally. There is no automatic public run ledger.
+Ledger recording requires successful target/state preflight and ownership of
+the exclusive lock. A preflight block returns only a static coarse reason and
+`validation-skipped` in the invoking private task response, without accessing
+audit state or sources. A competing run returns `skipped-concurrent` there and
+does not read/write the active attempt's ledger or observations. Neither case
+creates a fallback file, state root or notification channel.
 
 Public publication is **off by default**, even if an old routine allowed issues.
 A separately approved finding may use provider name, coarse impact, public
@@ -231,6 +251,9 @@ Before the operator enables a schedule, validate on the enrolled Mac:
    retries cannot double-advance removal streaks, partial/offline slots cannot
    advance them, concurrent runs cannot overwrite state, and sensitive literals
    do not appear in persistent/report output. Leave existing snapshots unchanged.
+   Inject a torn final ledger frame and interruption during recovery: preserve
+   the fragment, retain the complete prefix byte-for-byte, recover idempotently,
+   and reject corruption of a complete frame rather than deleting history.
 5. Record which real source/core/discovery/enrichment strata were actually tested
    and the missing validation. Enabling remains an operator action; do not
    convert a partial smoke test into an audit-wide compatibility pass.

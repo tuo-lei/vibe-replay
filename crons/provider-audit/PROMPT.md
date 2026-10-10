@@ -67,6 +67,10 @@ On shutdown release only this attempt's lock. Incomplete files must not become
 current baselines. Missing/corrupt state is `blocked-state`, not permission to
 reset it. A never-enrolled provider can establish a separately identified first
 baseline; this is not proof of compatibility and not a noisy drift finding.
+Follow README's framed-ledger recovery for an uncommitted final fragment: validate
+the complete prefix, preserve/fsync only that fragment before tail truncation,
+and reconcile idempotently under the lock. Never delete a complete record or
+treat committed-frame corruption as a recoverable tail.
 
 Read approved old snapshots/logs **read-only**. Do not overwrite, rename, delete,
 copy raw legacy records wholesale, or change old missing counters. Import only
@@ -225,8 +229,9 @@ expected/actual behavior and baseline SHA; no private schema literals, source
 paths, IDs, raw content, tool payloads, credentials or hardware identity. A failed
 privacy review blocks publication, never causes a fallback to raw evidence.
 
-Always record one final attempt outcome and per-stratum coverage privately:
-`completed`, `partial`, `blocked`, `duplicate`, or `skipped-concurrent`. A
+After target/state preflight passes and this attempt owns the exclusive lock,
+record one final attempt outcome and per-stratum coverage privately:
+`completed`, `partial`, `blocked`, or `duplicate`. A
 completed run means all enrolled required/established strata were covered in
 both tracks; it does not mean no drift or all possible providers on all machines
 were tested. Return a concise private provider matrix, baseline, counts, new
@@ -236,3 +241,12 @@ Mac produces no run: on the next local start, record the missed slot(s), do at
 most one bounded catch-up for the current window, and do not infer clean history
 or replay every missed week. Retries reuse the slot/ledger under the same lock;
 do not create heartbeat loops, alternate crons, or another machine fallback.
+
+If preflight prevents safe state access, do not read/create/write audit state or
+session sources. Return only the static coarse block code and `validation-skipped`
+through this invocation's private task response; never expose config paths,
+identity or raw errors. If the validated lock is held by another attempt, return
+`skipped-concurrent` through the same response without reading or writing its
+ledger/observations. These outcomes have no ledger entry from this attempt; do
+not create a fallback ledger, notification channel or state directory to record
+them. A later lock-owning run may record independently verified missed slots.
