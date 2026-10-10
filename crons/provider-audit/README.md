@@ -120,12 +120,21 @@ atomically update small current pointers. Publish a pointer only if its immutabl
 file and corresponding ledger event exist. On crash, reconcile pointers from
 the ledger and immutable observations; discard incomplete temporary files only
 after proving they belong to the abandoned attempt. Never replace ledger/history.
+File fsync alone does not persist directory entries. After creating each attempt
+directory, fsync its parent; after observation renames, fsync every containing
+directory **before** appending any ledger reference. A newly created ledger also
+needs its parent fsynced before pointer publication. After a pointer rename,
+fsync its containing directory. If required directory fsync is unavailable or
+fails, stop without publishing new references/pointers and report partial state
+durability; do not silently downgrade this ordering.
 Ledger records are newline-terminated JSON frames with a sequence number and
 digest of their canonical event payload. Before reconciliation, validate every
 complete frame and its immutable observation reference under the exclusive lock.
 A missing final newline is an uncommitted trailing frame, not corruption of the
 validated prefix. First save those trailing bytes and their digest/offset to an
-exclusive, owner-only recovery file and fsync it. Only then truncate the ledger
+exclusive, owner-only recovery file and fsync it, then fsync its containing
+directory. If directory durability cannot be established, keep the original
+ledger untouched and block recovery. Only then truncate the ledger
 to the last validated newline and fsync it; append a recovery event identifying
 the preserved fragment, then reconcile/retry the abandoned observation. This
 exception removes only an uncommitted tail, never a complete historical record.
@@ -238,7 +247,9 @@ Before the operator enables a schedule, validate on the enrolled Mac:
 
 1. Verify the target gate accepts this Mac and rejects missing config, a foreign
    binding, unsafe state path, or another account **before any session read**.
-2. Probe all registered provider storage roots without reading auth files.
+2. Enumerate all registered providers from repository code, then probe only
+   explicitly configured/allowlisted storage roots without reading auth files.
+   Label other registered providers `unconfigured`; do not inspect their paths.
    Independently distinguish missing/denied; do not infer availability from
    bundled samples. A setup smoke test is deliberately sampled, not a weekly
    full census.

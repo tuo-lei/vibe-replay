@@ -68,9 +68,13 @@ current baselines. Missing/corrupt state is `blocked-state`, not permission to
 reset it. A never-enrolled provider can establish a separately identified first
 baseline; this is not proof of compatibility and not a noisy drift finding.
 Follow README's framed-ledger recovery for an uncommitted final fragment: validate
-the complete prefix, preserve/fsync only that fragment before tail truncation,
+the complete prefix, preserve/fsync only that fragment and its directory before
+tail truncation,
 and reconcile idempotently under the lock. Never delete a complete record or
 treat committed-frame corruption as a recoverable tail.
+Persist containing directories after observation creation/renames before ledger
+references, and after ledger creation and pointer renames, as README specifies.
+Unavailable directory fsync is a durability blocker, not a weaker commit protocol.
 
 Read approved old snapshots/logs **read-only**. Do not overwrite, rename, delete,
 copy raw legacy records wholesale, or change old missing counters. Import only
@@ -86,7 +90,10 @@ paths or free-form notes. This task does not migrate existing state destructivel
 
 Enumerate **all providers registered in `packages/providers-default`**, including
 Claude Code/Desktop/Cowork separately. Read each provider's source-path logic
-and nested instructions. Honor approved local env overrides only if their
+and nested instructions. Enumerating the code registry does not authorize path
+access: probe/read only explicitly configured allowlisted source roots/files.
+Label all other registered providers/strata `unconfigured` without inspecting
+their storage, even by metadata or `Provider.detect()`. Honor approved local env overrides only if their
 resolved paths are allowlisted; do not silently use an override on another host.
 Treat Cursor JSONL/SQLite/SDK, Hermes profiles, OpenCode legacy/v2, Pi/OMP,
 Desktop metadata/backing transcripts, and Grok replicas as separate source
