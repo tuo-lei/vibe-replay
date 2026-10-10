@@ -94,9 +94,18 @@ export async function queryLocalSessions(
   options: SessionQueryOptions = {},
 ): Promise<SessionQueryMatch[]> {
   const limit = normalizeLimit(options.limit);
-  const terms = splitTerms(options.query);
   const offset = options.offset || 0;
-  const filtered = filterScoredSessionInfos(sessions, options).slice(offset, offset + limit);
+  return prepareSessionMatches(
+    filterScoredSessionInfos(sessions, options).slice(offset, offset + limit),
+    options,
+  );
+}
+
+async function prepareSessionMatches(
+  filtered: ScoredSessionInfo[],
+  options: SessionQueryOptions,
+): Promise<SessionQueryMatch[]> {
+  const terms = splitTerms(options.query);
   const matches = filtered.map(({ session, query }) => sessionInfoToMatch(session, terms, query));
 
   if (!options.scan && !options.brief) return matches;
@@ -125,7 +134,7 @@ export async function queryLocalSessions(
 
 /** Stable list revision prevents a refreshed catalog from skipping or repeating a page. */
 export async function querySessionPage(sessions: SessionInfo[], options: SessionQueryOptions = {}) {
-  const filtered = filterSessionInfos(sessions, options);
+  const filtered = filterScoredSessionInfos(sessions, options);
   const revision = createHash("sha256")
     .update(
       JSON.stringify({
@@ -136,7 +145,7 @@ export async function querySessionPage(sessions: SessionInfo[], options: Session
         dedupe: !!options.dedupe,
         compacted: !!options.compacted,
         // Pagination binds ordered membership, not live counters or transcript sizes.
-        sessions: filtered.map(sessionPageIdentity),
+        sessions: filtered.map(({ session }) => sessionPageIdentity(session)),
       }),
     )
     .digest("hex");
@@ -147,9 +156,9 @@ export async function querySessionPage(sessions: SessionInfo[], options: Session
     Object.assign(error, { code: "revision-mismatch" });
     throw error;
   }
-  const matches = await queryLocalSessions(sessions, options);
   const offset = options.offset || 0;
   const limit = normalizeLimit(options.limit);
+  const matches = await prepareSessionMatches(filtered.slice(offset, offset + limit), options);
   const truncated = offset + matches.length < filtered.length;
   return {
     sessions: matches,

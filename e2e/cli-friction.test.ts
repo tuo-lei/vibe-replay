@@ -1,6 +1,8 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -30,6 +32,91 @@ async function run(args: string[]) {
     return { stdout: err.stdout, stderr: err.stderr, code: err.code };
   }
 }
+
+it("validates interactively selected saved edits before logged-out or cloud sharing", async () => {
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests++;
+    res.writeHead(500);
+    res.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const isolatedHome = await mkdtemp(join(tmpdir(), "vibe-interactive-share-"));
+  const dir = join(isolatedHome, ".vibe-replay", "picked");
+  await mkdir(dir, { recursive: true });
+  const raw = JSON.stringify({
+    meta: {
+      sessionId: "picked-session",
+      slug: "picked",
+      title: "Saved incident",
+      provider: "codex",
+    },
+    scenes: [{ type: "user-prompt", content: "DO_NOT_SHARE_ORIGINAL_CANARY" }],
+  });
+  await writeFile(join(dir, "replay.json"), raw);
+  try {
+    for (const loggedIn of [false, true]) {
+      if (loggedIn)
+        await writeFile(
+          join(isolatedHome, ".vibe-replay", "auth.json"),
+          JSON.stringify({
+            accounts: {
+              [origin]: { token: "fixture-only", user: { id: "fixture", name: "Fixture" } },
+            },
+          }),
+        );
+      for (const sidecar of ["overlays.json", "annotations.json"]) {
+        await writeFile(join(dir, sidecar), "{");
+        const result = await new Promise<{ output: string; code: number | null }>(
+          (resolve, reject) => {
+            const child = spawn(process.execPath, [cli, "share"], {
+              env: { ...env, HOME: isolatedHome, VIBE_REPLAY_API_URL: origin },
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            let output = "";
+            let selected = false;
+            const timer = setTimeout(() => {
+              child.kill();
+              reject(new Error(`Interactive share timed out: ${output}`));
+            }, 10_000);
+            const data = (chunk: Buffer) => {
+              output += chunk.toString();
+              if (!selected && output.includes("Pick a replay to share")) {
+                selected = true;
+                child.stdin.write("\n");
+              }
+            };
+            child.stdout.on("data", data);
+            child.stderr.on("data", data);
+            child.on("error", (error) => {
+              clearTimeout(timer);
+              reject(error);
+            });
+            child.on("close", (code) => {
+              clearTimeout(timer);
+              resolve({ output, code });
+            });
+          },
+        );
+        expect(result.code).toBe(1);
+        expect(result.output).toContain("Cannot safely read saved edits");
+        expect(result.output).toContain(sidecar);
+        expect(result.output).not.toContain("DO_NOT_SHARE_ORIGINAL_CANARY");
+        expect(await readFile(join(dir, "replay.json"), "utf-8")).toBe(raw);
+        expect(await readFile(join(dir, sidecar), "utf-8")).toBe("{");
+        await expect(readFile(join(dir, "index.html"))).rejects.toMatchObject({ code: "ENOENT" });
+        await rm(join(dir, sidecar));
+      }
+    }
+    expect(requests).toBe(0);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(isolatedHome, { recursive: true, force: true });
+  }
+});
 
 it("uses one JSON error envelope for Commander, invalid inputs, references, and sidecar reads", async () => {
   const path = join(home, "replay.json");

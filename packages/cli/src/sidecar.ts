@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { setTimeout } from "node:timers/promises";
 
 export class SidecarError extends Error {
   readonly code = "invalid-sidecar";
@@ -36,7 +37,16 @@ export async function writeSidecar(path: string, value: unknown): Promise<void> 
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, JSON.stringify(value, null, 2), { encoding: "utf-8", mode: 0o600 });
-    await rename(temporary, path);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(temporary, path);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt >= 5 || !["EPERM", "EACCES", "EBUSY"].includes(code || "")) throw error;
+        await setTimeout(20 * 2 ** attempt);
+      }
+    }
   } finally {
     await rm(temporary, { force: true });
   }

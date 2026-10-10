@@ -1574,6 +1574,8 @@ program
         });
       }
 
+      // Interactive selection must use the same strict edit validation as explicit references.
+      shareSession ??= await readEffectiveReplay(outputDir);
       if (!opts.json) printContentProvenance(provenance);
       const loggedIn = !!loadAuthToken();
       if (opts.dryRun) {
