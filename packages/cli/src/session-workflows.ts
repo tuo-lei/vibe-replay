@@ -17,6 +17,7 @@ import { generateGitHubMarkdown } from "./formatters/github.js";
 import { loadSavedCloudInfo } from "./publishers/cloud.js";
 import { loadSavedGistInfo } from "./publishers/gist.js";
 import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
+import { SidecarError } from "./sidecar.js";
 import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
 import { assertSqliteWalReadable, withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
@@ -651,18 +652,44 @@ function loadedSession(
   };
 }
 
-export async function readEffectiveReplay(outputDir: string): Promise<ReplaySession> {
+async function readSavedReplay(outputDir: string): Promise<ReplaySession> {
   const replay = JSON.parse(
     await readFile(join(outputDir, "replay.json"), "utf-8"),
   ) as ReplaySession;
   validateReplay(replay);
-  const overlays = await loadOverlays(dirname(outputDir), basename(outputDir), undefined, false);
+  return replay;
+}
+
+export async function readEffectiveReplay(outputDir: string): Promise<ReplaySession> {
+  return applySavedEdits(await readSavedReplay(outputDir), outputDir);
+}
+
+async function applySavedEdits(replay: ReplaySession, outputDir: string): Promise<ReplaySession> {
+  const overlays = await loadOverlays(
+    dirname(outputDir),
+    basename(outputDir),
+    undefined,
+    false,
+    true,
+  );
   const annotations = await loadAnnotations(
     dirname(outputDir),
     basename(outputDir),
     undefined,
     false,
+    true,
   );
+  if (
+    overlays.overlays.some(
+      (o) =>
+        o.sceneIndex >= replay.scenes.length ||
+        !["user-prompt", "text-response"].includes(replay.scenes[o.sceneIndex].type) ||
+        (o.field !== undefined && o.field !== "content"),
+    )
+  )
+    throw new SidecarError(join(outputDir, "overlays.json"));
+  if (annotations.some((a) => a.sceneIndex >= replay.scenes.length))
+    throw new SidecarError(join(outputDir, "annotations.json"));
   return sessionWithEffectiveContent(
     {
       ...replay,
@@ -681,7 +708,7 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions, ex
   const prefixMatches: SavedMatch[] = [];
   for (const slug of await readdir(base).catch(() => [] as string[])) {
     try {
-      const replay = await readEffectiveReplay(join(base, slug));
+      const replay = await readSavedReplay(join(base, slug));
       if (options.provider && replay.meta.provider !== options.provider) continue;
       if (
         options.target &&
@@ -700,7 +727,7 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions, ex
   const matches = exactMatches.length || exactOnly ? exactMatches : prefixMatches;
   if (matches.length === 1)
     return loadedSession(
-      matches[0].replay,
+      await applySavedEdits(matches[0].replay, matches[0].outputDir),
       matches[0].outputDir,
       matches[0].publicationDir,
       "snapshot",
@@ -773,15 +800,16 @@ export async function loadCliSession(
     );
     for (const savedDir of savedDirs) {
       if (!existsSync(join(savedDir, "replay.json"))) continue;
-      const existing = await readEffectiveReplay(savedDir);
+      const snapshot = await readSavedReplay(savedDir);
       const savedTarget =
-        existing.meta.location?.kind === "ssh" ? existing.meta.location.id : "local";
+        snapshot.meta.location?.kind === "ssh" ? snapshot.meta.location.id : "local";
       const sourceTarget = info.location?.kind === "ssh" ? info.location.id : "local";
       if (
-        [info.sessionId, ...(info.sessionIds || [])].includes(existing.meta.sessionId) &&
-        existing.meta.provider === source.provider &&
+        [info.sessionId, ...(info.sessionIds || [])].includes(snapshot.meta.sessionId) &&
+        snapshot.meta.provider === source.provider &&
         savedTarget === sourceTarget
       ) {
+        const existing = await applySavedEdits(snapshot, savedDir);
         if ((!existing.meta.title || existing.meta.title === existing.meta.slug) && info.title)
           existing.meta.title = info.title;
         return loadedSession(existing, savedDir, savedDir, "snapshot", options, source.discovery);
@@ -1003,7 +1031,7 @@ export function inspectSession(
   };
 }
 
-export function diagnoseSession(replay: ReplaySession, query?: string, limit = 12) {
+export function diagnoseSession(replay: ReplaySession, query?: string, limit = 12, offset = 0) {
   const toolErrors = replay.scenes.flatMap((scene, index) =>
     scene.type === "tool-call" && scene.isError && !scene.isToolContainer
       ? [
@@ -1016,17 +1044,36 @@ export function diagnoseSession(replay: ReplaySession, query?: string, limit = 1
         ]
       : [],
   );
+  const signals = {
+    apiErrors: replay.meta.apiErrors || [],
+    toolErrors,
+    compactions: replay.meta.compactions || [],
+    diagnostics: replay.meta.diagnostics || [],
+  };
+  const signalRevision = createHash("sha256").update(JSON.stringify(signals)).digest("hex");
+  const page = (total: number) => ({
+    total,
+    returned: Math.max(0, Math.min(limit, total - offset)),
+    offset,
+    limit,
+    truncated: offset + limit < total,
+    ...(offset + limit < total ? { nextOffset: offset + limit } : {}),
+  });
   return {
     revision: contentRevision(replay),
+    signalRevision,
+    pagination: Object.fromEntries(
+      Object.entries(signals).map(([name, entries]) => [name, page(entries.length)]),
+    ),
     sessionId: replay.meta.sessionId,
     title: replay.meta.title,
     apiErrorCount: replay.meta.apiErrors?.length || 0,
-    apiErrors: replay.meta.apiErrors?.slice(0, limit) || [],
+    apiErrors: replay.meta.apiErrors?.slice(offset, offset + limit) || [],
     toolErrorCount: toolErrors.length,
-    toolErrors: toolErrors.slice(0, limit),
+    toolErrors: toolErrors.slice(offset, offset + limit),
     compactionCount: replay.meta.compactions?.length || 0,
-    compactions: replay.meta.compactions?.slice(0, limit) || [],
-    diagnostics: replay.meta.diagnostics?.slice(0, limit) || [],
+    compactions: replay.meta.compactions?.slice(offset, offset + limit) || [],
+    diagnostics: replay.meta.diagnostics?.slice(offset, offset + limit) || [],
     parseWarnings: replay.meta.parseWarnings || [],
     notes: [
       "API errors, tool failures, and recorded compactions are separate signals; zero API errors does not mean a build succeeded.",
@@ -1088,16 +1135,24 @@ export async function exportSession(
   await mkdir(outputDir, { recursive: true });
   const path =
     format === "html"
-      ? await generateOutput(shareable, outputDir)
+      ? await generateOutput(shareable, outputDir, { writeReplayJson: false })
       : join(outputDir, format === "markdown" ? "github-summary.md" : "replay.json");
   if (format !== "html") await writeFile(path, `${text}\n`, "utf-8");
   const report = {
     version: 1,
     source: basename(path),
+    format,
+    artifactSha256: createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex"),
+    contentRevision: contentRevision(shareable),
     alreadyRedactedCount: (text.match(/\[REDACTED\]/g) || []).length,
     leftoverFindings: scanForSecrets(text),
   };
-  const redactionsPath = join(outputDir, "redactions.json");
+  const redactionsPath = join(
+    outputDir,
+    format === "markdown" ? "redactions.json" : `${basename(path, extname(path))}.redactions.json`,
+  );
   await writeFile(redactionsPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
   return { path, redactionsPath, potentialSecretCount: report.leftoverFindings.length, format };
 }

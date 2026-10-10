@@ -225,6 +225,15 @@ npx vibe-replay share ./replay --visibility unlisted --json
 References accept full IDs, unique prefixes of at least four characters, and source paths.
 Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
 selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+Session pages include `pagination.total`, `returned`, `truncated`, `nextOffset`, and
+`revision`. Keep the same filters and pass `--offset <nextOffset> --revision <hash>`
+to continue. Changed matching membership or order requires restarting the search; live metric
+updates do not invalidate pagination. Only the returned
+page is richly scanned. CLI limits must be integers from 1 to 100.
+All `--json` command errors, including argument parsing, emit one stderr object
+with `error`, a stable `code`, and `suggestions`; stdout stays free of errors.
+Discovery coverage remains a structured result: `sessions` and `doctor` may exit 1
+with JSON coverage on stdout when providers cannot be read.
 Copied Cursor/Grok JSONL can share generic wake tags and custom tool payloads.
 When the source lacks provider-specific identity, pass `--provider cursor` or
 `--provider grok-bot`; missing tool IDs are not a reliable identity signal.
@@ -256,7 +265,12 @@ scenes. To read a long scene losslessly, use `--scene <index> --field result
 `text`, `input`, or `result`; offsets count JavaScript UTF-16 characters and each
 page is capped at 10,000 characters. JSON `content.value` is the exact page. `diagnose` separates model API errors, tool failures,
 compactions, and matching text evidence; it does not infer root causes from an error
-string alone. Metadata search does not search tool results: use `inspect --query`
+string alone. Each diagnostic signal has its own `pagination` totals and continuation.
+Use `diagnose --offset <nextOffset>` to skip that many entries in every signal,
+with the same limit and `--revision <hash> --signal-revision <hash>` to require
+unchanged content and diagnostic metadata. Query evidence remains a separate
+first page; use `inspect --query` for scene-based evidence continuation.
+Metadata search does not search tool results: use `inspect --query`
 after selecting a session.
 
 `export` supports `markdown`, `json`, and `html`, defaulting to Markdown with no
@@ -264,10 +278,18 @@ preview images. Files go under `~/.vibe-replay/<slug>/exports` unless `--output`
 provided. `--stdout` emits only Markdown or replay JSON and creates no files,
 including discovery caches and telemetry. SSH stdout exports use already staged
 sessions; run `sessions --refresh` first if the session is not staged.
-File exports include a redaction report. `--github` remains available for the
+File exports return a format-specific `redactionsPath`: Markdown retains
+`redactions.json`, JSON uses `replay.redactions.json`, and HTML uses
+`index.redactions.json`. Each report records its source, format, actual artifact
+SHA-256, and effective content revision. Formats can coexist without overwriting
+one another's reports; re-exporting a format replaces its artifact and report. `--github` remains available for the
 Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
 replay with its editor overlays and annotations when available; an explicit source
 path reparses the source, while an explicit replay JSON uses that saved snapshot.
+Missing optional edit sidecars are allowed. A damaged or unreadable saved overlay
+or annotation stops CLI inspection, export, and sharing with a recovery message;
+restore a valid backup or deliberately choose `--source` with the original source
+reference. Editor sidecar saves use atomic replacement.
 Replay JSON files are recognized by their contents, so a handoff renamed to
 `incident.json` also works. A standalone renamed file does not inherit neighboring
 replay edits, annotations, or publication links; exported JSON already includes

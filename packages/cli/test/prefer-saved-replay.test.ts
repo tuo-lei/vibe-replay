@@ -29,6 +29,40 @@ afterEach(async () => {
   await rm(mockHome, { recursive: true, force: true });
 });
 
+it("validates sidecars only after a saved candidate belongs to the resolved source", async () => {
+  const dir = join(mockHome, ".vibe-replay", "collision");
+  await mkdir(dir, { recursive: true });
+  const snapshot = {
+    meta: { sessionId: "unrelated-session", provider: "pi" },
+    scenes: [{ type: "user-prompt", content: "Unrelated" }],
+  };
+  await writeFile(join(dir, "replay.json"), JSON.stringify(snapshot));
+  await writeFile(join(dir, "overlays.json"), "{");
+  sourceInfo = {
+    provider: "pi",
+    sessionId: "wanted-session",
+    slug: "collision",
+    project: "/repo",
+    cwd: "/repo",
+    version: "",
+    timestamp: "2026-10-10",
+    lineCount: 1,
+    fileSize: 1,
+    filePath: "/missing/wanted.jsonl",
+    filePaths: ["/missing/wanted.jsonl"],
+    firstPrompt: "Wanted",
+    transcriptStatus: "unreadable",
+  };
+  await expect(
+    loadCliSession("wanted-session", { provider: "pi", preferReplay: true }),
+  ).rejects.toThrow("Session transcript is unreadable");
+  snapshot.meta.sessionId = "wanted-session";
+  await writeFile(join(dir, "replay.json"), JSON.stringify(snapshot));
+  await expect(
+    loadCliSession("wanted-session", { provider: "pi", preferReplay: true }),
+  ).rejects.toMatchObject({ code: "invalid-sidecar" });
+});
+
 describe("saved replay before live parsing", () => {
   it.each(["no-prompts", "unreadable", undefined] as const)(
     "uses the edited snapshot with source status=%s",

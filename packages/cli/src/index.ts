@@ -36,7 +36,6 @@ import { publishLocal } from "./publishers/local.js";
 import {
   LOCAL_PREVIEW_HINT,
   SHARE_VISIBILITIES,
-  ShareError,
   printLocalShareFallback,
   shareReplay,
   type ShareVisibility,
@@ -48,7 +47,7 @@ import { discoverProvidersSafely } from "./provider-discovery.js";
 import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
 import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
 import { startDashboard, startServer } from "./server.js";
-import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
+import { formatSessionQueryText, querySessionPage } from "./session-query.js";
 import {
   bucketBytes,
   bucketCount,
@@ -79,6 +78,17 @@ import {
 } from "./session-workflows.js";
 
 setFileCacheAppVersion(CLI_VERSION);
+
+// Commander normally exits before action errors reach the shared handler.
+// In JSON mode capture its full error (including suggestions) and throw instead.
+const jsonErrors = process.argv.includes("--json");
+let commanderErrorText = "";
+program.configureOutput({
+  writeErr: (text) => {
+    commanderErrorText += text;
+  },
+});
+program.exitOverride();
 
 interface GitHubExportResult {
   markdown: string;
@@ -906,6 +916,8 @@ interface SessionsCommandOptions {
   provider?: string;
   providerFilter?: string;
   limit?: number;
+  offset?: number;
+  revision?: string;
   scan?: boolean;
   any?: boolean;
   brief?: boolean;
@@ -929,7 +941,9 @@ program
     "-P, --provider-filter <name>",
     "Filter by provider (claude-code, cursor, codex, grok-bot, pi, ...)",
   )
-  .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
+  .option("-l, --limit <number>", "Maximum sessions to return (1–100)", workflowInteger, 10)
+  .option("--offset <index>", "Skip this many matching sessions (0-based)", workflowInteger, 0)
+  .option("--revision <hash>", "Require the session list revision from the previous page")
   .option("--scan", "Run richer per-session scan for efficiency metrics")
   .option("--any", "Match any query term instead of requiring all terms")
   .option("--brief", "Include scan-backed session briefs and match evidence")
@@ -939,6 +953,7 @@ program
   .action(async (opts: SessionsCommandOptions, command: Command) => {
     const discoverSpinner = opts.json ? undefined : ora("Discovering sessions...").start();
     try {
+      if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
       const queryOptions = normalizeSessionsCommandOptions(opts, command);
       const discovery = await discoverCliSessions(queryOptions);
       let sessions = discovery.sessions;
@@ -956,14 +971,15 @@ program
           (s) => (s.location?.kind === "ssh" ? s.location.id : "local") === queryOptions.target,
         );
       discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
-      if (discovery.failedProviders.length)
+      if (discovery.failedProviders.length && !opts.json)
         process.stderr.write(
           `Discovery incomplete: ${discovery.failedProviders.join(", ")}. Run vibe-replay doctor --json.\n`,
         );
 
       const scanSpinner =
         opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
-      const matches = await queryLocalSessions(sessions, queryOptions);
+      const page = await querySessionPage(sessions, queryOptions);
+      const matches = page.sessions;
       scanSpinner?.succeed(`Prepared ${matches.length} session result(s)`);
       recordTelemetry("session.query", {
         matches: bucketCount(matches.length),
@@ -975,6 +991,7 @@ program
           JSON.stringify(
             {
               sessions: matches,
+              pagination: page.pagination,
               discovery: {
                 source: discovery.source,
                 updatedAt: discovery.updatedAt,
@@ -998,6 +1015,11 @@ program
       } else {
         console.log();
         console.log(formatSessionQueryText(matches));
+        console.log(`Returned ${matches.length} of ${page.pagination.total} matching sessions`);
+        if (page.pagination.truncated)
+          console.log(
+            `Keep the same filters; continue with --offset ${page.pagination.nextOffset} --revision ${page.pagination.revision}`,
+          );
         if (!matches.length)
           console.log(
             "Try --any, broaden filters, or use inspect <session> --query <text> to search tool results.",
@@ -1008,13 +1030,7 @@ program
         process.exitCode = 1;
     } catch (err) {
       discoverSpinner?.fail("Session search failed");
-      const message = err instanceof Error ? err.message : String(err);
-      if (opts.json) {
-        console.error(message);
-      } else {
-        console.error(chalk.red(`\n  ✗ ${message}\n`));
-      }
-      process.exit(1);
+      throw err;
     }
   });
 
@@ -1033,15 +1049,25 @@ interface WorkflowOptions {
   source?: boolean;
   snapshot?: boolean;
   revision?: string;
+  signalRevision?: string;
   field?: "text" | "input" | "result";
   textOffset?: number;
   textLimit?: number;
 }
 
+class CliInputError extends Error {
+  constructor(
+    message: string,
+    readonly code = "invalid-argument",
+  ) {
+    super(message);
+  }
+}
+
 function workflowInteger(value: string): number {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number < 0)
-    throw new Error("Expected a non-negative integer");
+    throw new CliInputError("Expected a non-negative safe integer");
   return number;
 }
 
@@ -1153,6 +1179,16 @@ workflowCommand(
   "Inspect API errors, tool failures, compactions, parser warnings, and matching evidence",
 )
   .option("-q, --query <text>", "Find error evidence in tool results and responses")
+  .option(
+    "--offset <index>",
+    "Skip this many entries in each diagnostic signal",
+    workflowInteger,
+    0,
+  )
+  .option(
+    "--signal-revision <hash>",
+    "Require the diagnostic signal revision from the previous page",
+  )
   .option("--limit <number>", "Maximum entries per signal (1–100)", workflowInteger, 12)
   .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
     if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
@@ -1161,10 +1197,20 @@ workflowCommand(
       ...opts,
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
-    printWorkflowResult(
-      { ...diagnoseSession(replay, opts.query, opts.limit), provenance },
-      opts.json,
-    );
+    const diagnosis = diagnoseSession(replay, opts.query, opts.limit, opts.offset);
+    if (opts.signalRevision !== undefined && opts.signalRevision !== diagnosis.signalRevision)
+      throw new CliInputError(
+        "Diagnostic signal revision mismatch. Restart without --signal-revision to use the current signals.",
+        "revision-mismatch",
+      );
+    printWorkflowResult({ ...diagnosis, provenance }, opts.json);
+    if (!opts.json)
+      for (const [signal, page] of Object.entries(diagnosis.pagination)) {
+        if (page.truncated)
+          console.log(
+            `More ${signal}; keep the same options and continue with --offset ${page.nextOffset} --revision ${diagnosis.revision} --signal-revision ${diagnosis.signalRevision}`,
+          );
+      }
   });
 
 workflowCommand("export", "Export a session as Markdown, replay JSON, or standalone HTML")
@@ -1455,33 +1501,28 @@ program
       let shareSession: ReplaySession | undefined;
 
       if (pathArg) {
-        try {
-          const loaded = await loadCliSession(pathArg, {
-            ...opts,
-            preferReplay: true,
-            readOnly: opts.dryRun,
-            provider: normalizeCommandProviderOption(opts.provider, command),
-          });
-          provenance = loaded.provenance;
-          shareSession = loaded.replay;
-          if (opts.dryRun) {
-            printWorkflowResult(
-              { ...sharePreflight(loaded.replay, visibility, !!loadAuthToken()), provenance },
-              opts.json,
-            );
-            return;
-          }
-          const { existsSync } = await import("node:fs");
-          if (loaded.publicationDir && existsSync(expandUserPath(pathArg))) {
-            outputDir = loaded.publicationDir;
-          } else {
-            shareSourceDir = loaded.publicationDir;
-            outputDir = join(loaded.outputDir, "share");
-            await generateOutput(loaded.replay, outputDir);
-          }
-        } catch (err: unknown) {
-          const message = err instanceof ShareError ? err.message : String(err);
-          throw new Error(message, { cause: err });
+        const loaded = await loadCliSession(pathArg, {
+          ...opts,
+          preferReplay: true,
+          readOnly: opts.dryRun,
+          provider: normalizeCommandProviderOption(opts.provider, command),
+        });
+        provenance = loaded.provenance;
+        shareSession = loaded.replay;
+        if (opts.dryRun) {
+          printWorkflowResult(
+            { ...sharePreflight(loaded.replay, visibility, !!loadAuthToken()), provenance },
+            opts.json,
+          );
+          return;
+        }
+        const { existsSync } = await import("node:fs");
+        if (loaded.publicationDir && existsSync(expandUserPath(pathArg))) {
+          outputDir = loaded.publicationDir;
+        } else {
+          shareSourceDir = loaded.publicationDir;
+          outputDir = join(loaded.outputDir, "share");
+          await generateOutput(loaded.replay, outputDir);
         }
       } else {
         if (opts.json || opts.dryRun || opts.source || opts.snapshot || opts.revision)
@@ -1543,19 +1584,14 @@ program
         return;
       }
       if (!loggedIn) {
-        try {
-          const result = await shareReplay(outputDir, {
-            loggedIn: false,
-            open: !opts.json,
-            session: shareSession,
-          });
-          if (opts.json)
-            console.log(JSON.stringify({ ...result, uploaded: false, provenance }, null, 2));
-          else if (result.mode === "local-fallback") printLocalShareFallback(result);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          throw new Error(message, { cause: err });
-        }
+        const result = await shareReplay(outputDir, {
+          loggedIn: false,
+          open: !opts.json,
+          session: shareSession,
+        });
+        if (opts.json)
+          console.log(JSON.stringify({ ...result, uploaded: false, provenance }, null, 2));
+        else if (result.mode === "local-fallback") printLocalShareFallback(result);
         return;
       }
 
@@ -1568,7 +1604,7 @@ program
         });
         if (result.mode !== "cloud") {
           spinner?.fail("Unexpected local fallback while logged in");
-          process.exit(1);
+          throw new Error("Unexpected local fallback while logged in");
         }
         if (shareSourceDir) {
           const { copyFile } = await import("node:fs/promises");
@@ -1614,8 +1650,7 @@ program
             // Local fallback failed too — fall through to exit.
           }
         }
-        if (opts.json) process.stderr.write(`${JSON.stringify({ error: message })}\n`);
-        process.exit(1);
+        throw err;
       }
     },
   );
@@ -1769,11 +1804,25 @@ telemetryCmd
   });
 
 await program.parseAsync().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const err = error as Error & { code?: string; exitCode?: number; suggestions?: string[] };
+  if (err.exitCode === 0) return; // --help and --version are successful exits.
+  const message =
+    commanderErrorText.trim() || (error instanceof Error ? error.message : String(error));
+  const code =
+    err.code ||
+    (/^--|^Use |^Scene index|^Expected |^Invalid |^share --|^Unknown provider/.test(message)
+      ? "invalid-argument"
+      : /revision mismatch/i.test(message)
+        ? "revision-mismatch"
+        : "operation-failed");
+  const suggestions =
+    err.suggestions || [...message.matchAll(/\(Did you mean (.+?)\?\)/g)].map((match) => match[1]);
   process.stderr.write(
-    process.argv.includes("--json")
-      ? `${JSON.stringify({ error: message })}\n`
-      : `\n  ✗ ${message}\n`,
+    jsonErrors
+      ? `${JSON.stringify({ error: message, code, suggestions })}\n`
+      : commanderErrorText
+        ? commanderErrorText
+        : `\n  ✗ ${message}\n`,
   );
   process.exitCode = 1;
 });

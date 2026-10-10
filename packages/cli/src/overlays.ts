@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { scopedSessionSlug } from "./server-persistence.js";
 import type { ReplaySession, SessionOverlays } from "./types.js";
+
+import { readSidecar } from "./sidecar.js";
 
 const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
 
@@ -14,6 +15,7 @@ export async function loadOverlays(
   slug: string,
   targetId?: string,
   allowLegacyFallback = true,
+  strict = false,
 ): Promise<SessionOverlays> {
   const dirs = targetId
     ? [join(baseDir, scopedSessionSlug(slug, targetId))]
@@ -21,15 +23,29 @@ export async function loadOverlays(
       ? [join(baseDir, slug), resolve("./vibe-replay", slug)]
       : [join(baseDir, slug)];
   for (const dir of dirs) {
-    try {
-      const raw = await readFile(join(dir, "overlays.json"), "utf-8");
-      const parsed = JSON.parse(raw) as SessionOverlays;
-      if (parsed && typeof parsed === "object" && Array.isArray(parsed.overlays)) {
-        return parsed;
-      }
-    } catch {
-      /* not found */
-    }
+    const parsed = await readSidecar<SessionOverlays>(
+      join(dir, "overlays.json"),
+      (value) => {
+        const data = value as SessionOverlays | null;
+        return (
+          !!data &&
+          typeof data === "object" &&
+          Array.isArray(data.overlays) &&
+          (!strict ||
+            (data.version === 1 &&
+              data.overlays.every(
+                (o) =>
+                  !!o &&
+                  Number.isSafeInteger(o.sceneIndex) &&
+                  o.sceneIndex >= 0 &&
+                  typeof o.modifiedValue === "string" &&
+                  typeof o.updatedAt === "string",
+              )))
+        );
+      },
+      strict,
+    );
+    if (parsed) return parsed;
   }
   return EMPTY_OVERLAYS;
 }
