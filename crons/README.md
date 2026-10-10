@@ -10,7 +10,7 @@ There is no cross-agent standard for scheduled tasks, so this folder follows a s
 crons/<task-name>/
   PROMPT.md        # required: frontmatter + the task prompt (English)
   README.md        # optional: background, design notes
-  snapshots/       # optional: task-owned state (baselines, watermarks)
+  snapshots/       # optional: non-sensitive task-owned state; private audits use external state
   ...              # optional: supporting files the prompt references
 ```
 
@@ -40,19 +40,20 @@ The repository currently defines these maintenance handoffs (all times `America/
 | `weekly-deps-update` | Monday 02:00 | GitHub PRs, the `[deps] weekly summary` issue, and a dedicated run ledger issue |
 | `weekly-issue-fix` | Monday 08:45 | GitHub issues/PRs and the `[automation] weekly-issue-fix ledger` issue |
 | `weekly-readme-docs-sync` | Wednesday 02:00 | GitHub merged/open PR history and a dedicated run ledger issue |
+| `provider-audit` | Tuesday 02:00 (proposed, enrolled Mac mini only) | One private local ledger and versioned raw/compatibility observations; never GitHub or tracked snapshots |
 | `muse-cloud-parity` | Tuesday & Friday 09:06 | GitHub PR history and the local `crons/muse-cloud-parity/watermark.json` |
 
 `weekly-issue-fix` keeps Monday 08:45 (not a round hour) to match the live Eng Grok Bot routine. It is product-issue hygiene, not `daily-code-quality` or `weekly-deps-update`.
 
-These files do not activate a schedule on their own. The scheduler needs an isolated repository checkout, `pnpm`, GitHub permissions for PRs/issues/comments, and access to current-head Codex review; otherwise its run must report the missing capability rather than relax the merge rules. `weekly-issue-fix` also uses Sentry when available and must continue without it rather than inventing credentials. The review requirement is retained from the previous routines and may still consume Codex review capacity even when a different bot does the coding.
+These files do not activate a schedule on their own. Maintenance tasks that create PRs need an isolated repository checkout, `pnpm`, GitHub permissions for PRs/issues/comments, and access to current-head Codex review; otherwise their runs must report the missing capability rather than relax the merge rules. The audit-only `provider-audit` instead requires its enrolled Mac, permitted local sources, private state, and Git read access for the pinned baseline; it does not create PRs or request reviews. `weekly-issue-fix` also uses Sentry when available and must continue without it rather than inventing credentials. The review requirement is retained from the previous routines and may still consume Codex review capacity even when a different bot does the coding.
 
-If a task needs machine-local data (local sessions, credentials, paired devices), state that in the prompt body so nobody tries to run it somewhere it can't work. The provider-audit prompt does this: it only audits providers with sessions on the machine it's running on.
+If a task needs machine-local data (local sessions, credentials, paired devices), state that in the prompt body so nobody tries to run it somewhere it can't work. The provider-audit prompt requires an explicitly enrolled Mac mini and permitted local sources; it never falls back to the scheduler's machine or another host. It combines raw schema discovery with independent provider discovery/parser validation, reports partial coverage honestly, and keeps snapshots/ledger outside Git. Its Tuesday cadence is proposed only; old scheduler states are unchanged. See [`provider-audit/README.md`](provider-audit/README.md) for enrollment, private-state and publication rules.
 
 ## Adding a task
 
 1. Create `crons/<task-name>/PROMPT.md` with the frontmatter above and an English prompt.
 2. Wire it into your agent's scheduler pointing at the file.
-3. If the task keeps a baseline, store it under the task directory (e.g. `snapshots/`) and update it in the same PR as any behavior change.
+3. Define the task's durable-state and privacy contract. Non-sensitive public baselines may live under the task directory (e.g. `snapshots/`); machine-derived private audit state must stay outside Git as specified by `provider-audit/README.md`. Never commit actual session data or machine identifiers.
 
 ## Design notes
 
