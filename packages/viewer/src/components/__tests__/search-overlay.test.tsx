@@ -72,4 +72,21 @@ describe("Replay search navigation", () => {
     expect(playbackShortcut).not.toHaveBeenCalled();
     window.removeEventListener("keydown", playbackShortcut);
   });
+
+  it.each([{ metaKey: true }, { ctrlKey: true }])(
+    "closes search with the toggle shortcut %j while focus is inside the dialog",
+    (modifier) => {
+      const onClose = vi.fn();
+      const onSeek = vi.fn();
+      render(
+        <SearchOverlay scenes={[userPrompt("target")]} open onSeek={onSeek} onClose={onClose} />,
+      );
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Search scenes" }), {
+        key: "k",
+        ...modifier,
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onSeek).not.toHaveBeenCalled();
+    },
+  );
 });

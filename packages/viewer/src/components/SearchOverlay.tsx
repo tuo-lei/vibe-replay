@@ -125,6 +125,11 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
     (e: React.KeyboardEvent) => {
       // Playback shortcuts must not run while the search dialog owns focus.
       e.stopPropagation();
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
       if (e.key === "Tab") {
         const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("input, button");
         const first = focusable?.[0];
