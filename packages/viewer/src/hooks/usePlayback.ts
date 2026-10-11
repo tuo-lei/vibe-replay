@@ -146,9 +146,9 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
     (newSpeed: number) => {
       setSpeed(newSpeed);
       if (stateRef.current === "playing") {
-        clearTimer();
         const currentScene = scenes[indexRef.current];
         if (currentScene) {
+          clearTimer();
           const duration = sceneDuration(currentScene, newSpeed);
           timerRef.current = setTimeout(advanceScene, duration);
         }

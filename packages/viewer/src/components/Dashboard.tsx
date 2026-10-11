@@ -29,6 +29,7 @@ import {
   cleanPrompt,
   computeProjectLabels,
   dataSourceBadgeClass,
+  dashboardTabParams,
   formatCacheAge,
   formatCompactAge,
   formatCost,
@@ -96,7 +97,7 @@ import {
 } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
 import { ActiveFilterChip, SessionCard } from "./SessionCard";
-import { ActiveFilterChipRow, SearchFilterInput } from "./SessionFilters";
+import { ActiveFilterChipRow, FilterEmptyState, SearchFilterInput } from "./SessionFilters";
 
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights" | "settings";
 
@@ -3502,7 +3503,7 @@ function SessionsPanel() {
             <SearchFilterInput
               value={filter}
               onChange={handleFilterChange}
-              placeholder="Search sessions, tools, MCP, skills..."
+              placeholder="Search sessions, tools, MCP, skills…"
               ariaLabel="Search sessions"
             />
             {archivedCount > 0 && (
@@ -3701,20 +3702,11 @@ function SessionsPanel() {
               Fetching sessions...
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-12 text-terminal-dim font-mono text-sm space-y-3">
-              <div>
-                {hasActiveFilters ? "No sessions match the current filters" : "No sessions found"}
-              </div>
-              {filter && (
-                <button
-                  type="button"
-                  onClick={() => handleFilterChange("")}
-                  className="rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-1.5 text-xs text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text"
-                >
-                  Clear search
-                </button>
-              )}
-            </div>
+            <FilterEmptyState
+              kind="sessions"
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={handleClearAllFilters}
+            />
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedSessions.map((s) => {
@@ -4726,8 +4718,15 @@ function ReplaysPanel() {
             <div className="text-center py-12 space-y-2">
               <div className="text-terminal-dim font-mono text-sm">No replays yet</div>
               <div className="text-terminal-dimmer font-mono text-xs">
-                Go to the Sessions tab to generate your first replay
+                Choose a session to generate your first replay
               </div>
+              <button
+                type="button"
+                onClick={() => navigateTo(dashboardTabParams("sessions"))}
+                className="rounded-lg bg-terminal-green-subtle px-4 py-2.5 text-xs font-sans font-semibold text-terminal-green hover:bg-terminal-green-emphasis transition-colors"
+              >
+                Browse sessions
+              </button>
             </div>
           )}
           {!serverAvailable && (
@@ -5155,7 +5154,7 @@ function ReplaysPanel() {
             <SearchFilterInput
               value={filter}
               onChange={handleFilterChange}
-              placeholder="Search replays..."
+              placeholder="Search replays…"
               ariaLabel="Search replays"
             />
             {archivedCount > 0 && (
@@ -5296,12 +5295,15 @@ function ReplaysPanel() {
         <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              Fetching replays...
+              Fetching replays…
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              {hasActiveFilters ? "No replays match the current filters" : "No replays found"}
-            </div>
+            <FilterEmptyState
+              kind="replays"
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={handleClearAllFilters}
+              onBrowseSessions={() => navigateTo(dashboardTabParams("sessions"))}
+            />
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedReplays.map((s) => {
@@ -5496,18 +5498,11 @@ export default function Dashboard({
       // `selected` query after the event.
       if (currentTab === "sessions") return;
       navigateTo({
-        tab: "sessions",
+        ...dashboardTabParams("sessions"),
         selected: slug,
         selectedProvider: detail.provider || null,
         selectedSessionId: detail.sessionId || null,
         selectedTargetId: detail.location?.kind === "ssh" ? detail.location.id : null,
-        project: null,
-        q: null,
-        archived: null,
-        provider: null,
-        repo: null,
-        insightsRange: null,
-        replay: null,
       });
     };
     window.addEventListener("vibe-open-session", handler);
@@ -5517,24 +5512,7 @@ export default function Dashboard({
   const handleTabChange = (id: Tab) => {
     setTab(id);
     setMobileNavOpen(false);
-    // Reset cross-tab list state to avoid landing on empty views due to stale project/filter params.
-    navigateTo({
-      tab: id,
-      settingsSection: null,
-      projectView: null,
-      insightsSection: null,
-      project: null,
-      q: null,
-      archived: null,
-      provider: null,
-      repo: null,
-      insightsRange: null,
-      replay: null,
-      selected: null,
-      selectedProvider: null,
-      selectedSessionId: null,
-      selectedTargetId: null,
-    });
+    navigateTo(dashboardTabParams(id));
   };
 
   const tabButton = (id: Tab, label: string) => (

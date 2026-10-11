@@ -1,7 +1,7 @@
 import { VibeReplayBrand } from "./components/VibeReplayBrand";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
-import { navigateTo } from "./components/dashboard-utils";
+import { dashboardTabParams, navigateTo } from "./components/dashboard-utils";
 import LocalChatAssistant from "./components/LocalChatAssistant";
 import Player from "./components/Player";
 import type { ActiveView } from "./components/ViewTabBar";
@@ -609,7 +609,7 @@ export default function App() {
               (t) => (
                 <button
                   key={t}
-                  onClick={() => navigateTo({ view: "dashboard", session: null, tab: t })}
+                  onClick={() => navigateTo(dashboardTabParams(t))}
                   className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg text-terminal-dim hover:text-terminal-text transition-all duration-200 ease-material"
                 >
                   {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -857,7 +857,7 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     setMobileMenuOpen(false);
-                    navigateTo({ view: "dashboard", session: null, tab: "settings" });
+                    navigateTo(dashboardTabParams("settings"));
                   }}
                   className="w-full rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-2 text-left text-xs font-mono text-terminal-dim transition-colors hover:text-terminal-text"
                 >
