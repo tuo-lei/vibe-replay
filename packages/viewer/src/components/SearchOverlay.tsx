@@ -65,14 +65,18 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Focus input when opened
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setSelectedIdx(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (!open) return;
+    const previousFocus = document.activeElement;
+    setQuery("");
+    setSelectedIdx(0);
+    inputRef.current?.focus();
+    return () => {
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
   }, [open]);
 
   // Search results
@@ -119,17 +123,38 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Playback shortcuts must not run while the search dialog owns focus.
+      e.stopPropagation();
+      if (e.key === "Tab") {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("input, button");
+        const first = focusable?.[0];
+        const last = focusable?.[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      // Result buttons and the close button retain native Enter/Space behavior.
+      if (e.target !== inputRef.current) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIdx((i) => Math.min(i + 1, results.length - 1));
+        setSelectedIdx((i) => Math.max(0, Math.min(i + 1, results.length - 1)));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIdx((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
         selectResult(selectedIdx);
-      } else if (e.key === "Escape") {
-        onClose();
       }
     },
     [results.length, selectedIdx, selectResult, onClose],
@@ -148,6 +173,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
       />
       {/* oxlint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/prefer-tag-over-role -- dialog panel owns arrow-key nav; native <dialog> would need a showModal lifecycle refactor */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label="Search scenes"
         aria-modal="true"
@@ -165,17 +191,27 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
               setQuery(e.target.value);
               setSelectedIdx(0);
             }}
-            placeholder="Search scenes..."
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Search scenes…"
             aria-label="Search scenes"
-            className="flex-1 bg-transparent text-sm font-sans font-medium text-terminal-text placeholder-terminal-dim outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm font-sans font-medium text-terminal-text placeholder-terminal-dim outline-none focus-visible:ring-1 focus-visible:ring-terminal-green/40 rounded"
           />
-          <kbd className="text-[10px] font-mono text-terminal-dimmer bg-terminal-surface px-2 py-0.5 rounded-md">
+          <kbd className="hidden sm:block text-[10px] font-mono text-terminal-dimmer bg-terminal-surface px-2 py-0.5 rounded-md">
             ESC
           </kbd>
+          <button
+            type="button"
+            aria-label="Close search"
+            onClick={onClose}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-terminal-dim hover:bg-terminal-surface hover:text-terminal-text transition-colors"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
+        <div ref={listRef} className="max-h-[50vh] overflow-y-auto overscroll-contain">
           {query.length < 2 ? (
             <div className="px-4 py-8 text-center text-xs font-sans font-medium text-terminal-dim">
               Type at least 2 characters to search

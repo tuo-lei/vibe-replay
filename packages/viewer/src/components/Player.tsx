@@ -400,9 +400,9 @@ export default function Player({
     (autoPlay = true) => {
       setLanded(true);
       if (autoPlay) {
-        setTimeout(play, 300);
+        play();
       } else {
-        setTimeout(() => seekTo(initialSeekIndex), 100);
+        seekTo(initialSeekIndex);
       }
     },
     [play, seekTo, initialSeekIndex],

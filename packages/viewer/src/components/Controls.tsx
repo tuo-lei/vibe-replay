@@ -50,117 +50,140 @@ export default function Controls({
   const flashClass = (id: string) => (flashId === id ? "scale-105" : "");
 
   const ghostBtn =
-    "px-2.5 py-1.5 text-xs font-sans rounded-lg transition-all duration-200 ease-material";
+    "px-2.5 py-1.5 text-xs font-sans rounded-lg transition-[color,background-color,transform] duration-200 ease-material";
 
   // Mobile touch target size
   const touchBtn =
-    "w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-200 ease-material";
+    "w-11 h-11 shrink-0 flex items-center justify-center rounded-lg transition-[color,background-color,transform] duration-200 ease-material";
 
   return (
     <>
       {/* Mobile controls — evenly distributed */}
       <div
-        className={`flex md:hidden items-center justify-between py-1.5 pl-3 ${
-          reserveAssistantSpace ? "pr-20" : "pr-3"
-        }`}
+        className={`md:hidden space-y-1 py-1.5 pl-3 ${reserveAssistantSpace ? "pr-20" : "pr-3"}`}
       >
-        <button
-          onClick={() => {
-            flash("play");
-            onTogglePlayPause();
-          }}
-          className={`${touchBtn} bg-terminal-green-subtle text-terminal-green ${flashClass("play")}`}
-          title="Play/Pause"
-        >
-          <span className="text-base">{playIcon}</span>
-        </button>
-
-        <button
-          onClick={() => {
-            flash("prev");
-            onPrevPrompt();
-          }}
-          className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("prev")}`}
-          title="Previous turn"
-          aria-label="Previous turn"
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center justify-between gap-2">
+          <button
+            aria-label={playLabel}
+            onClick={() => {
+              flash("play");
+              onTogglePlayPause();
+            }}
+            className={`${touchBtn} bg-terminal-green-subtle text-terminal-green ${flashClass("play")}`}
+            title="Play/Pause"
           >
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
-
-        <span className="text-xs font-mono text-terminal-text tabular-nums font-medium">
-          {currentTurn} / {userPromptCount}
-        </span>
-
-        <button
-          onClick={() => {
-            flash("next");
-            onNextPrompt();
-          }}
-          className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("next")}`}
-          title="Next turn"
-          aria-label="Next turn"
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            <span className="text-base">{playIcon}</span>
+          </button>
+          <fieldset
+            aria-label="Playback speed"
+            className="flex rounded-lg bg-terminal-surface overflow-hidden"
           >
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </button>
-
-        <button
-          onClick={() => {
-            flash("search");
-            onOpenSearch();
-          }}
-          className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("search")}`}
-          title="Search"
-          aria-label="Search"
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-        </button>
-
-        {onOpenOutline && (
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-label={`Playback speed ${s}x`}
+                aria-pressed={speed === s}
+                onClick={() => onChangeSpeed(s)}
+                className={`min-w-9 h-11 px-2 text-xs font-mono transition-colors ${speed === s ? "bg-terminal-green-subtle text-terminal-green" : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"}`}
+              >
+                {s}×
+              </button>
+            ))}
+          </fieldset>
+          <span className="text-[10px] font-mono text-terminal-dim tabular-nums">
+            {Math.max(0, currentIndex + 1)} / {totalScenes}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
           <button
             onClick={() => {
-              flash("outline");
-              onOpenOutline();
+              flash("prev");
+              onPrevPrompt();
             }}
-            className={`${touchBtn} bg-terminal-surface border border-terminal-border text-terminal-text ${flashClass("outline")}`}
-            title="Outline"
+            className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("prev")}`}
+            title="Previous turn"
+            aria-label="Previous turn"
           >
-            {"\u2630"}
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
           </button>
-        )}
+
+          <span className="text-xs font-mono text-terminal-text tabular-nums font-medium">
+            {currentTurn} / {userPromptCount}
+          </span>
+
+          <button
+            onClick={() => {
+              flash("next");
+              onNextPrompt();
+            }}
+            className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("next")}`}
+            title="Next turn"
+            aria-label="Next turn"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+
+          <button
+            onClick={() => {
+              flash("search");
+              onOpenSearch();
+            }}
+            className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("search")}`}
+            title="Search"
+            aria-label="Search"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.35-4.35" />
+            </svg>
+          </button>
+
+          {onOpenOutline && (
+            <button
+              onClick={() => {
+                flash("outline");
+                onOpenOutline();
+              }}
+              className={`${touchBtn} bg-terminal-surface border border-terminal-border text-terminal-text ${flashClass("outline")}`}
+              title="Outline"
+              aria-label="Open outline"
+            >
+              {"\u2630"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Desktop controls */}
@@ -177,6 +200,7 @@ export default function Controls({
             }}
             className={`${ghostBtn} bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis font-medium ${flashClass("play")}`}
             title="Play/Pause (Space)"
+            aria-label={playLabel}
           >
             <span>{playIcon}</span>
             <span className="ml-1.5">{playLabel}</span>
@@ -186,11 +210,13 @@ export default function Controls({
             {SPEEDS.map((s) => (
               <button
                 key={s}
+                aria-label={`Playback speed ${s}x`}
+                aria-pressed={speed === s}
                 onClick={() => {
                   flash(`speed-${s}`);
                   onChangeSpeed(s);
                 }}
-                className={`px-2.5 py-1.5 text-xs font-mono transition-all duration-200 ease-material ${
+                className={`px-2.5 py-1.5 text-xs font-mono transition-[color,background-color,transform] duration-200 ease-material ${
                   speed === s
                     ? "bg-terminal-green-subtle text-terminal-green font-medium"
                     : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
@@ -209,6 +235,7 @@ export default function Controls({
               }}
               className={`${ghostBtn} text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover ${flashClass("prev")}`}
               title="Previous turn (p)"
+              aria-label="Previous turn"
             >
               {"\u2039"}
             </button>
@@ -224,6 +251,7 @@ export default function Controls({
               }}
               className={`${ghostBtn} text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover ${flashClass("next")}`}
               title="Next turn (n)"
+              aria-label="Next turn"
             >
               {"\u203A"}
             </button>
