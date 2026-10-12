@@ -4,8 +4,10 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   assertSqliteSnapshotCurrent,
+  isSqliteReadOnlyScope,
   readSqliteSnapshot,
   assertSqliteWalReadable,
   withSqliteReadSource,
@@ -181,19 +183,32 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   const dbPaths = await listSdkIndexDbPaths(CURSOR_PROJECTS_ROOT);
   const index = new Map<string, SdkAgent>();
   const blocked: SqliteSnapshotRequiredError[] = [];
-  for (const dbPath of dbPaths) {
+
+  // Every automation run owns its own index.db, so a machine can hold hundreds.
+  // Finished runs never change again: reuse their agent rows while the file
+  // (and WAL) fingerprint is unchanged instead of spawning sqlite3 for each one.
+  const persisted = (await readFileCache<SdkAgentIndexCache>(SDK_AGENT_INDEX_CACHE_KEY))?.data;
+  const results = await mapLimit(dbPaths, SDK_INDEX_READ_CONCURRENCY, async (dbPath) => {
+    // Fingerprint before reading: a write that lands mid-read leaves the cached
+    // fingerprint stale, so the next scan re-reads instead of trusting old rows.
+    const fingerprint = await sdkIndexDbFingerprint(dbPath);
+    const hit = persisted?.[dbPath];
+    if (fingerprint && hit && sameSdkIndexFingerprint(hit, fingerprint)) {
+      return { agents: hit.agents, entry: hit, fresh: false };
+    }
     let handle: IndexDbHandle | null = null;
     try {
       handle = await openIndexDb(dbPath);
-      if (!handle) continue;
+      if (!handle) return { agents: [] as SdkAgent[], fresh: false };
       const rows = await queryIndexDb(
         handle,
         "SELECT agent_id, workspace_ref, status, name, created_at, updated_at FROM agents",
       );
+      const agents: SdkAgent[] = [];
       for (const row of rows) {
         const agentId = stringOrEmpty(row.agent_id);
         if (!agentId) continue;
-        index.set(agentId, {
+        agents.push({
           agentId,
           workspaceRef: stringOrEmpty(row.workspace_ref),
           status: stringOrEmpty(row.status) || "UNKNOWN",
@@ -203,13 +218,33 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
           dbPath,
         });
       }
+      return { agents, entry: fingerprint ? { ...fingerprint, agents } : undefined, fresh: true };
     } catch (error) {
       if (error instanceof SqliteSnapshotRequiredError) blocked.push(error);
       // SDK schema differs across Cursor versions; skip databases we can't read.
+      return { agents: [] as SdkAgent[], fresh: false };
     } finally {
       closeIndexDb(handle);
     }
+  });
+
+  // Merge in path order so duplicate agent ids resolve exactly as a serial scan did.
+  // Unreadable databases get no cache entry, so they are retried on the next scan.
+  const nextCache: SdkAgentIndexCache = {};
+  let cacheChanged = false;
+  results.forEach((result, i) => {
+    for (const agent of result.agents) index.set(agent.agentId, agent);
+    if (result.entry) nextCache[dbPaths[i]] = result.entry;
+    if (result.fresh) cacheChanged = true;
+  });
+  // Rewrite when a database was (re)read, or to drop entries for databases that vanished.
+  if (persisted && Object.keys(persisted).length !== Object.keys(nextCache).length) {
+    cacheChanged = true;
   }
+  if (cacheChanged && !isSqliteReadOnlyScope()) {
+    await writeFileCache<SdkAgentIndexCache>(SDK_AGENT_INDEX_CACHE_KEY, nextCache);
+  }
+
   // Do not cache partial coverage as a successful full index.
   if (blocked.length) {
     throw new SdkIndexSnapshotRequiredError(blocked[0].message, [...index.values()]);
@@ -217,6 +252,60 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   cachedAgentIndex = index;
   cachedAgentIndexAt = Date.now();
   return index;
+}
+
+interface SdkIndexDbFingerprint {
+  size: number;
+  mtimeMs: number;
+  walSize: number;
+  walMtimeMs: number;
+}
+
+type SdkAgentIndexCache = Record<string, SdkIndexDbFingerprint & { agents: SdkAgent[] }>;
+
+const SDK_AGENT_INDEX_CACHE_KEY = "cursor-sdk-agent-index-v1";
+const SDK_INDEX_READ_CONCURRENCY = 8;
+
+async function sdkIndexDbFingerprint(dbPath: string): Promise<SdkIndexDbFingerprint | null> {
+  const [db, wal] = await Promise.all([
+    stat(dbPath).catch(() => null),
+    stat(`${dbPath}-wal`).catch(() => null),
+  ]);
+  if (!db?.isFile()) return null;
+  return {
+    size: db.size,
+    mtimeMs: db.mtimeMs,
+    walSize: wal?.size ?? 0,
+    walMtimeMs: wal?.mtimeMs ?? 0,
+  };
+}
+
+function sameSdkIndexFingerprint(a: SdkIndexDbFingerprint, b: SdkIndexDbFingerprint): boolean {
+  return (
+    a.size === b.size &&
+    a.mtimeMs === b.mtimeMs &&
+    (a.walSize ?? 0) === b.walSize &&
+    (a.walMtimeMs ?? 0) === b.walMtimeMs
+  );
+}
+
+/** Run `worker` over `items` with bounded concurrency, preserving result order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+  return results;
 }
 
 /**
