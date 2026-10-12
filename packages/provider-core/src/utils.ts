@@ -207,6 +207,11 @@ export function withSqliteSnapshotScope<T>(action: () => Promise<T>): Promise<T>
   });
 }
 
+/** True inside `withReadOnlySqlite(true, ...)`, where best-effort cache writes must be skipped. */
+export function isSqliteReadOnlyScope(): boolean {
+  return sqliteNoWrites.getStore() !== undefined;
+}
+
 /** Carry the zero-write contract through async provider discovery and parsing. */
 export function withReadOnlySqlite<T>(readOnly: boolean, action: () => Promise<T>): Promise<T> {
   if (!readOnly || sqliteNoWrites.getStore()) return action();
