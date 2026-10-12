@@ -190,6 +190,30 @@ describe("Pi discovery scan cache", () => {
     expect(Object.keys(cacheRows()).sort()).toEqual([firstPath, secondPath].sort());
   });
 
+  it("garbage-collects other roots' vanished transcripts only when a write happens", async () => {
+    const first = await makeRoot();
+    const second = await makeRoot();
+    const firstPath = join(first.projectDir, "2026-01-01T00-00-00-000Z_one.jsonl");
+    const secondPath = join(second.projectDir, "2026-01-01T00-00-00-000Z_two.jsonl");
+    await writeFile(firstPath, sessionLines("one", ["a"]), "utf-8");
+    await writeFile(secondPath, sessionLines("two", ["b"]), "utf-8");
+    await discoverPiSessions(first.root, false);
+    await discoverPiSessions(second.root, false);
+    expect(Object.keys(cacheRows())).toHaveLength(2);
+
+    // A warm scan of the second root writes nothing, so the first root's stale entry stays.
+    await rm(firstPath);
+    const writes = cache.writes;
+    await discoverPiSessions(second.root, false);
+    expect(cache.writes).toBe(writes);
+    expect(Object.keys(cacheRows())).toHaveLength(2);
+
+    // Any write for another reason collects it.
+    await writeFile(secondPath, sessionLines("two", ["b", "c"]), "utf-8");
+    await discoverPiSessions(second.root, false);
+    expect(Object.keys(cacheRows())).toEqual([secondPath]);
+  });
+
   it("keeps every root's fresh entries when roots are scanned concurrently", async () => {
     const roots = await Promise.all([makeRoot(), makeRoot(), makeRoot()]);
     const paths: string[] = [];

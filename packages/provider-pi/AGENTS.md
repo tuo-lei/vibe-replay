@@ -20,7 +20,8 @@ line by line cost about 3s per call.
   partial, so it is rescanned next time.
 - **One shared cache key.** Entries for other roots are kept while their file still exists
   (local, OMP and staged SSH roots share it); entries under the scanned root that vanished
-  are pruned. Roots are discovered concurrently, so the read-merge-write is serialized
+  are pruned, and other roots' vanished files are collected (bounded concurrency) only when
+  a write happens anyway, so a warm scan does no filesystem work for the cache. Roots are discovered concurrently, so the read-merge-write is serialized
   in-process and merges against a fresh read of the cache, never the pre-scan snapshot
   (otherwise the last writer drops another root's entries). The cache is only rewritten
   when something was rescanned or pruned, and never

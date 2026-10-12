@@ -171,8 +171,9 @@ let scanCacheWrite: Promise<void> = Promise.resolve();
  * staged SSH targets), so the read-merge-write is serialized and merges against the cache as
  * it is *now*, not the snapshot taken before scanning; otherwise the last writer would discard
  * another root's fresh entries. Entries for other roots are kept while their file still
- * exists, and entries for deleted transcripts are dropped so the cache cannot grow forever.
- * The write is skipped when nothing was rescanned and nothing was pruned.
+ * exists (checked only when a write happens, with bounded concurrency), and entries for
+ * deleted transcripts are dropped so the cache cannot grow forever. The write, and with it
+ * all filesystem work, is skipped when nothing was rescanned and nothing was pruned.
  */
 function persistScanCache(
   root: string,
@@ -193,20 +194,26 @@ async function mergeScanCache(
   const previous =
     persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
   const next: PiScanCache = {};
+  const foreign: Array<[string, PiScanCacheEntry]> = [];
   let pruned = false;
   const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
   for (const [path, entry] of Object.entries(previous)) {
-    if (path.startsWith(rootPrefix)) {
-      if (fresh.has(path)) continue;
-      pruned = true;
-    } else if (await stat(path).catch(() => null)) {
-      next[path] = entry;
-    } else {
-      pruned = true;
-    }
+    if (!path.startsWith(rootPrefix)) foreign.push([path, entry]);
+    else if (!fresh.has(path)) pruned = true;
+  }
+  // A warm scan changes nothing, so it must not touch the filesystem again.
+  if (!scannedAny && !pruned) return;
+
+  // Entries for other roots are garbage-collected only when a write happens anyway.
+  const alive = await mapLimit(foreign, SCAN_CONCURRENCY, async ([path]) =>
+    stat(path)
+      .then(() => true)
+      .catch(() => false),
+  );
+  for (const [index, [path, entry]] of foreign.entries()) {
+    if (alive[index]) next[path] = entry;
   }
   for (const [path, entry] of fresh) next[path] = entry;
-  if (!scannedAny && !pruned) return;
   await writeFileCache<PiScanCache>(SCAN_CACHE_KEY, next);
 }
 
