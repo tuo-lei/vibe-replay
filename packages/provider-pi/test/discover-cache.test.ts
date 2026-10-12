@@ -232,6 +232,36 @@ describe("Pi discovery scan cache", () => {
     expect(cache.writes).toBe(writesAfterCold);
   });
 
+  it("does not alias relative session roots across working directories", async () => {
+    const cwd = process.cwd();
+    const stamp = new Date("2026-01-01T00:00:00.000Z");
+    const homes: string[] = [];
+    for (const id of ["session-aaa", "session-bbb"]) {
+      const home = await mkdtemp(join(tmpdir(), "vibe-pi-rel-"));
+      tempDirs.push(home);
+      const dir = join(home, "sessions", "--Users-test-project--");
+      await mkdir(dir, { recursive: true });
+      // Same relative path, same size and same mtime: only the working directory differs.
+      const file = join(dir, "2026-01-01T00-00-00-000Z_s.jsonl");
+      await writeFile(file, sessionLines(id, ["hello"]), "utf-8");
+      await utimes(file, stamp, stamp);
+      homes.push(home);
+    }
+
+    try {
+      const seen: string[] = [];
+      for (const home of homes) {
+        process.chdir(home);
+        const sessions = await discoverPiSessions("sessions", false);
+        seen.push(...sessions.map((session) => session.sessionId));
+      }
+      expect(seen).toEqual(["session-aaa", "session-bbb"]);
+      expect(Object.keys(cacheRows()).every((path) => path.startsWith("/"))).toBe(true);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
   it("does not write the cache inside a read-only scope", async () => {
     const { root, projectDir } = await makeRoot();
     await writeFile(

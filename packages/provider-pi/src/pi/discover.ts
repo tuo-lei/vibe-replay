@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, join, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
@@ -64,6 +64,8 @@ export async function discoverPiSessions(
       if (!fileStat) continue;
       candidates.push({
         filePath,
+        // Relative roots (PI_CODING_AGENT_SESSION_DIR) must not alias across working directories.
+        cacheKey: resolve(filePath),
         projectDir,
         size: fileStat.size,
         mtimeMs: fileStat.mtimeMs,
@@ -82,16 +84,16 @@ export async function discoverPiSessions(
 
   const infos = await mapLimit(candidates, SCAN_CONCURRENCY, async (candidate) => {
     let scan: PiFileScan | undefined;
-    const cached = cachedEntries[candidate.filePath];
+    const cached = cachedEntries[candidate.cacheKey];
     if (isReusableScanEntry(cached, candidate)) {
       scan = cached.scan;
-      freshEntries.set(candidate.filePath, cached);
+      freshEntries.set(candidate.cacheKey, cached);
     } else {
       scannedAny = true;
       scan = await scanPiSessionFile(candidate.filePath);
       // A failed read may be partial, so it is never persisted.
       if (!scan.readFailed) {
-        freshEntries.set(candidate.filePath, {
+        freshEntries.set(candidate.cacheKey, {
           size: candidate.size,
           mtimeMs: candidate.mtimeMs,
           scan,
@@ -111,7 +113,7 @@ export async function discoverPiSessions(
   for (const info of infos) if (info) sessions.push(info);
 
   if (!isSqliteReadOnlyScope()) {
-    await persistScanCache(sessionsRoot, freshEntries, scannedAny);
+    await persistScanCache(resolve(sessionsRoot), freshEntries, scannedAny);
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -120,6 +122,7 @@ export async function discoverPiSessions(
 
 interface PiSessionCandidate {
   filePath: string;
+  cacheKey: string;
   projectDir: string;
   size: number;
   mtimeMs: number;
