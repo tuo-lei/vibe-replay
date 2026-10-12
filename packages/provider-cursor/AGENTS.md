@@ -23,5 +23,23 @@ machine can hold a ~25 GB `state.vscdb` (mostly `bubbleId:*` rows) and hundreds 
   path order so a duplicate agent id resolves as a serial scan would. Only successfully
   read databases get an entry, and nothing is written inside `withReadOnlySqlite(true, …)`
   (`isSqliteReadOnlyScope`).
+- **SDK enrichment: count spawns, not queries.** `ChildProcess.spawn` blocks the main
+  thread (~36 ms each in a large process), so `SCAN_CONCURRENCY` cannot parallelise it;
+  the old 4-5 `sqlite3` spawns per agent cost 100 s of the 106 s serial rich scan here.
+  `loadSdkAgentEnrichment` now reads a database in-process with sql.js only when it is
+  under `SQLJS_PREFERRED_MAX_BYTES` (16 MB) and `-wal`/`-journal` are empty
+  (`isMainFileComplete`; sql.js ignores sidecars, so it must never read past a non-empty
+  one). Everything else uses one `sqlite3 -readonly -json` run with two statements
+  (`parseConcatenatedJsonArrays`: no output = no runs, one array = runs without events),
+  falling back to the stepwise path on any non-snapshot error. `SqliteSnapshotRequiredError`
+  always propagates, and the fallback must never mask a main-file race. Test with spawn
+  counts (`sdk-enrichment-read-paths.test.ts`), not wall time: timings on a loaded
+  machine are noisy.
+- **Known remaining cost: large shared `index.db`.** A 148 MB WAL-mode database holding
+  266 agents still costs ~88 ms per agent, almost all in `withSqliteReadSource` staging a
+  fresh snapshot per operation (SQL itself is ~12 ms; the same call is 0.1 ms once the
+  snapshot is staged in the scope). Fixing it needs a fingerprint-validated, idle-expiring
+  snapshot pool; do not simply wrap a whole scan in one `withSqliteSnapshotScope`, which
+  would let cached scan results record a newer fingerprint than the data they hold.
 - **`sourceFingerprint` intentionally changes whenever the live global DB does.** That is
   by design (late tool results), not a cache bug; do not "fix" it to stabilise output.
