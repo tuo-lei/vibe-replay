@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SqliteSnapshotRequiredError } from "@vibe-replay/provider-core/utils";
 
 // Counts real sqlite3 spawns while still running them.
-const spawns = vi.hoisted(() => ({ count: 0 }));
+const spawns = vi.hoisted(() => ({ count: 0, sql: [] as string[] }));
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   const { promisify } = await import("node:util");
@@ -17,6 +17,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   }) as typeof actual.execFile;
   (execFile as any)[promisify.custom] = (...args: any[]) => {
     spawns.count++;
+    spawns.sql.push(String(args[1]?.at(-1)));
     return (actual.execFile as any)[promisify.custom](...args);
   };
   return { ...actual, execFile };
@@ -169,6 +170,10 @@ describe("SDK enrichment read paths", () => {
       let before = spawns.count;
       const events = await loadSdkAgentEnrichment(agent("agent-events", walPath));
       expect(spawns.count - before).toBe(1);
+      // Both SELECTs share one read transaction so a concurrent commit cannot split them.
+      expect(spawns.sql.at(-1)).toMatch(
+        /^BEGIN;.*SELECT \* FROM runs.*SELECT \* FROM run_events.*COMMIT;$/,
+      );
       before = spawns.count;
       const noEvents = await loadSdkAgentEnrichment(agent("agent-no-events", walPath));
       expect(spawns.count - before).toBe(1);

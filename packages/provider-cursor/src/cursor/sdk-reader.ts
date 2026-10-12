@@ -386,9 +386,13 @@ async function loadEnrichmentWithOneSpawn(
           "-readonly",
           "-json",
           source,
+          // One explicit read transaction: separate statements would each see their own
+          // snapshot, so a run committed between them could surface events without its run.
           [
+            "BEGIN;",
             `SELECT * FROM runs WHERE agent_id = ${agentSql} ORDER BY turn_number ASC, created_at ASC;`,
             `SELECT * FROM run_events WHERE run_id IN (SELECT run_id FROM runs WHERE agent_id = ${agentSql}) ORDER BY run_id, seq;`,
+            "COMMIT;",
           ].join(" "),
         ],
         { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
