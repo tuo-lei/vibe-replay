@@ -1,6 +1,6 @@
 import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
 
@@ -256,7 +256,7 @@ describe("Pi discovery scan cache", () => {
         seen.push(...sessions.map((session) => session.sessionId));
       }
       expect(seen).toEqual(["session-aaa", "session-bbb"]);
-      expect(Object.keys(cacheRows()).every((path) => path.startsWith("/"))).toBe(true);
+      expect(Object.keys(cacheRows()).every((path) => isAbsolute(path))).toBe(true);
     } finally {
       process.chdir(cwd);
     }
