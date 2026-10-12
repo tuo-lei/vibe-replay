@@ -1,12 +1,15 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo } from "@vibe-replay/provider-core/utils";
+import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
+import { isSqliteReadOnlyScope, readGitRepo } from "@vibe-replay/provider-core/utils";
 import { getPiSessionsDirs } from "./config.js";
 const PROMPT_SCAN_LIMIT = 2;
+const SCAN_CACHE_KEY = "pi-session-scan-v1";
+const SCAN_CONCURRENCY = 8;
 
 const decodedProjectDirCache = new Map<string, string | Promise<string>>();
 
@@ -41,6 +44,7 @@ export async function discoverPiSessions(
     return sessions;
   }
 
+  const candidates: PiSessionCandidate[] = [];
   for (const projectDir of projectDirs) {
     const projectPath = join(sessionsRoot, projectDir);
     const projectStat = await stat(projectPath).catch(() => null);
@@ -58,31 +62,185 @@ export async function discoverPiSessions(
       const filePath = join(projectPath, file);
       const fileStat = await stat(filePath).catch(() => null);
       if (!fileStat) continue;
-
-      const info = await extractPiSessionInfo(
+      candidates.push({
         filePath,
-        fileStat.size,
+        // Relative roots (PI_CODING_AGENT_SESSION_DIR) must not alias across working directories.
+        cacheKey: resolve(filePath),
         projectDir,
-        resolveGitRepo,
-        includeUnreplayable,
-        fileStat.mtime.toISOString(),
-      );
-      if (info) sessions.push(info);
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        mtime: fileStat.mtime.toISOString(),
+      });
     }
+  }
+
+  // Pi transcripts are append-only and large (hundreds of MB across a few hundred files), so
+  // the per-file scan result is persisted and reused while the file's size/mtime are unchanged.
+  const persisted = (await readFileCache<PiScanCache>(SCAN_CACHE_KEY))?.data;
+  const cachedEntries =
+    persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
+  const freshEntries = new Map<string, PiScanCacheEntry>();
+  let scannedAny = false;
+
+  const infos = await mapLimit(candidates, SCAN_CONCURRENCY, async (candidate) => {
+    let scan: PiFileScan | undefined;
+    const cached = cachedEntries[candidate.cacheKey];
+    if (isReusableScanEntry(cached, candidate)) {
+      scan = cached.scan;
+      freshEntries.set(candidate.cacheKey, cached);
+    } else {
+      scannedAny = true;
+      scan = await scanPiSessionFile(candidate.filePath);
+      // A failed read may be partial, so it is never persisted.
+      if (!scan.readFailed) {
+        freshEntries.set(candidate.cacheKey, {
+          size: candidate.size,
+          mtimeMs: candidate.mtimeMs,
+          scan,
+        });
+      }
+    }
+    return buildPiSessionInfo(
+      scan,
+      candidate.filePath,
+      candidate.size,
+      candidate.projectDir,
+      resolveGitRepo,
+      includeUnreplayable,
+      candidate.mtime,
+    );
+  });
+  for (const info of infos) if (info) sessions.push(info);
+
+  if (!isSqliteReadOnlyScope()) {
+    await persistScanCache(resolve(sessionsRoot), freshEntries, scannedAny);
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;
 }
 
-async function extractPiSessionInfo(
-  filePath: string,
-  fileSize: number,
-  encodedProjectDir: string,
-  resolveGitRepo = true,
-  includeUnreplayable = false,
-  fileMtime?: string,
-): Promise<SessionInfo | null> {
+interface PiSessionCandidate {
+  filePath: string;
+  cacheKey: string;
+  projectDir: string;
+  size: number;
+  mtimeMs: number;
+  mtime: string;
+}
+
+/** Everything derived from a transcript's content; independent of discovery options. */
+interface PiFileScan {
+  header?: Pick<PiSessionHeader, "id" | "version" | "timestamp" | "cwd">;
+  timestamp: string;
+  title?: string;
+  model?: string;
+  prompts: string[];
+  lineCount: number;
+  promptCount: number;
+  toolCallCount: number;
+  editCountEst: number;
+  compactionCount: number;
+  sawParseableRecord: boolean;
+  readFailed: boolean;
+}
+
+interface PiScanCacheEntry {
+  size: number;
+  mtimeMs: number;
+  scan: PiFileScan;
+}
+
+type PiScanCache = Record<string, PiScanCacheEntry>;
+
+function isReusableScanEntry(
+  entry: PiScanCacheEntry | undefined,
+  candidate: PiSessionCandidate,
+): entry is PiScanCacheEntry {
+  return (
+    !!entry &&
+    entry.size === candidate.size &&
+    entry.mtimeMs === candidate.mtimeMs &&
+    !!entry.scan &&
+    !entry.scan.readFailed &&
+    Array.isArray(entry.scan.prompts)
+  );
+}
+
+let scanCacheWrite: Promise<void> = Promise.resolve();
+
+/**
+ * Persist the entries seen under `root`. Roots are discovered concurrently (local Pi, OMP and
+ * staged SSH targets), so the read-merge-write is serialized and merges against the cache as
+ * it is *now*, not the snapshot taken before scanning; otherwise the last writer would discard
+ * another root's fresh entries. Entries for other roots are kept while their file still
+ * exists (checked only when a write happens, with bounded concurrency), and entries for
+ * deleted transcripts are dropped so the cache cannot grow forever. The write, and with it
+ * all filesystem work, is skipped when nothing was rescanned and nothing was pruned.
+ */
+function persistScanCache(
+  root: string,
+  fresh: Map<string, PiScanCacheEntry>,
+  scannedAny: boolean,
+): Promise<void> {
+  const run = scanCacheWrite.then(() => mergeScanCache(root, fresh, scannedAny));
+  scanCacheWrite = run.catch(() => undefined);
+  return run;
+}
+
+async function mergeScanCache(
+  root: string,
+  fresh: Map<string, PiScanCacheEntry>,
+  scannedAny: boolean,
+): Promise<void> {
+  const persisted = (await readFileCache<PiScanCache>(SCAN_CACHE_KEY))?.data;
+  const previous =
+    persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
+  const next: PiScanCache = {};
+  const foreign: Array<[string, PiScanCacheEntry]> = [];
+  let pruned = false;
+  const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  for (const [path, entry] of Object.entries(previous)) {
+    if (!path.startsWith(rootPrefix)) foreign.push([path, entry]);
+    else if (!fresh.has(path)) pruned = true;
+  }
+  // A warm scan changes nothing, so it must not touch the filesystem again.
+  if (!scannedAny && !pruned) return;
+
+  // Entries for other roots are garbage-collected only when a write happens anyway.
+  const alive = await mapLimit(foreign, SCAN_CONCURRENCY, async ([path]) =>
+    stat(path)
+      .then(() => true)
+      .catch(() => false),
+  );
+  for (const [index, [path, entry]] of foreign.entries()) {
+    if (alive[index]) next[path] = entry;
+  }
+  for (const [path, entry] of fresh) next[path] = entry;
+  await writeFileCache<PiScanCache>(SCAN_CACHE_KEY, next);
+}
+
+/** Run `worker` over `items` with bounded concurrency, preserving result order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await worker(items[index]);
+      }
+    }),
+  );
+  return results;
+}
+
+/** Stream one transcript and reduce it to the content-derived fields discovery reports. */
+async function scanPiSessionFile(filePath: string): Promise<PiFileScan> {
   let header: PiSessionHeader | undefined;
   let timestamp = "";
   let lineCount = 0;
@@ -188,7 +346,6 @@ async function extractPiSessionInfo(
     }
   } catch {
     readFailed = true;
-    if (!includeUnreplayable) return null;
   } finally {
     rl.close();
   }
@@ -203,6 +360,49 @@ async function extractPiSessionInfo(
     }
     compactionCount += [...compactionEntryIds].filter((id) => activeIds.has(id)).length;
   }
+
+  return {
+    header: header
+      ? { id: header.id, version: header.version, timestamp: header.timestamp, cwd: header.cwd }
+      : undefined,
+    timestamp,
+    title,
+    model,
+    prompts,
+    lineCount,
+    promptCount,
+    toolCallCount,
+    editCountEst,
+    compactionCount,
+    sawParseableRecord,
+    readFailed,
+  };
+}
+
+async function buildPiSessionInfo(
+  scan: PiFileScan,
+  filePath: string,
+  fileSize: number,
+  encodedProjectDir: string,
+  resolveGitRepo = true,
+  includeUnreplayable = false,
+  fileMtime?: string,
+): Promise<SessionInfo | null> {
+  const {
+    header,
+    timestamp,
+    title,
+    model,
+    prompts,
+    lineCount,
+    promptCount,
+    toolCallCount,
+    editCountEst,
+    compactionCount,
+    sawParseableRecord,
+    readFailed,
+  } = scan;
+  if (readFailed && !includeUnreplayable) return null;
 
   const sessionId = header?.id || basename(filePath, ".jsonl");
   if (!sessionId) return null;
