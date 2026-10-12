@@ -190,6 +190,24 @@ describe("Pi discovery scan cache", () => {
     expect(Object.keys(cacheRows()).sort()).toEqual([firstPath, secondPath].sort());
   });
 
+  it("keeps every root's fresh entries when roots are scanned concurrently", async () => {
+    const roots = await Promise.all([makeRoot(), makeRoot(), makeRoot()]);
+    const paths: string[] = [];
+    for (const [index, { projectDir }] of roots.entries()) {
+      const path = join(projectDir, `2026-01-0${index + 1}T00-00-00-000Z_s.jsonl`);
+      await writeFile(path, sessionLines(`session-${index}`, ["hello"]), "utf-8");
+      paths.push(path);
+    }
+
+    // Local and SSH discovery run in parallel, so cold roots race on the shared cache file.
+    await Promise.all(roots.map(({ root }) => discoverPiSessions(root, false)));
+    expect(Object.keys(cacheRows()).sort()).toEqual([...paths].sort());
+
+    const writesAfterCold = cache.writes;
+    await Promise.all(roots.map(({ root }) => discoverPiSessions(root, false)));
+    expect(cache.writes).toBe(writesAfterCold);
+  });
+
   it("does not write the cache inside a read-only scope", async () => {
     const { root, projectDir } = await makeRoot();
     await writeFile(

@@ -20,7 +20,10 @@ line by line cost about 3s per call.
   partial, so it is rescanned next time.
 - **One shared cache key.** Entries for other roots are kept while their file still exists
   (local, OMP and staged SSH roots share it); entries under the scanned root that vanished
-  are pruned. The cache is only rewritten when something was rescanned or pruned, and never
+  are pruned. Roots are discovered concurrently, so the read-merge-write is serialized
+  in-process and merges against a fresh read of the cache, never the pre-scan snapshot
+  (otherwise the last writer drops another root's entries). The cache is only rewritten
+  when something was rescanned or pruned, and never
   inside `withReadOnlySqlite(true, …)` (`isSqliteReadOnlyScope`), which is the shared
   zero-write contract despite its name.
 - Cold scans run with bounded concurrency (8) and keep directory order, so output order and

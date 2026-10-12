@@ -111,7 +111,7 @@ export async function discoverPiSessions(
   for (const info of infos) if (info) sessions.push(info);
 
   if (!isSqliteReadOnlyScope()) {
-    await persistScanCache(sessionsRoot, cachedEntries, freshEntries, scannedAny);
+    await persistScanCache(sessionsRoot, freshEntries, scannedAny);
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -164,17 +164,34 @@ function isReusableScanEntry(
   );
 }
 
+let scanCacheWrite: Promise<void> = Promise.resolve();
+
 /**
- * Persist the entries seen under `root`. Entries for other roots are kept while their file
- * still exists; entries for deleted transcripts are dropped so the cache cannot grow forever.
+ * Persist the entries seen under `root`. Roots are discovered concurrently (local Pi, OMP and
+ * staged SSH targets), so the read-merge-write is serialized and merges against the cache as
+ * it is *now*, not the snapshot taken before scanning; otherwise the last writer would discard
+ * another root's fresh entries. Entries for other roots are kept while their file still
+ * exists, and entries for deleted transcripts are dropped so the cache cannot grow forever.
  * The write is skipped when nothing was rescanned and nothing was pruned.
  */
-async function persistScanCache(
+function persistScanCache(
   root: string,
-  previous: PiScanCache,
   fresh: Map<string, PiScanCacheEntry>,
   scannedAny: boolean,
 ): Promise<void> {
+  const run = scanCacheWrite.then(() => mergeScanCache(root, fresh, scannedAny));
+  scanCacheWrite = run.catch(() => undefined);
+  return run;
+}
+
+async function mergeScanCache(
+  root: string,
+  fresh: Map<string, PiScanCacheEntry>,
+  scannedAny: boolean,
+): Promise<void> {
+  const persisted = (await readFileCache<PiScanCache>(SCAN_CACHE_KEY))?.data;
+  const previous =
+    persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
   const next: PiScanCache = {};
   let pruned = false;
   const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
