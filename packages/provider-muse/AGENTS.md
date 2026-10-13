@@ -22,7 +22,14 @@ default `~/agents`):
 ## Item kinds
 
 - `message` (`role: user|assistant|developer`) — plain `text`
-- `message_parts` (`role`, `parts[]`) — text lives in `parts[].text`
+- `message_parts` (`role`, `parts[]`) — text lives in `parts[].text`; user
+  messages may also carry `file_ref` parts
+  (`{type: "file_ref", path, mime_type, bytes_len, sha256}`) for attached
+  images. `path` is relative to the user's home directory; the parser embeds
+  them as `_user_images` data URLs only when the file's size matches
+  `bytes_len` and its sha256 matches the digest (tampered/swapped files are
+  never embedded). Image-only user messages replay as `(image)` user-prompt
+  scenes instead of being dropped.
 - `thinking` — `thinking` field → assistant thinking block
 - `commentary_text` — short assistant narration → assistant text block
 - `function_call` (`call_id`, `name`, `arguments` as a JSON string) → tool_use
