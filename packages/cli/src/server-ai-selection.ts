@@ -152,8 +152,14 @@ export async function resolveAiSelection(
   let providerId = requested?.providerId;
   let defaultModelId: string | undefined;
   if (!providerId) {
-    const providers = await runtime.listProviders({ signal });
-    const defaultSelection = await resolveDefaultAiSelection(providers, undefined, signal);
+    let providers = await runtime.listProviders({ signal });
+    const defaultSelection = await resolveDefaultAiSelection(
+      providers,
+      (refreshed) => {
+        providers = refreshed;
+      },
+      signal,
+    );
     providerId = defaultSelection?.providerId;
     defaultModelId = defaultSelection?.modelId;
     if (!providerId) {

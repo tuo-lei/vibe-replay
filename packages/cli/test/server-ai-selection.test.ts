@@ -58,6 +58,31 @@ afterEach(async () => {
 
 describe("AI default selection", () => {
   it.each([
+    {
+      name: "newly discovered provider",
+      initial: [],
+      refreshed: [provider("openai", "other-model")],
+      expected: "No AI provider/model is selected. Choose a provider and model in AI Studio.",
+    },
+    {
+      name: "removed last provider",
+      initial: [provider("openai", "other-model")],
+      refreshed: [],
+      expected: "No usable AI provider is configured. Set up a provider and model in AI Studio.",
+    },
+  ])(
+    "uses the refreshed catalog for the $name generation error",
+    async ({ initial, refreshed, expected }) => {
+      if (initial.length) await writeAppDefault("openai", "removed-model");
+      vi.mocked(aiRuntime.getAiRuntime().listProviders)
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(refreshed);
+      await expect(resolveAiSelection(undefined)).rejects.toThrow(expected);
+      expect(aiRuntime.getAiRuntime().listProviders).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([
     ["providers", false],
     ["providers", true],
     ["generation", false],
