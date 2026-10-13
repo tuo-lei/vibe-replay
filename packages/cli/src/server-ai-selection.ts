@@ -40,14 +40,17 @@ function parseAiSelectionBody(body: unknown): AiSelection | undefined {
   };
 }
 
+/** Resolve a usable app default, preserving explicit choices made during seeding. */
 export async function resolveDefaultAiSelection(
   providers: AiProviderInfo[],
 ): Promise<AiSelection | undefined> {
   const usable = providers.filter((provider) => provider.configured && provider.models.length > 0);
   if (usable.length === 0) return undefined;
-  const isUsableSelection = (selection: AiSelection) =>
-    usable.some(
+  /** Check the selected model against configured providers in a catalog snapshot. */
+  const isUsableSelection = (selection: AiSelection, candidates = usable) =>
+    candidates.some(
       (provider) =>
+        provider.configured &&
         provider.id === selection.providerId &&
         provider.models.some((model) => model.id === selection.modelId),
     );
@@ -73,7 +76,13 @@ export async function resolveDefaultAiSelection(
     const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
       () => preferred,
     );
-    return isUsableSelection(selected) ? selected : preferred;
+    if (isUsableSelection(selected)) return selected;
+    // A concurrent explicit choice may belong to a newly configured provider
+    // or a model discovered after the caller fetched its catalog.
+    const refreshed = await getAiRuntime()
+      .listProviders()
+      .catch(() => []);
+    return isUsableSelection(selected, refreshed) ? selected : preferred;
   }
 
   // Do not invent a provider/model or silently select the first catalog entry.

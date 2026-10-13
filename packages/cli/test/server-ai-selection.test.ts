@@ -42,6 +42,7 @@ beforeEach(async () => {
   settingsPath = join(root, "ai-settings.json");
   previousSettingsPath = process.env.VIBE_REPLAY_AI_SETTINGS;
   process.env.VIBE_REPLAY_AI_SETTINGS = settingsPath;
+  vi.spyOn(aiRuntime.getAiRuntime(), "listProviders").mockResolvedValue([]);
 });
 
 afterEach(async () => {
@@ -141,5 +142,25 @@ describe("AI default selection", () => {
 
     expect(selection).toEqual({ providerId: "openai", modelId: "gpt-5.6-luna" });
     expect(await readDefault()).toEqual({ providerId: "new-provider", modelId: "new-model" });
+  });
+
+  it.each(["openai", "new-provider"])("preserves a newly available choice on %s", async (id) => {
+    await writeAppDefault("openai", "removed-model");
+    const readDefault = aiRuntime.readAiDefaultSelection;
+    vi.spyOn(aiRuntime, "readAiDefaultSelection").mockImplementationOnce(async () => {
+      const observed = await readDefault();
+      await aiRuntime.writeAiDefaultSelection({ providerId: id, modelId: "new-model" });
+      return observed;
+    });
+    vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue([
+      provider(id, "new-model"),
+    ]);
+
+    const selection = await __testables.resolveDefaultAiSelection([
+      provider("openai", "gpt-5.6-luna"),
+    ]);
+
+    expect(selection).toEqual({ providerId: id, modelId: "new-model" });
+    expect(await readDefault()).toEqual(selection);
   });
 });
