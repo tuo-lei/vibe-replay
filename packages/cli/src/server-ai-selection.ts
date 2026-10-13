@@ -103,7 +103,7 @@ export async function resolveDefaultAiSelection(
 
   // Do not invent a provider/model or silently select the first catalog entry.
   // The UI should ask the user to choose one when Luna is unavailable.
-  return undefined;
+  return await resolveAfterRefresh();
 }
 
 export async function resolveAiSelection(

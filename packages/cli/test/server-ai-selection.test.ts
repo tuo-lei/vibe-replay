@@ -168,11 +168,11 @@ describe("AI default selection", () => {
 
   it.each(
     ["openai", "new-provider"].flatMap((id) =>
-      ["before", "after", "empty", "empty-stale"].map((timing) => ({ id, timing })),
+      ["before", "after", "empty", "empty-stale", "no-luna"].map((timing) => ({ id, timing })),
     ),
   )("returns a coherent catalog for $id ($timing)", async ({ id, timing }) => {
     const beforeRead = timing === "before";
-    if (timing !== "empty") {
+    if (timing !== "empty" && timing !== "no-luna") {
       await writeAppDefault(beforeRead ? id : "openai", beforeRead ? "new-model" : "removed-model");
     }
     const readDefault = aiRuntime.readAiDefaultSelection;
@@ -183,7 +183,11 @@ describe("AI default selection", () => {
     });
     const refreshed = [provider(id, "new-model")];
     vi.mocked(aiRuntime.getAiRuntime().listProviders)
-      .mockResolvedValueOnce(timing.startsWith("empty") ? [] : [provider("openai", "gpt-5.6-luna")])
+      .mockResolvedValueOnce(
+        timing.startsWith("empty")
+          ? []
+          : [provider("openai", timing === "no-luna" ? "other-model" : "gpt-5.6-luna")],
+      )
       .mockResolvedValue(refreshed);
     const app = new Hono();
     registerAiRoutes(app, {
