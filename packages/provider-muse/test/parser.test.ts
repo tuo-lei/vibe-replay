@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -349,6 +349,43 @@ describe("file_ref image attachments", () => {
       [header(), userPartsMessage([fileRef({ path: join("..", "outside.png") })])],
       { homeDir: home },
     );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("rejects a symlink inside home that points outside it", async () => {
+    const { home } = await makeImageHome();
+    // A real, readable image living outside the fake home.
+    const outsideDir = await mkdtemp(join(tmpdir(), "vibe-muse-outside-"));
+    tempDirs.push(outsideDir);
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+    await writeFile(join(outsideDir, "evil.png"), bytes);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    await symlink(join(outsideDir, "evil.png"), join(home, "workspace", "evil.png"));
+    const parsed = parseMuseLines(
+      [
+        header(),
+        userPartsMessage([
+          {
+            type: "file_ref",
+            path: join("workspace", "evil.png"),
+            mime_type: "image/png",
+            bytes_len: bytes.length,
+            sha256,
+          },
+        ]),
+      ],
+      { homeDir: home },
+    );
+    // Size and digest match the outside file, so only the canonical-path
+    // containment check rejects it.
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("skips a file_ref without a bounded bytes_len", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const ref = fileRef();
+    delete (ref as Record<string, unknown>).bytes_len;
+    const parsed = parseMuseLines([header(), userPartsMessage([ref])], { homeDir: home });
     expect(parsed.turns).toHaveLength(0);
   });
 

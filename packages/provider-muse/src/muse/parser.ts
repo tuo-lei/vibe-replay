@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -117,28 +117,60 @@ const MAX_USER_IMAGE_BYTES = 5 * 1024 * 1024;
  * (and an image-only message entirely) vanishes from the replay.
  *
  * The part's `path` is relative to the user's home directory. A file is
- * only embedded when it resolves inside the home directory, its size
- * matches `bytes_len`, and its sha256 matches the part's digest — a
- * tampered or swapped file is never silently embedded into a replay.
+ * only embedded when it resolves inside the home directory (canonical
+ * target — symlinks pointing outside are rejected), its size matches a
+ * required, bounded `bytes_len`, and its sha256 matches the part's digest —
+ * a tampered or swapped file is never silently embedded into a replay.
+ * `bytes_len` is required precisely so the embed cap and the size check can
+ * be enforced *before* any bytes are read.
  */
 function userImageDataUrls(item: MuseItem, homeDir: string = homedir()): string[] {
   const urls: string[] = [];
   if (!Array.isArray(item.parts)) return urls;
   const home = homeDir;
+  let canonicalHome: string;
+  try {
+    canonicalHome = realpathSync(home);
+  } catch {
+    return urls;
+  }
   for (const part of item.parts) {
     if (!part || part.type !== "file_ref") continue;
     if (typeof part.mime_type !== "string" || !part.mime_type.startsWith("image/")) continue;
     if (typeof part.path !== "string" || !part.path || typeof part.sha256 !== "string") continue;
-    if (typeof part.bytes_len === "number" && part.bytes_len > MAX_USER_IMAGE_BYTES) continue;
-    const resolved = join(home, part.path);
-    if (resolved !== home && !resolved.startsWith(home + sep)) continue;
+    if (
+      typeof part.bytes_len !== "number" ||
+      !Number.isFinite(part.bytes_len) ||
+      part.bytes_len < 0 ||
+      part.bytes_len > MAX_USER_IMAGE_BYTES
+    ) {
+      continue;
+    }
+    const joined = join(home, part.path);
+    if (joined !== home && !joined.startsWith(home + sep)) continue;
+    let canonical: string;
+    try {
+      canonical = realpathSync(joined);
+    } catch {
+      continue; // missing or unreadable; the text (if any) still replays
+    }
+    if (canonical !== canonicalHome && !canonical.startsWith(canonicalHome + sep)) continue;
+    let size: number;
+    try {
+      const st = statSync(canonical);
+      if (!st.isFile()) continue;
+      size = st.size;
+    } catch {
+      continue;
+    }
+    if (size !== part.bytes_len) continue;
     let data: Buffer;
     try {
-      data = readFileSync(resolved);
+      data = readFileSync(canonical);
     } catch {
-      continue; // attachment gone; the text (if any) still replays
+      continue;
     }
-    if (typeof part.bytes_len === "number" && data.length !== part.bytes_len) continue;
+    if (data.length !== part.bytes_len) continue;
     if (createHash("sha256").update(data).digest("hex") !== part.sha256.toLowerCase()) continue;
     urls.push(`data:${part.mime_type};base64,${data.toString("base64")}`);
   }
