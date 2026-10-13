@@ -168,38 +168,38 @@ describe("AI default selection", () => {
 
   it.each(
     ["openai", "new-provider"].flatMap((id) =>
-      [false, true].map((beforeRead) => ({ id, beforeRead })),
+      ["before", "after", "empty", "empty-stale"].map((timing) => ({ id, timing })),
     ),
-  )(
-    "returns a coherent catalog for $id (saved before read: $beforeRead)",
-    async ({ id, beforeRead }) => {
+  )("returns a coherent catalog for $id ($timing)", async ({ id, timing }) => {
+    const beforeRead = timing === "before";
+    if (timing !== "empty") {
       await writeAppDefault(beforeRead ? id : "openai", beforeRead ? "new-model" : "removed-model");
-      const readDefault = aiRuntime.readAiDefaultSelection;
-      vi.spyOn(aiRuntime, "readAiDefaultSelection").mockImplementationOnce(async () => {
-        const observed = await readDefault();
-        await aiRuntime.writeAiDefaultSelection({ providerId: id, modelId: "new-model" });
-        return observed;
-      });
-      const refreshed = [provider(id, "new-model")];
-      vi.mocked(aiRuntime.getAiRuntime().listProviders)
-        .mockResolvedValueOnce([provider("openai", "gpt-5.6-luna")])
-        .mockResolvedValue(refreshed);
-      const app = new Hono();
-      registerAiRoutes(app, {
-        baseDir: "/synthetic",
-        loadSession: vi.fn(),
-        isSameOriginSettingsRequest: () => true,
-      });
+    }
+    const readDefault = aiRuntime.readAiDefaultSelection;
+    vi.spyOn(aiRuntime, "readAiDefaultSelection").mockImplementationOnce(async () => {
+      const observed = await readDefault();
+      await aiRuntime.writeAiDefaultSelection({ providerId: id, modelId: "new-model" });
+      return observed;
+    });
+    const refreshed = [provider(id, "new-model")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders)
+      .mockResolvedValueOnce(timing.startsWith("empty") ? [] : [provider("openai", "gpt-5.6-luna")])
+      .mockResolvedValue(refreshed);
+    const app = new Hono();
+    registerAiRoutes(app, {
+      baseDir: "/synthetic",
+      loadSession: vi.fn(),
+      isSameOriginSettingsRequest: () => true,
+    });
 
-      const response = await app.request("/api/ai/providers");
+    const response = await app.request("/api/ai/providers");
 
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        available: true,
-        providers: refreshed,
-        defaultProvider: { id, name: id, modelId: "new-model" },
-      });
-      expect(await readDefault()).toEqual({ providerId: id, modelId: "new-model" });
-    },
-  );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      providers: refreshed,
+      defaultProvider: { id, name: id, modelId: "new-model" },
+    });
+    expect(await readDefault()).toEqual({ providerId: id, modelId: "new-model" });
+  });
 });

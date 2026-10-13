@@ -54,22 +54,29 @@ export async function resolveDefaultAiSelection(
         provider.id === selection.providerId &&
         provider.models.some((model) => model.id === selection.modelId),
     );
-  /** Refresh a stale catalog and publish it only when it validates the choice. */
-  const isUsableAfterRefresh = async (selection: AiSelection) => {
+  /** Re-read concurrent choices against a fresh catalog before publishing a default. */
+  const resolveAfterRefresh = async (selection?: AiSelection) => {
     const refreshed = await getAiRuntime()
       .listProviders()
       .catch(() => []);
-    if (!isUsableSelection(selection, refreshed)) return false;
+    const current = await readAiDefaultSelection();
+    const resolved =
+      current && isUsableSelection(current, refreshed)
+        ? current
+        : selection && isUsableSelection(selection, refreshed)
+          ? selection
+          : undefined;
+    if (!resolved) return undefined;
     onCatalogRefresh?.(refreshed);
-    return true;
+    return resolved;
   };
 
   const savedDefault = await readAiDefaultSelection();
-  if (
-    savedDefault &&
-    (isUsableSelection(savedDefault) || (await isUsableAfterRefresh(savedDefault)))
-  )
-    return savedDefault;
+  if (savedDefault && isUsableSelection(savedDefault)) return savedDefault;
+  if (savedDefault || usable.length === 0) {
+    const refreshed = await resolveAfterRefresh(savedDefault);
+    if (refreshed) return refreshed;
+  }
   if (usable.length === 0) return undefined;
 
   // Vibe Replay owns its default. Prefer Luna when the configured provider
@@ -90,9 +97,8 @@ export async function resolveDefaultAiSelection(
     const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
       () => preferred,
     );
-    return isUsableSelection(selected) || (await isUsableAfterRefresh(selected))
-      ? selected
-      : preferred;
+    if (isUsableSelection(selected)) return selected;
+    return (await resolveAfterRefresh(selected)) ?? preferred;
   }
 
   // Do not invent a provider/model or silently select the first catalog entry.
