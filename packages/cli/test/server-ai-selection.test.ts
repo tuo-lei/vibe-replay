@@ -7,6 +7,7 @@ import * as aiRuntime from "../src/ai-runtime.js";
 import type { AiProviderInfo } from "../src/ai-runtime.js";
 import { __testables } from "../src/server.js";
 import { registerAiRoutes } from "../src/server-routes/ai.js";
+import { resolveAiSelection } from "../src/server-ai-selection.js";
 
 let settingsPath: string;
 let previousSettingsPath: string | undefined;
@@ -56,6 +57,72 @@ afterEach(async () => {
 });
 
 describe("AI default selection", () => {
+  it.each([
+    ["providers", false],
+    ["providers", true],
+    ["generation", false],
+    ["generation", true],
+  ] as const)(
+    "cancels %s default repair when refresh aborts (reject: %s)",
+    async (flow, reject) => {
+      await writeAppDefault("openai", "removed-model");
+      const catalog = [provider("openai", "gpt-5.6-luna")];
+      const controller = new AbortController();
+      const reason = new DOMException("Synthetic disconnect", "AbortError");
+      let refreshSignal: AbortSignal | undefined;
+      vi.mocked(aiRuntime.getAiRuntime().listProviders)
+        .mockResolvedValueOnce(catalog)
+        .mockImplementationOnce(async (options) => {
+          refreshSignal = options?.signal;
+          controller.abort(reason);
+          if (reject) throw reason;
+          return catalog;
+        });
+      vi.spyOn(aiRuntime.getAiRuntime(), "getSafeErrorMessage").mockResolvedValue(
+        "Request aborted",
+      );
+      const resolveModel = vi
+        .spyOn(aiRuntime.getAiRuntime(), "resolveModel")
+        .mockRejectedValue(new Error("Generation continued after abort"));
+      const outcome =
+        flow === "providers"
+          ? await requestProviders(controller.signal)
+          : await resolveAiSelection(undefined, controller.signal).catch((error: unknown) => error);
+      expect(await aiRuntime.readAiDefaultSelection()).toEqual({
+        providerId: "openai",
+        modelId: "removed-model",
+      });
+      expect(refreshSignal?.aborted).toBe(true);
+      if (flow === "providers") expect((outcome as Response).status).toBe(500);
+      else expect(outcome).toBe(reason);
+      expect(resolveModel).not.toHaveBeenCalled();
+    },
+  );
+
+  it("propagates an abort from the settings repair instead of returning fallback", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("Synthetic disconnect", "AbortError");
+    const ensure = vi
+      .spyOn(aiRuntime, "ensureAiDefaultSelection")
+      .mockImplementationOnce(async () => {
+        controller.abort(reason);
+        throw reason;
+      });
+    await expect(
+      __testables.resolveDefaultAiSelection(
+        [provider("openai", "gpt-5.6-luna")],
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBe(reason);
+    expect(ensure).toHaveBeenCalledWith(
+      { providerId: "openai", modelId: "gpt-5.6-luna" },
+      controller.signal,
+      undefined,
+    );
+    expect(await aiRuntime.readAiDefaultSelection()).toBeUndefined();
+  });
+
   it("reads the app-owned default without consulting Pi settings", async () => {
     await writeAppDefault("my-custom-provider", "luna");
 
@@ -320,12 +387,12 @@ describe("AI default selection", () => {
   });
 });
 
-async function requestProviders() {
+async function requestProviders(signal?: AbortSignal) {
   const app = new Hono();
   registerAiRoutes(app, {
     baseDir: "/synthetic",
     loadSession: vi.fn(),
     isSameOriginSettingsRequest: () => true,
   });
-  return app.request("/api/ai/providers");
+  return app.request("/api/ai/providers", { signal });
 }

@@ -46,10 +46,16 @@ function parseAiSelectionBody(body: unknown): AiSelection | undefined {
 export async function resolveDefaultAiSelection(
   providers: AiProviderInfo[],
   onCatalogRefresh?: (providers: AiProviderInfo[]) => void,
+  signal?: AbortSignal,
 ): Promise<AiSelection | undefined> {
+  signal?.throwIfAborted();
   let catalog = providers;
   let refreshCount = 0;
   let refreshObserved: AiDefaultSelection | undefined;
+  const rethrowAbort = (error: unknown) => {
+    signal?.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") throw error;
+  };
   /** Check the selected model against the active configured provider catalog. */
   const isUsableSelection = (selection?: AiSelection) =>
     selection !== undefined &&
@@ -69,13 +75,19 @@ export async function resolveDefaultAiSelection(
     refreshObserved = observed;
     refreshCount++;
     const refreshed = await getAiRuntime()
-      .listProviders()
-      .catch(() => undefined);
+      .listProviders({ signal })
+      .catch((error: unknown) => {
+        rethrowAbort(error);
+        return undefined;
+      });
+    signal?.throwIfAborted();
     if (refreshed) {
       catalog = refreshed;
       onCatalogRefresh?.(catalog);
     }
-    return await readAiDefaultSelection();
+    const current = await readAiDefaultSelection();
+    signal?.throwIfAborted();
+    return current;
   };
   /** At most one extra refresh is needed for an intervening explicit settings write. */
   const revalidate = async (current?: AiDefaultSelection) => {
@@ -104,6 +116,7 @@ export async function resolveDefaultAiSelection(
   };
 
   const savedDefault = await readAiDefaultSelection();
+  signal?.throwIfAborted();
   if (isUsableSelection(savedDefault)) return savedDefault;
   if (
     savedDefault ||
@@ -114,14 +127,19 @@ export async function resolveDefaultAiSelection(
   }
   const preferred = preferredSelection();
   if (preferred) {
-    const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
-      () => preferred,
+    const selected = await ensureAiDefaultSelection(preferred, signal, savedDefault).catch(
+      (error: unknown) => {
+        rethrowAbort(error);
+        return preferred;
+      },
     );
+    signal?.throwIfAborted();
     if (isUsableSelection(selected)) return selected;
     const current = await revalidate(selected);
     return current ?? preferredSelection();
   }
   const current = await readAiDefaultSelection();
+  signal?.throwIfAborted();
   return current ? await revalidate(current) : undefined;
 }
 
@@ -135,7 +153,7 @@ export async function resolveAiSelection(
   let defaultModelId: string | undefined;
   if (!providerId) {
     const providers = await runtime.listProviders({ signal });
-    const defaultSelection = await resolveDefaultAiSelection(providers);
+    const defaultSelection = await resolveDefaultAiSelection(providers, undefined, signal);
     providerId = defaultSelection?.providerId;
     defaultModelId = defaultSelection?.modelId;
     if (!providerId) {
