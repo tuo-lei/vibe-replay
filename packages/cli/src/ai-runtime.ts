@@ -734,18 +734,33 @@ export interface AiDefaultSelection {
   modelId: string;
 }
 
+const aiDefaultRevisions = new WeakMap<AiDefaultSelection, string>();
+
+/** File revisions stay internal; the persisted/default-response shape remains unchanged. */
+export function getAiDefaultSelectionRevision(selection?: AiDefaultSelection): string | undefined {
+  return selection ? aiDefaultRevisions.get(selection) : undefined;
+}
+
 export function getAiSettingsPath(): string {
   return process.env.VIBE_REPLAY_AI_SETTINGS?.trim() || DEFAULT_AI_SETTINGS_PATH;
 }
 
 export async function readAiDefaultSelection(): Promise<AiDefaultSelection | undefined> {
   try {
-    const raw = JSON.parse(await readFile(getAiSettingsPath(), "utf8")) as Record<string, unknown>;
-    if (typeof raw.providerId !== "string" || typeof raw.modelId !== "string") return undefined;
-    return {
-      providerId: raw.providerId,
-      modelId: raw.modelId,
-    };
+    const handle = await openFile(getAiSettingsPath(), "r");
+    try {
+      const revision = await handle.stat({ bigint: true });
+      const raw = JSON.parse(await handle.readFile("utf8")) as Record<string, unknown>;
+      if (typeof raw.providerId !== "string" || typeof raw.modelId !== "string") return undefined;
+      const selection = { providerId: raw.providerId, modelId: raw.modelId };
+      aiDefaultRevisions.set(
+        selection,
+        `${revision.dev}:${revision.ino}:${revision.mtimeNs}:${revision.ctimeNs}:${revision.size}`,
+      );
+      return selection;
+    } finally {
+      await handle.close();
+    }
   } catch {
     return undefined;
   }
@@ -774,12 +789,15 @@ export async function ensureAiDefaultSelection(
   const release = await acquireFileLock(`${settingsPath}.transaction`, signal);
   try {
     const saved = await readAiDefaultSelection();
-    // Compare under the same lock as explicit writes. A different saved choice
-    // belongs to a concurrent writer and must not be replaced by this fallback.
+    // Atomic writes can retain the same values. Compare the observed file
+    // revision under the existing lock so those explicit writes also win.
+    const observedRevision = getAiDefaultSelectionRevision(observedInvalid);
     if (
       saved &&
       (saved.providerId !== observedInvalid?.providerId ||
-        saved.modelId !== observedInvalid?.modelId)
+        saved.modelId !== observedInvalid?.modelId ||
+        !observedRevision ||
+        getAiDefaultSelectionRevision(saved) !== observedRevision)
     ) {
       return saved;
     }

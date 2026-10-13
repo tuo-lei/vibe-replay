@@ -95,11 +95,13 @@ describe("AI default selection", () => {
     const emptyProvider = provider("empty-provider", "removed-model");
     emptyProvider.models = [];
 
-    const selection = await __testables.resolveDefaultAiSelection([
+    const catalog = [
       provider("openai", "gpt-5.6-luna"),
       provider("unconfigured-provider", "gpt-5.6-luna", undefined, false),
       emptyProvider,
-    ]);
+    ];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue(catalog);
+    const selection = await __testables.resolveDefaultAiSelection(catalog);
 
     expect(selection).toEqual({ providerId: "openai", modelId: "gpt-5.6-luna" });
     expect(await aiRuntime.readAiDefaultSelection()).toEqual(selection);
@@ -119,10 +121,9 @@ describe("AI default selection", () => {
         return observed;
       });
 
-      const selection = await __testables.resolveDefaultAiSelection([
-        provider("openai", "gpt-5.6-luna"),
-        provider("explicit", "chosen-model"),
-      ]);
+      const catalog = [provider("openai", "gpt-5.6-luna"), provider("explicit", "chosen-model")];
+      vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue(catalog);
+      const selection = await __testables.resolveDefaultAiSelection(catalog);
 
       expect(selection).toEqual({ providerId: "explicit", modelId: "chosen-model" });
       expect(await readDefault()).toEqual(selection);
@@ -138,9 +139,9 @@ describe("AI default selection", () => {
       return observed;
     });
 
-    const selection = await __testables.resolveDefaultAiSelection([
-      provider("openai", "gpt-5.6-luna"),
-    ]);
+    const catalog = [provider("openai", "gpt-5.6-luna")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue(catalog);
+    const selection = await __testables.resolveDefaultAiSelection(catalog);
 
     expect(selection).toEqual({ providerId: "openai", modelId: "gpt-5.6-luna" });
     expect(await readDefault()).toEqual({ providerId: "new-provider", modelId: "new-model" });
@@ -206,4 +207,113 @@ describe("AI default selection", () => {
     });
     expect(await readDefault()).toEqual({ providerId: id, modelId: "new-model" });
   });
+
+  it.each(["gpt-5.6-luna", "other-model"])(
+    "publishes first-time discovery of %s",
+    async (modelId) => {
+      const refreshed = [provider("openai", modelId)];
+      vi.mocked(aiRuntime.getAiRuntime().listProviders)
+        .mockResolvedValueOnce([])
+        .mockResolvedValue(refreshed);
+      const response = await requestProviders();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        available: true,
+        providers: refreshed,
+        defaultProvider:
+          modelId === "gpt-5.6-luna" ? { id: "openai", name: "openai", modelId } : null,
+      });
+      expect(await aiRuntime.readAiDefaultSelection()).toEqual(
+        modelId === "gpt-5.6-luna" ? { providerId: "openai", modelId } : undefined,
+      );
+    },
+  );
+
+  it.each([false, true])("does not seed a model removed by refresh (empty: %s)", async (empty) => {
+    await writeAppDefault("openai", "removed-model");
+    const refreshed = empty ? [] : [provider("openai", "other-model")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders)
+      .mockResolvedValueOnce([provider("openai", "gpt-5.6-luna")])
+      .mockResolvedValue(refreshed);
+    const response = await requestProviders();
+    expect(await response.json()).toEqual({
+      available: !empty,
+      providers: refreshed,
+      defaultProvider: null,
+    });
+    expect(await aiRuntime.readAiDefaultSelection()).toEqual({
+      providerId: "openai",
+      modelId: "removed-model",
+    });
+  });
+
+  it("reuses a refreshed catalog when the invalid default has not changed", async () => {
+    await writeAppDefault("openai", "removed-model");
+    const catalog = [provider("openai", "other-model")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue(catalog);
+    const response = await requestProviders();
+    expect(await response.json()).toEqual({
+      available: true,
+      providers: catalog,
+      defaultProvider: null,
+    });
+    expect(aiRuntime.getAiRuntime().listProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains the known catalog when refresh fails", async () => {
+    await writeAppDefault("openai", "removed-model");
+    const catalog = [provider("openai", "gpt-5.6-luna")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders)
+      .mockResolvedValueOnce(catalog)
+      .mockRejectedValue(new Error("synthetic discovery failure"));
+    const response = await requestProviders();
+    expect(await response.json()).toEqual({
+      available: true,
+      providers: catalog,
+      defaultProvider: { id: "openai", name: "openai", modelId: "gpt-5.6-luna" },
+    });
+    expect(aiRuntime.getAiRuntime().listProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a same-valued explicit write under the settings lock", async () => {
+    const explicit = { providerId: "openai", modelId: "restored-model" };
+    await writeAppDefault(explicit.providerId, explicit.modelId);
+    const observed = await aiRuntime.readAiDefaultSelection();
+    await aiRuntime.writeAiDefaultSelection(explicit);
+    const selected = await aiRuntime.ensureAiDefaultSelection(
+      { providerId: "openai", modelId: "gpt-5.6-luna" },
+      undefined,
+      observed,
+    );
+    expect(selected).toEqual(explicit);
+    expect(await aiRuntime.readAiDefaultSelection()).toEqual(explicit);
+  });
+
+  it("revalidates a same-valued choice whose model was concurrently restored", async () => {
+    const explicit = { providerId: "openai", modelId: "restored-model" };
+    await writeAppDefault(explicit.providerId, explicit.modelId);
+    const readDefault = aiRuntime.readAiDefaultSelection;
+    vi.spyOn(aiRuntime, "readAiDefaultSelection").mockImplementationOnce(async () => {
+      const observed = await readDefault();
+      await aiRuntime.writeAiDefaultSelection(explicit);
+      return observed;
+    });
+    const initial = [provider("openai", "gpt-5.6-luna")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue([provider("openai", "restored-model")]);
+    const selected = await __testables.resolveDefaultAiSelection(initial);
+    expect(selected).toEqual(explicit);
+    expect(await readDefault()).toEqual(explicit);
+  });
 });
+
+async function requestProviders() {
+  const app = new Hono();
+  registerAiRoutes(app, {
+    baseDir: "/synthetic",
+    loadSession: vi.fn(),
+    isSameOriginSettingsRequest: () => true,
+  });
+  return app.request("/api/ai/providers");
+}

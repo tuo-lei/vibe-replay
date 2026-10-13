@@ -1,6 +1,8 @@
 import {
   ensureAiDefaultSelection,
   getAiRuntime,
+  getAiDefaultSelectionRevision,
+  type AiDefaultSelection,
   readAiDefaultSelection,
   type AiProviderInfo,
 } from "./ai-runtime.js";
@@ -45,65 +47,81 @@ export async function resolveDefaultAiSelection(
   providers: AiProviderInfo[],
   onCatalogRefresh?: (providers: AiProviderInfo[]) => void,
 ): Promise<AiSelection | undefined> {
-  const usable = providers.filter((provider) => provider.configured && provider.models.length > 0);
-  /** Check the selected model against configured providers in a catalog snapshot. */
-  const isUsableSelection = (selection: AiSelection, candidates = usable) =>
-    candidates.some(
+  let catalog = providers;
+  let refreshCount = 0;
+  let refreshObserved: AiDefaultSelection | undefined;
+  /** Check the selected model against the active configured provider catalog. */
+  const isUsableSelection = (selection?: AiSelection) =>
+    selection !== undefined &&
+    catalog.some(
       (provider) =>
         provider.configured &&
         provider.id === selection.providerId &&
         provider.models.some((model) => model.id === selection.modelId),
     );
-  /** Re-read concurrent choices against a fresh catalog before publishing a default. */
-  const resolveAfterRefresh = async (selection?: AiSelection) => {
+  /** Reuse a snapshot unless a different settings revision requires revalidation. */
+  const changedSince = (current?: AiDefaultSelection, observed?: AiDefaultSelection) =>
+    current?.providerId !== observed?.providerId ||
+    current?.modelId !== observed?.modelId ||
+    getAiDefaultSelectionRevision(current) !== getAiDefaultSelectionRevision(observed);
+  /** Publish every successful refresh, including an empty catalog; retain failures separately. */
+  const refreshCatalog = async (observed?: AiDefaultSelection) => {
+    refreshObserved = observed;
+    refreshCount++;
     const refreshed = await getAiRuntime()
       .listProviders()
-      .catch(() => []);
-    const current = await readAiDefaultSelection();
-    const resolved =
-      current && isUsableSelection(current, refreshed)
-        ? current
-        : selection && isUsableSelection(selection, refreshed)
-          ? selection
-          : undefined;
-    if (!resolved) return undefined;
-    onCatalogRefresh?.(refreshed);
-    return resolved;
+      .catch(() => undefined);
+    if (refreshed) {
+      catalog = refreshed;
+      onCatalogRefresh?.(catalog);
+    }
+    return await readAiDefaultSelection();
+  };
+  /** At most one extra refresh is needed for an intervening explicit settings write. */
+  const revalidate = async (current?: AiDefaultSelection) => {
+    if (isUsableSelection(current)) return current;
+    if (refreshCount === 0 || changedSince(current, refreshObserved)) {
+      while (refreshCount < 2) {
+        const observed = current;
+        current = await refreshCatalog(observed);
+        if (isUsableSelection(current)) return current;
+        if (!changedSince(current, observed)) break;
+      }
+    }
+    return undefined;
+  };
+  /** Vibe Replay owns its inference policy; never choose the first arbitrary model. */
+  const preferredSelection = () => {
+    const provider = PREFERRED_PROVIDER_IDS.map((id) =>
+      catalog.find(
+        (candidate) =>
+          candidate.id === id &&
+          candidate.configured &&
+          candidate.models.some((model) => model.id === PREFERRED_DEFAULT_MODEL_ID),
+      ),
+    ).find((candidate) => candidate !== undefined);
+    return provider ? { providerId: provider.id, modelId: PREFERRED_DEFAULT_MODEL_ID } : undefined;
   };
 
   const savedDefault = await readAiDefaultSelection();
-  if (savedDefault && isUsableSelection(savedDefault)) return savedDefault;
-  if (savedDefault || usable.length === 0) {
-    const refreshed = await resolveAfterRefresh(savedDefault);
-    if (refreshed) return refreshed;
+  if (isUsableSelection(savedDefault)) return savedDefault;
+  if (
+    savedDefault ||
+    !catalog.some((provider) => provider.configured && provider.models.length > 0)
+  ) {
+    const current = await revalidate(savedDefault);
+    if (current) return current;
   }
-  if (usable.length === 0) return undefined;
-
-  // Vibe Replay owns its default. Prefer Luna when the configured provider
-  // exposes it, with the local/custom endpoint ahead of a direct API key.
-  const preferredProvider = PREFERRED_PROVIDER_IDS.map((id) =>
-    usable.find(
-      (provider) =>
-        provider.id === id &&
-        provider.models.some((model) => model.id === PREFERRED_DEFAULT_MODEL_ID),
-    ),
-  ).find((provider): provider is AiProviderInfo => provider !== undefined);
-  if (preferredProvider) {
-    const preferred = {
-      providerId: preferredProvider.id,
-      modelId: PREFERRED_DEFAULT_MODEL_ID,
-    };
-    // Repair only the invalid choice we observed, preserving concurrent writes.
+  const preferred = preferredSelection();
+  if (preferred) {
     const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
       () => preferred,
     );
     if (isUsableSelection(selected)) return selected;
-    return (await resolveAfterRefresh(selected)) ?? preferred;
+    const current = await revalidate(selected);
+    return current ?? preferredSelection();
   }
-
-  // Do not invent a provider/model or silently select the first catalog entry.
-  // The UI should ask the user to choose one when Luna is unavailable.
-  return await resolveAfterRefresh();
+  return await revalidate(await readAiDefaultSelection());
 }
 
 export async function resolveAiSelection(
