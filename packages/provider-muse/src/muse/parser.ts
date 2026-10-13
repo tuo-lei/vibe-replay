@@ -176,6 +176,10 @@ function userImageDataUrls(
     }
     if (size !== part.bytes_len) continue;
     if (size > budget.remaining) continue;
+    // Consumed even when validation below fails: a transcript repeating a
+    // size-matching reference with a wrong digest must not get unlimited
+    // re-reads/re-hashes outside the budget.
+    budget.remaining -= size;
     let data: Buffer;
     try {
       data = readFileSync(canonical);
@@ -184,7 +188,6 @@ function userImageDataUrls(
     }
     if (data.length !== part.bytes_len) continue;
     if (createHash("sha256").update(data).digest("hex") !== part.sha256.toLowerCase()) continue;
-    budget.remaining -= data.length;
     urls.push(`data:${part.mime_type};base64,${data.toString("base64")}`);
   }
   return urls;

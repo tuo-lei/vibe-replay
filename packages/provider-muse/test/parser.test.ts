@@ -381,6 +381,21 @@ describe("file_ref image attachments", () => {
     expect(parsed.turns).toHaveLength(0);
   });
 
+  it("consumes the budget even when digest validation fails", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [
+        header(),
+        // Wrong digest consumes the 9-byte budget without embedding…
+        userPartsMessage([fileRef({ sha256: "0".repeat(64) })]),
+        // …so the valid duplicate that follows is skipped too.
+        userPartsMessage([fileRef()]),
+      ],
+      { homeDir: home, maxTotalImageBytes: 9 },
+    );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
   it("stops embedding once the per-parse image byte budget is exhausted", async () => {
     const { home, fileRef } = await makeImageHome();
     const parsed = parseMuseLines(
