@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
@@ -135,6 +136,65 @@ describe("Editor Server E2E", () => {
       expect(await page.locator("body").textContent()).toContain("vibe-replay");
     } finally {
       await page.close();
+    }
+  });
+
+  it("repairs a stale AI default and preserves an explicit choice across provider reads", async () => {
+    const modelServer = createServer((_request, response) => {
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({ data: [{ id: "gpt-5.6-luna" }, { id: "chosen-model" }] }));
+    });
+    await new Promise<void>((resolve) => modelServer.listen(0, "127.0.0.1", resolve));
+    const address = modelServer.address();
+    if (!address || typeof address === "string") throw new Error("model fixture did not bind");
+    const origin = `http://localhost:${serverPort}`;
+    const settingsDir = join(tmpDir, ".vibe-replay");
+    const settingsPath = join(settingsDir, "ai-settings.json");
+    try {
+      await mkdir(settingsDir, { recursive: true });
+      await writeFile(
+        settingsPath,
+        JSON.stringify({ providerId: "custom-openai", modelId: "removed-model" }),
+      );
+      const configured = await fetch(`${origin}/api/ai/custom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({
+          name: "Synthetic provider",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          apiKey: "synthetic-test-key",
+        }),
+      });
+      expect(configured.status).toBe(200);
+      expect(await configured.json()).toMatchObject({
+        defaultProvider: { id: "custom-openai", modelId: "gpt-5.6-luna" },
+      });
+      expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+        providerId: "custom-openai",
+        modelId: "gpt-5.6-luna",
+      });
+
+      const selected = await fetch(`${origin}/api/ai/default`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({ providerId: "custom-openai", modelId: "chosen-model" }),
+      });
+      expect(selected.status).toBe(200);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const providers = await fetch(`${origin}/api/ai/providers`);
+        expect(providers.status).toBe(200);
+        expect(await providers.json()).toMatchObject({
+          defaultProvider: { id: "custom-openai", modelId: "chosen-model" },
+        });
+      }
+      expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+        providerId: "custom-openai",
+        modelId: "chosen-model",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        modelServer.close((error) => (error ? reject(error) : resolve())),
+      );
     }
   });
 });

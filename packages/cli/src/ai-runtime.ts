@@ -764,16 +764,25 @@ export async function writeAiDefaultSelection(
   }
 }
 
-/** Seed a default only when the app-owned settings file is still empty. */
+/** Seed an empty default or replace the invalid choice the caller observed. */
 export async function ensureAiDefaultSelection(
   selection: AiDefaultSelection,
   signal?: AbortSignal,
+  observedInvalid?: AiDefaultSelection,
 ): Promise<AiDefaultSelection> {
   const settingsPath = getAiSettingsPath();
   const release = await acquireFileLock(`${settingsPath}.transaction`, signal);
   try {
     const saved = await readAiDefaultSelection();
-    if (saved) return saved;
+    // Compare under the same lock as explicit writes. A different saved choice
+    // belongs to a concurrent writer and must not be replaced by this fallback.
+    if (
+      saved &&
+      (saved.providerId !== observedInvalid?.providerId ||
+        saved.modelId !== observedInvalid?.modelId)
+    ) {
+      return saved;
+    }
     await persistJsonFile(settingsPath, selection, signal);
     return selection;
   } finally {

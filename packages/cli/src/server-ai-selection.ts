@@ -45,20 +45,15 @@ export async function resolveDefaultAiSelection(
 ): Promise<AiSelection | undefined> {
   const usable = providers.filter((provider) => provider.configured && provider.models.length > 0);
   if (usable.length === 0) return undefined;
+  const isUsableSelection = (selection: AiSelection) =>
+    usable.some(
+      (provider) =>
+        provider.id === selection.providerId &&
+        provider.models.some((model) => model.id === selection.modelId),
+    );
 
   const savedDefault = await readAiDefaultSelection();
-  if (savedDefault) {
-    const matchingProvider = usable.find((provider) => provider.id === savedDefault.providerId);
-    if (
-      matchingProvider &&
-      matchingProvider.models.some((model) => model.id === savedDefault.modelId)
-    ) {
-      return {
-        providerId: matchingProvider.id,
-        modelId: savedDefault.modelId,
-      };
-    }
-  }
+  if (savedDefault && isUsableSelection(savedDefault)) return savedDefault;
 
   // Vibe Replay owns its default. Prefer Luna when the configured provider
   // exposes it, with the local/custom endpoint ahead of a direct API key.
@@ -74,9 +69,11 @@ export async function resolveDefaultAiSelection(
       providerId: preferredProvider.id,
       modelId: PREFERRED_DEFAULT_MODEL_ID,
     };
-    // Seed the app-owned settings file once so CLI and browser surfaces share
-    // the same default without importing another agent's configuration.
-    return await ensureAiDefaultSelection(preferred).catch(() => preferred);
+    // Repair only the invalid choice we observed, preserving concurrent writes.
+    const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
+      () => preferred,
+    );
+    return isUsableSelection(selected) ? selected : preferred;
   }
 
   // Do not invent a provider/model or silently select the first catalog entry.
