@@ -1,10 +1,12 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as aiRuntime from "../src/ai-runtime.js";
 import type { AiProviderInfo } from "../src/ai-runtime.js";
 import { __testables } from "../src/server.js";
+import { registerAiRoutes } from "../src/server-routes/ai.js";
 
 let settingsPath: string;
 let previousSettingsPath: string | undefined;
@@ -163,4 +165,41 @@ describe("AI default selection", () => {
     expect(selection).toEqual({ providerId: id, modelId: "new-model" });
     expect(await readDefault()).toEqual(selection);
   });
+
+  it.each(
+    ["openai", "new-provider"].flatMap((id) =>
+      [false, true].map((beforeRead) => ({ id, beforeRead })),
+    ),
+  )(
+    "returns a coherent catalog for $id (saved before read: $beforeRead)",
+    async ({ id, beforeRead }) => {
+      await writeAppDefault(beforeRead ? id : "openai", beforeRead ? "new-model" : "removed-model");
+      const readDefault = aiRuntime.readAiDefaultSelection;
+      vi.spyOn(aiRuntime, "readAiDefaultSelection").mockImplementationOnce(async () => {
+        const observed = await readDefault();
+        await aiRuntime.writeAiDefaultSelection({ providerId: id, modelId: "new-model" });
+        return observed;
+      });
+      const refreshed = [provider(id, "new-model")];
+      vi.mocked(aiRuntime.getAiRuntime().listProviders)
+        .mockResolvedValueOnce([provider("openai", "gpt-5.6-luna")])
+        .mockResolvedValue(refreshed);
+      const app = new Hono();
+      registerAiRoutes(app, {
+        baseDir: "/synthetic",
+        loadSession: vi.fn(),
+        isSameOriginSettingsRequest: () => true,
+      });
+
+      const response = await app.request("/api/ai/providers");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        available: true,
+        providers: refreshed,
+        defaultProvider: { id, name: id, modelId: "new-model" },
+      });
+      expect(await readDefault()).toEqual({ providerId: id, modelId: "new-model" });
+    },
+  );
 });

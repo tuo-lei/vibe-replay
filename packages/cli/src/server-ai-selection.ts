@@ -43,9 +43,9 @@ function parseAiSelectionBody(body: unknown): AiSelection | undefined {
 /** Resolve a usable app default, preserving explicit choices made during seeding. */
 export async function resolveDefaultAiSelection(
   providers: AiProviderInfo[],
+  onCatalogRefresh?: (providers: AiProviderInfo[]) => void,
 ): Promise<AiSelection | undefined> {
   const usable = providers.filter((provider) => provider.configured && provider.models.length > 0);
-  if (usable.length === 0) return undefined;
   /** Check the selected model against configured providers in a catalog snapshot. */
   const isUsableSelection = (selection: AiSelection, candidates = usable) =>
     candidates.some(
@@ -54,9 +54,23 @@ export async function resolveDefaultAiSelection(
         provider.id === selection.providerId &&
         provider.models.some((model) => model.id === selection.modelId),
     );
+  /** Refresh a stale catalog and publish it only when it validates the choice. */
+  const isUsableAfterRefresh = async (selection: AiSelection) => {
+    const refreshed = await getAiRuntime()
+      .listProviders()
+      .catch(() => []);
+    if (!isUsableSelection(selection, refreshed)) return false;
+    onCatalogRefresh?.(refreshed);
+    return true;
+  };
 
   const savedDefault = await readAiDefaultSelection();
-  if (savedDefault && isUsableSelection(savedDefault)) return savedDefault;
+  if (
+    savedDefault &&
+    (isUsableSelection(savedDefault) || (await isUsableAfterRefresh(savedDefault)))
+  )
+    return savedDefault;
+  if (usable.length === 0) return undefined;
 
   // Vibe Replay owns its default. Prefer Luna when the configured provider
   // exposes it, with the local/custom endpoint ahead of a direct API key.
@@ -76,13 +90,9 @@ export async function resolveDefaultAiSelection(
     const selected = await ensureAiDefaultSelection(preferred, undefined, savedDefault).catch(
       () => preferred,
     );
-    if (isUsableSelection(selected)) return selected;
-    // A concurrent explicit choice may belong to a newly configured provider
-    // or a model discovered after the caller fetched its catalog.
-    const refreshed = await getAiRuntime()
-      .listProviders()
-      .catch(() => []);
-    return isUsableSelection(selected, refreshed) ? selected : preferred;
+    return isUsableSelection(selected) || (await isUsableAfterRefresh(selected))
+      ? selected
+      : preferred;
   }
 
   // Do not invent a provider/model or silently select the first catalog entry.

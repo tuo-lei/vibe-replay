@@ -33,8 +33,10 @@ export function registerAiRoutes(app: Hono, deps: AiRouteDeps): void {
   const { baseDir, loadSession, isSameOriginSettingsRequest } = deps;
 
   const getAiProvidersResponse = async (signal?: AbortSignal, retryChatGptModels = false) => {
-    const providers = await getAiRuntime().listProviders({ signal, retryChatGptModels });
-    const defaultSelection = await resolveDefaultAiSelection(providers);
+    let providers = await getAiRuntime().listProviders({ signal, retryChatGptModels });
+    const defaultSelection = await resolveDefaultAiSelection(providers, (refreshed) => {
+      providers = refreshed;
+    });
     const defaultProvider = defaultSelection
       ? providers.find((provider) => provider.id === defaultSelection.providerId) || null
       : null;
