@@ -260,6 +260,18 @@ describe("AI default selection", () => {
     expect(aiRuntime.getAiRuntime().listProviders).toHaveBeenCalledTimes(2);
   });
 
+  it("does not refresh the caller's fresh catalog when no default is saved", async () => {
+    const catalog = [provider("openai", "other-model")];
+    vi.mocked(aiRuntime.getAiRuntime().listProviders).mockResolvedValue(catalog);
+    const response = await requestProviders();
+    expect(await response.json()).toEqual({
+      available: true,
+      providers: catalog,
+      defaultProvider: null,
+    });
+    expect(aiRuntime.getAiRuntime().listProviders).toHaveBeenCalledTimes(1);
+  });
+
   it("retains the known catalog when refresh fails", async () => {
     await writeAppDefault("openai", "removed-model");
     const catalog = [provider("openai", "gpt-5.6-luna")];

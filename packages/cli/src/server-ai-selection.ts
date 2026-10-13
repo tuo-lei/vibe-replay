@@ -121,7 +121,8 @@ export async function resolveDefaultAiSelection(
     const current = await revalidate(selected);
     return current ?? preferredSelection();
   }
-  return await revalidate(await readAiDefaultSelection());
+  const current = await readAiDefaultSelection();
+  return current ? await revalidate(current) : undefined;
 }
 
 export async function resolveAiSelection(
