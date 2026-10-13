@@ -30,8 +30,9 @@ default `~/agents`):
   inside the home directory (symlink escapes rejected), a required bounded
   `bytes_len` matches the on-disk size (checked before reading), and the
   file's sha256 matches the digest (tampered/swapped files are never
-  embedded). Image-only user messages replay as `(image)` user-prompt
-  scenes instead of being dropped.
+  embedded). A 5 MB per-image cap and a 25 MB per-parse cumulative budget
+  bound the embedded total. Image-only user messages replay as `(image)`
+  user-prompt scenes instead of being dropped.
 - `thinking` — `thinking` field → assistant thinking block
 - `commentary_text` — short assistant narration → assistant text block
 - `function_call` (`call_id`, `name`, `arguments` as a JSON string) → tool_use

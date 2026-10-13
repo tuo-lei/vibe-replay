@@ -107,6 +107,12 @@ function textFromItem(item: MuseItem): string {
  * replay JSON/HTML the parser feeds.
  */
 const MAX_USER_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * Cumulative cap across one parse: many individually-valid `file_ref` parts
+ * (or the same reference duplicated) must not add up to gigabytes of
+ * base64 during parsing or background scanning.
+ */
+const MAX_TOTAL_USER_IMAGE_BYTES = 25 * 1024 * 1024;
 
 /**
  * Collect user-attached images from `file_ref` message parts as data URLs.
@@ -122,9 +128,14 @@ const MAX_USER_IMAGE_BYTES = 5 * 1024 * 1024;
  * required, bounded `bytes_len`, and its sha256 matches the part's digest —
  * a tampered or swapped file is never silently embedded into a replay.
  * `bytes_len` is required precisely so the embed cap and the size check can
- * be enforced *before* any bytes are read.
+ * be enforced *before* any bytes are read. A shared per-parse byte budget
+ * additionally bounds the total embedded across many `file_ref` parts.
  */
-function userImageDataUrls(item: MuseItem, homeDir: string = homedir()): string[] {
+function userImageDataUrls(
+  item: MuseItem,
+  homeDir: string = homedir(),
+  budget: { remaining: number } = { remaining: MAX_TOTAL_USER_IMAGE_BYTES },
+): string[] {
   const urls: string[] = [];
   if (!Array.isArray(item.parts)) return urls;
   const home = homeDir;
@@ -164,6 +175,7 @@ function userImageDataUrls(item: MuseItem, homeDir: string = homedir()): string[
       continue;
     }
     if (size !== part.bytes_len) continue;
+    if (size > budget.remaining) continue;
     let data: Buffer;
     try {
       data = readFileSync(canonical);
@@ -172,6 +184,7 @@ function userImageDataUrls(item: MuseItem, homeDir: string = homedir()): string[
     }
     if (data.length !== part.bytes_len) continue;
     if (createHash("sha256").update(data).digest("hex") !== part.sha256.toLowerCase()) continue;
+    budget.remaining -= data.length;
     urls.push(`data:${part.mime_type};base64,${data.toString("base64")}`);
   }
   return urls;
@@ -229,13 +242,28 @@ function firstTextBlockText(turn: ParsedTurn | undefined): string {
  */
 export function parseMuseLines(
   lines: string[],
-  options: { sessionInfo?: SessionInfo; now?: () => string; model?: string; homeDir?: string } = {},
+  options: {
+    sessionInfo?: SessionInfo;
+    now?: () => string;
+    model?: string;
+    homeDir?: string;
+    maxTotalImageBytes?: number;
+  } = {},
 ): ProviderParseResult {
-  const { sessionInfo, now = () => new Date().toISOString(), model, homeDir } = options;
+  const {
+    sessionInfo,
+    now = () => new Date().toISOString(),
+    model,
+    homeDir,
+    maxTotalImageBytes = MAX_TOTAL_USER_IMAGE_BYTES,
+  } = options;
   const turns: ParsedTurn[] = [];
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   const compactions: Compaction[] = [];
   const timestamps: string[] = [];
+  // Shared across the whole parse so many file_ref parts cannot add up to
+  // gigabytes of embedded base64.
+  const imageBudget = { remaining: maxTotalImageBytes };
 
   const toolBlocksByCallId = new Map<string, MuseToolBlock>();
   // Parallel to `turns`: the record-level `source` of the line that created
@@ -324,7 +352,7 @@ export function parseMuseLines(
         if (item.role === "user") {
           flush();
           const cleaned = cleanPromptText(text);
-          const images = userImageDataUrls(item, homeDir);
+          const images = userImageDataUrls(item, homeDir, imageBudget);
           if (!cleaned && images.length === 0) break;
           const blocks: ContentBlock[] = [];
           if (cleaned) blocks.push({ type: "text", text: cleaned });

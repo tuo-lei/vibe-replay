@@ -381,6 +381,21 @@ describe("file_ref image attachments", () => {
     expect(parsed.turns).toHaveLength(0);
   });
 
+  it("stops embedding once the per-parse image byte budget is exhausted", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [header(), userPartsMessage([{ type: "text", text: "two shots" }, fileRef(), fileRef()])],
+      // 9-byte fake image; budget fits exactly one.
+      { homeDir: home, maxTotalImageBytes: 9 },
+    );
+    expect(parsed.turns).toHaveLength(1);
+    const imageBlock = parsed.turns[0].blocks.find((b) => b.type === "_user_images");
+    expect(imageBlock?.type).toBe("_user_images");
+    if (imageBlock?.type === "_user_images") {
+      expect(imageBlock.images).toHaveLength(1);
+    }
+  });
+
   it("skips a file_ref without a bounded bytes_len", async () => {
     const { home, fileRef } = await makeImageHome();
     const ref = fileRef();
