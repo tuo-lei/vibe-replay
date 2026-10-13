@@ -119,9 +119,15 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    `tool_use` blocks, `thinking` scenes == non-empty thinking blocks,
    `text-response` scenes == non-empty assistant text blocks
    (whitespace-only blocks are dropped by shared `replay-core/transform.ts`
-   logic, by design). Also verify the embedded
+   logic, by design). Force source parsing with `--source`: `export`
+   prefers a saved replay snapshot when one exists
+   (`"origin": "snapshot"` in its `--json` output), which would validate a
+   stale tree instead of the code under test — the E2E must run against
+   `"origin": "source"`. Also verify the embedded
    `window.__VIBE_REPLAY_DATA__` JSON parses and matches the generated
-   `replay.json` with no unescaped `</script>`. When the run changed the
+   `replay.json` with no unescaped `</script>` (ignore
+   `meta.generator.generatedAt`, which legitimately differs between the
+   two separate export invocations). When the run changed the
    Muse parser or any replay-affecting code, validate both required replay
    sizes: a ~30-scene and a ~500-scene representative session, not just the
    single most recent one. A green unit suite alone does not
@@ -152,7 +158,9 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    passing `--branch <branch>` explicitly (its default branch is stale).
    Never bump versions or publish.
 8. **Review → merge.** Wait for the Codex auto-review (usually ~10 min; poll
-   for up to 30 min). Read every comment and address each one — fix, or push
+   for up to 30 min). CodeRabbit also reviews PRs in this repo — read its
+   inline comments too and address the valid ones the same way. Read every
+   comment and address each one — fix, or push
    back with a reasoned reply — pushing follow-ups to the same branch.
    After every follow-up push, wait for a fresh Codex review of the new head
    before merging: fixes pushed after a review must themselves be reviewed.
@@ -175,6 +183,15 @@ Keep `watermark.json` in `crons/muse-cloud-parity/` (untracked local state):
 `last_run`, `last_verified_commit`, `last_pr` (number/URL or null),
 `open_followups`. Read it first; a previous run's unfinished PR is your
 first job, not a new audit.
+
+## Environment resilience
+
+The VM can restart mid-run: `/tmp` is wiped and anything installed outside
+`~` (e.g. a global `pnpm`) vanishes. Keep every run artifact the next step
+needs under `~/workspace`, never in `/tmp`. After any long wait, re-verify
+`command -v pnpm` (reinstall the pinned version per step 2 if it is gone)
+and re-confirm branch/PR-head state against the API before continuing —
+do not assume a backgrounded shell's world is still intact.
 
 ## Reporting rules
 
