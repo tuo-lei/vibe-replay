@@ -79,6 +79,34 @@ describe("Codex compressed source workflows", () => {
     }
   }, 20_000);
 
+  it("updates Live promptly when a plain sibling is created while compression remains", async () => {
+    const { path, info, text } = await fixture();
+    const app = new Hono();
+    registerLiveRoutes(app, { resolveSessionInfo: async () => info });
+    const response = await app.request("/api/live?provider=codex&sessionId=test-session");
+    const reader = response.body!.getReader();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const first = new TextDecoder().decode((await reader.read()).value);
+      expect(first).toContain("Inspection complete");
+      await writeFile(path, text.replace("Inspection complete", "Resumed with plain storage"));
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Live did not detect its new sibling")),
+            4000,
+          );
+        }),
+      ]);
+      expect(new TextDecoder().decode(next.value)).toContain("Resumed with plain storage");
+      expect(await readFile(`${path}.zst`)).toEqual(zstdCompressSync(Buffer.from(text)));
+    } finally {
+      clearTimeout(timeout);
+      await reader.cancel();
+    }
+  });
+
   it.skipIf(process.platform === "win32")(
     "indexes and stages compressed SSH sources without a remote decoder",
     async () => {
