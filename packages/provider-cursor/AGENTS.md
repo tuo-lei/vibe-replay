@@ -29,12 +29,24 @@ machine can hold a ~25 GB `state.vscdb` (mostly `bubbleId:*` rows) and hundreds 
   `loadSdkAgentEnrichment` now reads a database in-process with sql.js only when it is
   under `SQLJS_PREFERRED_MAX_BYTES` (16 MB) and `-wal`/`-journal` are empty
   (`isMainFileComplete`; sql.js ignores sidecars, so it must never read past a non-empty
-  one). Everything else uses one `sqlite3 -readonly -json` run with two statements
-  (`parseConcatenatedJsonArrays`: no output = no runs, one array = runs without events),
+  one). Everything else uses one `sqlite3 -readonly` run (row format below) with the runs and
+  events statements in one `BEGIN`/`COMMIT`, separated by a `.print` marker so an empty
+  result set cannot shift the other (`parseSqliteCliResultSets`),
   falling back to the stepwise path on any non-snapshot error. `SqliteSnapshotRequiredError`
   always propagates, and the fallback must never mask a main-file race. Test with spawn
   counts (`sdk-enrichment-read-paths.test.ts`), not wall time: timings on a loaded
   machine are noisy.
+- **Never read large text through `sqlite3 -json`.** The CLI escapes every `"`/`\` with a
+  pass that is quadratic in the string length (sqlite 3.51: 200 KB of quotes = 30 s;
+  1.5 MB of Cursor request context = 14 s; `-quote`/list/`hex()` = ~25 ms). Cursor values are
+  JSON stored as TEXT, so this is the common case, and a single session cost up to 8.6 s.
+  Use `SQLITE_CLI_ROW_FLAGS` + `parseSqliteCliRows` from `provider-core/src/sqlite-cli.ts`
+  (`-quote -header`, linear, typed, Windows keeps `-json`); split multi-statement output
+  with `sqliteCliResultSeparator`/`parseSqliteCliResultSets`. The bubble, request-context,
+  agentKV and SDK reads use it. Also project only the fields you consume in SQL (request
+  contexts: four arrays, via `json_type(...) = 'array'`). `readCursorLiveDiagnostics` still
+  uses `-json` because `live-snapshot-scope.test.ts` mocks the CLI by that flag; move it
+  once that test is updated with maintainer approval (`packages/cli/test/README.md`).
 - **Known remaining cost: large shared `index.db`.** A 148 MB WAL-mode database holding
   266 agents still costs ~88 ms per agent, almost all in `withSqliteReadSource` staging a
   fresh snapshot per operation (SQL itself is ~12 ms; the same call is 0.1 ms once the

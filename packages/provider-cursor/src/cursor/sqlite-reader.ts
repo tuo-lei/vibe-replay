@@ -34,6 +34,7 @@ import type {
   ProviderDiscoveryOptions,
   SessionInfo,
 } from "@vibe-replay/provider-contract";
+import { SQLITE_CLI_ROW_FLAGS, parseSqliteCliRows } from "@vibe-replay/provider-core/sqlite-cli";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import {
@@ -55,6 +56,13 @@ const UNC_PATH_RE = /^\/\//;
 
 const MIN_STORE_DB_SIZE = 8192;
 const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
+/** The only request-context fields `extractCursorContextSummary` reads. */
+const REQUEST_CONTEXT_FIELDS = [
+  "terminalFiles",
+  "cursorRules",
+  "attachedFoldersListDirResults",
+  "summarizedComposers",
+] as const;
 const SQLITE_CLI_MAX_BUFFER = 256 * 1024 * 1024;
 const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
 const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
@@ -366,13 +374,27 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
   return canUse;
 }
 
-async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
+/**
+ * `linear` selects the `-quote` row format, which stays linear for large JSON-bearing text
+ * values; `-json` is quadratic on them (see `provider-core/src/sqlite-cli.ts`). Callers that
+ * read bubble text, tool results, or request contexts must pass it.
+ */
+async function querySqliteCli(
+  dbPath: string,
+  sql: string,
+  linear = false,
+): Promise<Record<string, any>[]> {
   const { stdout } = await withSqliteReadSource(dbPath, (source) =>
-    execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
-      maxBuffer: SQLITE_CLI_MAX_BUFFER,
-      timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
-    }),
+    execFileAsync(
+      "sqlite3",
+      ["-readonly", ...(linear ? SQLITE_CLI_ROW_FLAGS : ["-json"]), source, sql],
+      {
+        maxBuffer: SQLITE_CLI_MAX_BUFFER,
+        timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+      },
+    ),
   );
+  if (linear) return parseSqliteCliRows(stdout);
   const trimmed = stdout.trim();
   if (!trimmed) return [];
   return JSON.parse(trimmed) as Record<string, any>[];
@@ -404,10 +426,11 @@ export function sqlJsRows(db: Database, sql: string): Record<string, any>[] {
 async function queryGlobalStateRows(
   globalStateDb: CachedGlobalStateDb,
   sql: string,
+  linear = false,
 ): Promise<Record<string, any>[]> {
   await assertSqliteSnapshotCurrent(globalStateDb.dbPath);
   if (globalStateDb.backend === "sqlite-cli") {
-    return querySqliteCli(globalStateDb.dbPath, sql);
+    return querySqliteCli(globalStateDb.dbPath, sql, linear);
   }
   return sqlJsRows(globalStateDb.db, sql);
 }
@@ -424,6 +447,7 @@ async function queryCursorDiskKvRowsByKeys(
     const chunkRows = await queryGlobalStateRows(
       db,
       `SELECT key, value FROM cursorDiskKV WHERE key IN (${chunk.map(sqlString).join(",")})`,
+      true,
     );
     for (const row of chunkRows) {
       if ("key" in row && "value" in row) rows.push({ key: row.key, value: row.value });
@@ -3024,18 +3048,28 @@ async function loadCursorRequestContexts(
   globalStateDb: CachedGlobalStateDb,
   sessionId: string,
 ): Promise<Record<string, any>[]> {
+  // Only these four fields are read (`extractCursorContextSummary`), but a whole context can
+  // be megabytes, so project them in SQL instead of shipping every row through the pipe.
   const rows = await queryGlobalStateRows(
     globalStateDb,
-    `SELECT value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange(
+    `SELECT ${REQUEST_CONTEXT_FIELDS.map(
+      (field) =>
+        `CASE WHEN json_type(value, '$.${field}') = 'array' THEN json_extract(value, '$.${field}') END AS ${field}`,
+    ).join(", ")} FROM cursorDiskKV WHERE ${sqlKeyPrefixRange(
       `messageRequestContext:${sessionId}:`,
-    )} LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
+    )} AND json_valid(value) LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
+    true,
   );
 
   const contexts: Record<string, any>[] = [];
   for (const row of rows) {
-    const raw = valueToString(row.value);
-    const parsed = parseJson<Record<string, any>>(raw);
-    if (parsed) contexts.push(parsed);
+    const context: Record<string, any> = {};
+    for (const field of REQUEST_CONTEXT_FIELDS) {
+      // json_extract returns an array as JSON text; other types are filtered out in SQL.
+      const parsed = parseJson<unknown>(valueToString(row[field]));
+      if (parsed !== null && parsed !== undefined) context[field] = parsed;
+    }
+    contexts.push(context);
   }
   return contexts;
 }
@@ -3066,6 +3100,7 @@ async function loadProjectedBubbleRowsByKeys(
         `SELECT ${projectedCursorBubbleSelectSql()} FROM cursorDiskKV WHERE key IN (${chunk
           .map(sqlString)
           .join(",")}) AND json_valid(value)`,
+        true,
       )),
     );
   }
