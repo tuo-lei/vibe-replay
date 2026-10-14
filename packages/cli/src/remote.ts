@@ -130,12 +130,18 @@ emit_files() {
   [ -d "$root" ] || return 0
 
   list=$(mktemp "\${TMPDIR:-/tmp}/vibe-replay-index.XXXXXX") || return 1
-  if ! find "$root" -type f -name '*.jsonl' -print > "$list" 2>/dev/null; then
+  if ! find "$root" -type f \\( -name '*.jsonl' -o -name '*.jsonl.zst' \\) -print > "$list" 2>/dev/null; then
     rm -f "$list"
     return 1
   fi
 
   while IFS= read -r file; do
+    case "$file" in
+      *.jsonl.zst)
+        [ "$provider" = codex ] || continue
+        [ ! -f "\${file%.zst}" ] || continue
+        ;;
+    esac
     size=$(wc -c < "$file" 2>/dev/null) || {
       rm -f "$list"
       return 1
@@ -858,7 +864,11 @@ function unavailableRemoteSessions(
     if (localPath && knownPaths.has(localPath)) continue;
     const metadata =
       file.provider === "codex"
-        ? [...codexMetadata.values()].find((entry) => entry.rolloutPath === file.remotePath)
+        ? [...codexMetadata.values()].find(
+            (entry) =>
+              entry.rolloutPath?.replace(/\.jsonl\.zst$/, ".jsonl") ===
+              file.remotePath.replace(/\.jsonl\.zst$/, ".jsonl"),
+          )
         : undefined;
     add(metadata ? metadataOnlyCodexSession(metadata) : unavailableRemoteFileSession(file));
   }
@@ -887,7 +897,11 @@ function addMissingRemoteFileSessions(
     if (localPath && knownPaths.has(localPath)) continue;
     const metadata =
       file.provider === "codex"
-        ? [...codexMetadata.values()].find((entry) => entry.rolloutPath === file.remotePath)
+        ? [...codexMetadata.values()].find(
+            (entry) =>
+              entry.rolloutPath?.replace(/\.jsonl\.zst$/, ".jsonl") ===
+              file.remotePath.replace(/\.jsonl\.zst$/, ".jsonl"),
+          )
         : undefined;
     add(metadata ? metadataOnlyCodexSession(metadata) : unavailableRemoteFileSession(file));
   }

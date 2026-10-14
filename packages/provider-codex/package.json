@@ -27,6 +27,10 @@
     "./remote": {
       "types": "./src/codex/remote.ts",
       "import": "./src/codex/remote.ts"
+    },
+    "./rollout": {
+      "types": "./src/codex/rollout.ts",
+      "import": "./src/codex/rollout.ts"
     }
   },
   "scripts": {
@@ -36,6 +40,7 @@
     "@vibe-replay/provider-contract": "workspace:*",
     "@vibe-replay/provider-core": "workspace:*",
     "acorn": "8.16.0",
+    "fzstd": "0.1.1",
     "sql.js": "^1.14.2"
   },
   "devDependencies": {

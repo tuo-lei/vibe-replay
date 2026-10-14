@@ -24,6 +24,7 @@ import { assertSqliteWalReadable, withReadOnlySqlite } from "@vibe-replay/provid
 import { inferSqliteProvider } from "./sqlite-schema.js";
 import { parseGrokBotMetaWake } from "@vibe-replay/provider-grok-bot/parser";
 import { CLI_VERSION } from "./version.js";
+import { readCodexRolloutPrefix } from "@vibe-replay/provider-codex/rollout";
 
 export interface SessionReferenceOptions {
   provider?: string;
@@ -38,7 +39,7 @@ export interface SessionReferenceOptions {
 export async function discoverCliSessions(options: SessionReferenceOptions = {}) {
   const providers = options.provider ? [getProvider(options.provider)] : getAllProviders();
   if (providers.some((p) => !p)) throw new Error(`Unknown provider: ${options.provider}`);
-  const key = `cli-discovery-v1-${options.provider || "all"}`;
+  const key = `cli-discovery-v2-${options.provider || "all"}`;
   const cached = options.refresh ? null : await readFileCache<SafeProviderDiscoveryResult>(key);
   if (cached && Date.now() - Date.parse(cached.updatedAt) < 30_000) {
     return {
@@ -144,12 +145,20 @@ function splitStorageReference(ref: string) {
 }
 
 function canonicalStoragePath(ref: string): string {
-  const path = resolve(expandUserPath(splitStorageReference(ref).base));
+  let path = resolve(expandUserPath(splitStorageReference(ref).base));
   try {
-    return realpathSync(path);
+    path = realpathSync(path);
   } catch {
-    return path;
+    // Missing logical Codex .jsonl paths still identify their .jsonl.zst sibling.
+    if (path.endsWith(".jsonl")) {
+      try {
+        path = realpathSync(`${path}.zst`);
+      } catch {
+        // Keep unresolved paths usable for reference matching.
+      }
+    }
   }
+  return path.endsWith(".jsonl.zst") ? path.slice(0, -4) : path;
 }
 
 function pathExists(ref: string): boolean {
@@ -290,6 +299,12 @@ async function inferProvider(path: string): Promise<string> {
   const { base, marker, suffix } = splitStorageReference(path);
   const cursorPath = /(?:^|[/\\])(?:\.cursor|Cursor)[/\\]/i.test(base);
   if (suffix.startsWith("#composerData:") || (marker && cursorPath)) return "cursor";
+  if (base.endsWith(".jsonl.zst")) {
+    const head = await readCodexRolloutPrefix(base, 1024 * 1024);
+    if (head.split("\n").some((line) => inferenceRecord(line)?.type === "session_meta"))
+      return "codex";
+    throw new Error("Could not infer the provider from this source. Specify --provider <name>.");
+  }
   const file = await open(base, "r");
   let head: string;
   let initialRecordIncomplete = false;

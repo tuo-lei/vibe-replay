@@ -1,7 +1,7 @@
 import { type FSWatcher, watch as fsWatch } from "node:fs";
 import { open as fsOpen, readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
@@ -23,6 +23,7 @@ import { getErrorMessage, safeTargetId } from "../server-core.js";
 import { transformToReplay } from "../transform.js";
 import type { SessionInfo } from "../types.js";
 import { CLI_VERSION } from "../version.js";
+import { resolveCodexRolloutPath } from "@vibe-replay/provider-codex/rollout";
 
 type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
 
@@ -138,6 +139,7 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
 
       const watchers: FSWatcher[] = [];
       const watchedPaths = new Set<string>();
+      const codexDirectoryNames = new Map<string, Set<string>>();
       let pendingTimer: ReturnType<typeof setTimeout> | null = null;
       let aborted = false;
       let inFlight = false;
@@ -167,6 +169,31 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
             watchedPaths.add(fp);
           } catch {
             // best-effort — if a path can't be watched, the others may still work
+          }
+        }
+      };
+
+      const ensureCodexDirectoryWatchersFor = (paths: Iterable<string>): void => {
+        if (!isCodexProvider) return;
+        for (const path of paths) {
+          const directory = dirname(path);
+          const names = codexDirectoryNames.get(directory) || new Set<string>();
+          const plainName = basename(path).replace(/\.jsonl\.zst$/, ".jsonl");
+          names.add(plainName);
+          names.add(`${plainName}.zst`);
+          codexDirectoryNames.set(directory, names);
+          if (aborted || watchedPaths.has(directory)) continue;
+          try {
+            // A new plain sibling does not notify a watcher on the existing
+            // compressed file. Filter directory events to this session's files.
+            const watcher = fsWatch(directory, { persistent: false }, (_event, filename) => {
+              if (filename === null || names.has(filename.toString())) scheduleRebuild();
+            });
+            watcher.on("error", () => {});
+            watchers.push(watcher);
+            watchedPaths.add(directory);
+          } catch {
+            // Existing file watchers and periodic rediscovery remain available.
           }
         }
       };
@@ -257,8 +284,12 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
             lastResolvedAt = Date.now();
           }
           const info = sessionInfo!;
-          const paths = [...info.filePaths, ...(info.toolPaths || [])];
+          const sourcePaths = [...info.filePaths, ...(info.toolPaths || [])];
+          const paths = isCodexProvider
+            ? await Promise.all(sourcePaths.map(resolveCodexRolloutPath))
+            : sourcePaths;
           ensureWatchersFor(paths);
+          ensureCodexDirectoryWatchersFor(paths);
           await ensureCursorDbWatchersFor(info);
           const cursorDiagnostics =
             isCursorProvider && info.hasSqlite
@@ -279,7 +310,7 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
             return;
           }
           let parsed;
-          if (isJsonlLiveProvider) {
+          if (isJsonlLiveProvider && !paths.some((path) => path.endsWith(".jsonl.zst"))) {
             const allLines: string[] = [];
             const grokMembers: Array<{ path: string; lines: string[] }> = [];
             for (const fp of paths) {

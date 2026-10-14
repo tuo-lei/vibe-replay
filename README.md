@@ -63,7 +63,7 @@ The Settings form validates source ids, provider selections, and connection time
 bounded SSH probe before you refresh the catalog. It uses your existing OpenSSH keys, aliases, and
 ProxyJump configuration; credentials are never stored by vibe-replay.
 
-`sshHost` can be a normal hostname or an alias from `~/.ssh/config`, so existing keys, agents, `ProxyJump`, and `ProxyCommand` configuration continue to work. No private key or password belongs in this file. Remote Codex, Claude Code, and Pi JSONL files are copied into a per-target local cache and parsed by the same providers as local sessions; source cards show the configured location label. A transcript that is still being written is kept at its last stable cached version instead of making the whole SSH source unavailable. Codex titles match `/resume`: explicit names from `session_index.jsonl` take precedence over the read-only `state_5.sqlite` title. The live database and WAL are never copied. Hosts with Python `sqlite3` or the `sqlite3` CLI unavailable still use cached metadata. Sessions whose source is missing, unreadable, or contains no meaningful human prompt remain visible with an explicit status and cannot be generated into an empty replay. Remote repository identity is retained for local filtering but omitted from shareable replay data. Remote Live mode is intentionally unavailable. Remote sessions stay in local insights and are excluded from optional cloud insight sync.
+`sshHost` can be a normal hostname or an alias from `~/.ssh/config`, so existing keys, agents, `ProxyJump`, and `ProxyCommand` configuration continue to work. No private key or password belongs in this file. Remote Codex (including `.jsonl.zst` cold rollouts), Claude Code, and Pi JSONL files are copied into a per-target local cache and parsed by the same providers as local sessions; source cards show the configured location label. A transcript that is still being written is kept at its last stable cached version instead of making the whole SSH source unavailable. Codex titles match `/resume`: explicit names from `session_index.jsonl` take precedence over the read-only `state_5.sqlite` title. The live database and WAL are never copied. Hosts with Python `sqlite3` or the `sqlite3` CLI unavailable still use cached metadata. Sessions whose source is missing, unreadable, or contains no meaningful human prompt remain visible with an explicit status and cannot be generated into an empty replay. Remote repository identity is retained for local filtering but omitted from shareable replay data. Remote Live mode is intentionally unavailable. Remote sessions stay in local insights and are excluded from optional cloud insight sync.
 
 ### Remote live sharing (`vibe-replay relay`)
 
@@ -339,7 +339,7 @@ so a local HTML fallback is distinguishable from a cloud URL.
 | Claude Code | Supported |
 | Claude Desktop | Supported |
 | Claude Cowork | Supported (agent-mode sessions) |
-| Codex | Supported (web search, GPT-5.x models, task timings, memory mode) |
+| Codex | Supported (plain or Zstandard-compressed rollouts, web search, task timings, memory mode) |
 | Cursor | Supported (SQLite + JSONL + SDK store, auto-discovered) |
 | OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |

@@ -147,7 +147,8 @@ export async function startServer(
   // v8 → v9: Codex source titles now follow explicit session_index names.
   // v9 → v10: carry provider compaction counts and storage fingerprints.
   // v10 → v11: distinguish Codex automation triggers from human prompts.
-  const sourcesCacheKey = `dashboard-sources-v11-${cacheKeySuffix}`;
+  // v11 → v12: discover Codex compressed rollouts previously marked unreadable.
+  const sourcesCacheKey = `dashboard-sources-v12-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets

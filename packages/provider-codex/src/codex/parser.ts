@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import { utf8ByteLength } from "@vibe-replay/provider-core/utils";
@@ -13,6 +12,7 @@ import {
   isCodexToolCallType,
 } from "./constants.js";
 import { nestedExecTools, patchFilePaths } from "./exec-tools.js";
+import { readCodexRolloutLines, resolveCodexRolloutPath } from "./rollout.js";
 import {
   addUsage,
   codexUsageByModel,
@@ -64,12 +64,14 @@ export async function parseCodexSession(
   sessionInfo?: SessionInfo,
 ): Promise<ProviderParseResult> {
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+  const sourcePaths: string[] = [];
   const lines: string[] = [];
   for (const fp of paths) {
-    const content = await readFile(fp, "utf-8");
-    lines.push(...content.split("\n"));
+    const source = await resolveCodexRolloutPath(fp);
+    sourcePaths.push(source);
+    for await (const line of readCodexRolloutLines(source)) lines.push(line);
   }
-  return parseCodexLines(lines, sessionInfo, paths);
+  return parseCodexLines(lines, sessionInfo, sourcePaths);
 }
 
 export function parseCodexLines(

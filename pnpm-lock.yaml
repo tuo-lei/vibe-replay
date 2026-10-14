@@ -117,6 +117,9 @@ importers:
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      fzstd:
+        specifier: 0.1.1
+        version: 0.1.1
       gifenc:
         specifier: ^1.0.3
         version: 1.0.3
@@ -227,6 +230,9 @@ importers:
       acorn:
         specifier: 8.16.0
         version: 8.16.0
+      fzstd:
+        specifier: 0.1.1
+        version: 0.1.1
       sql.js:
         specifier: ^1.14.2
         version: 1.14.2
@@ -3392,6 +3398,9 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  fzstd@0.1.1:
+    resolution: {integrity: sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA==}
 
   gaxios@7.3.1:
     resolution: {integrity: sha512-kB3rzJV7d9juLZh8/56QTXCwQfxyhdOMdyYk1HdQKFtF8TJTDTZQJtixWIwXdE9Jji91mC41DUNpjleo4L4eAQ==}
@@ -7563,6 +7572,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  fzstd@0.1.1: {}
 
   gaxios@7.3.1:
     dependencies:
