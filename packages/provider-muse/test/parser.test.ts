@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -273,6 +274,187 @@ describe("parseMuseLines", () => {
 
     expect(parsed.slug).toBe("custom-slug");
     expect(parsed.title).toBe("Custom title");
+  });
+});
+
+describe("file_ref image attachments", () => {
+  async function makeImageHome() {
+    const home = await mkdtemp(join(tmpdir(), "vibe-muse-home-"));
+    tempDirs.push(home);
+    // Minimal fake PNG bytes; the parser only checks size + sha256, not the codec.
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    const relPath = join("workspace", "shot.png");
+    await mkdir(join(home, "workspace"), { recursive: true });
+    await writeFile(join(home, relPath), bytes);
+    return {
+      home,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      dataUrl: `data:image/png;base64,${bytes.toString("base64")}`,
+      fileRef: (overrides: Record<string, unknown> = {}) => ({
+        type: "file_ref",
+        path: relPath,
+        filename: "shot.png",
+        mime_type: "image/png",
+        bytes_len: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        ...overrides,
+      }),
+    };
+  }
+
+  function userPartsMessage(parts: unknown[]) {
+    return item({ type: "message_parts", role: "user", parts });
+  }
+
+  it("embeds a valid file_ref image as a _user_images block", async () => {
+    const { home, dataUrl, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [
+        header(),
+        userPartsMessage([{ type: "text", text: "What is in this screenshot?" }, fileRef()]),
+      ],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(1);
+    expect(parsed.turns[0].role).toBe("user");
+    expect(parsed.turns[0].blocks).toHaveLength(2);
+    expect(parsed.turns[0].blocks[1]).toEqual({ type: "_user_images", images: [dataUrl] });
+  });
+
+  it("keeps an image-only user message as a user-prompt scene", async () => {
+    const { home, dataUrl, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines([header(), userPartsMessage([fileRef()])], { homeDir: home });
+    const replay = transformToReplay(parsed, "muse", "~");
+    const promptScene = replay.scenes.find((scene) => scene.type === "user-prompt");
+    expect(promptScene?.type).toBe("user-prompt");
+    if (promptScene?.type === "user-prompt") {
+      expect(promptScene.content).toBe("(image)");
+      expect(promptScene.images).toEqual([dataUrl]);
+    }
+    expect(replay.meta.stats.userPrompts).toBe(1);
+  });
+
+  it("skips a file_ref whose bytes do not match the recorded sha256", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [header(), userPartsMessage([fileRef({ sha256: "0".repeat(64) })])],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("skips a file_ref that escapes the home directory", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [header(), userPartsMessage([fileRef({ path: join("..", "outside.png") })])],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("rejects a symlink inside home that points outside it", async () => {
+    const { home } = await makeImageHome();
+    // A real, readable image living outside the fake home.
+    const outsideDir = await mkdtemp(join(tmpdir(), "vibe-muse-outside-"));
+    tempDirs.push(outsideDir);
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+    await writeFile(join(outsideDir, "evil.png"), bytes);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    await symlink(join(outsideDir, "evil.png"), join(home, "workspace", "evil.png"));
+    const parsed = parseMuseLines(
+      [
+        header(),
+        userPartsMessage([
+          {
+            type: "file_ref",
+            path: join("workspace", "evil.png"),
+            mime_type: "image/png",
+            bytes_len: bytes.length,
+            sha256,
+          },
+        ]),
+      ],
+      { homeDir: home },
+    );
+    // Size and digest match the outside file, so only the canonical-path
+    // containment check rejects it.
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("consumes the budget even when digest validation fails", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [
+        header(),
+        // Wrong digest consumes the 9-byte budget without embedding…
+        userPartsMessage([fileRef({ sha256: "0".repeat(64) })]),
+        // …so the valid duplicate that follows is skipped too.
+        userPartsMessage([fileRef()]),
+      ],
+      { homeDir: home, maxTotalImageBytes: 9 },
+    );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("stops embedding once the per-parse image byte budget is exhausted", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [header(), userPartsMessage([{ type: "text", text: "two shots" }, fileRef(), fileRef()])],
+      // 9-byte fake image; budget fits exactly one.
+      { homeDir: home, maxTotalImageBytes: 9 },
+    );
+    expect(parsed.turns).toHaveLength(1);
+    const imageBlock = parsed.turns[0].blocks.find((b) => b.type === "_user_images");
+    expect(imageBlock?.type).toBe("_user_images");
+    if (imageBlock?.type === "_user_images") {
+      expect(imageBlock.images).toHaveLength(1);
+    }
+  });
+
+  it("skips a file_ref without a bounded bytes_len", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const ref = fileRef();
+    delete (ref as Record<string, unknown>).bytes_len;
+    const parsed = parseMuseLines([header(), userPartsMessage([ref])], { homeDir: home });
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("skips non-image file_ref parts but keeps the text", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [
+        header(),
+        userPartsMessage([
+          { type: "text", text: "See the attached doc" },
+          fileRef({ mime_type: "application/pdf" }),
+        ]),
+      ],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(1);
+    expect(parsed.turns[0].blocks).toEqual([{ type: "text", text: "See the attached doc" }]);
+  });
+
+  it("skips a file_ref whose recorded size exceeds the embed cap", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [header(), userPartsMessage([fileRef({ bytes_len: 100 * 1024 * 1024 })])],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(0);
+  });
+
+  it("keeps the text when the referenced file is missing", async () => {
+    const { home, fileRef } = await makeImageHome();
+    const parsed = parseMuseLines(
+      [
+        header(),
+        userPartsMessage([{ type: "text", text: "Look at this" }, fileRef({ path: "gone.png" })]),
+      ],
+      { homeDir: home },
+    );
+    expect(parsed.turns).toHaveLength(1);
+    expect(parsed.turns[0].blocks).toEqual([{ type: "text", text: "Look at this" }]);
   });
 });
 

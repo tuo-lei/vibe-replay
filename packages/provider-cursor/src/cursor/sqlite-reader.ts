@@ -59,6 +59,7 @@ const SQLITE_CLI_MAX_BUFFER = 256 * 1024 * 1024;
 const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
 const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
 const GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE = 200;
+const REPLAYABLE_PROBE_CHUNK_SIZE = 8;
 const CURSOR_AGENTKV_BLOB_PREFIX = "agentKv:blob:";
 const execFileAsync = promisify(execFile);
 
@@ -302,22 +303,26 @@ function replayableGlobalStateBubblePredicateSql(valueExpr: string): string {
   ].join(" OR ");
 }
 
-function replayableGlobalStateBubbleCountSql(
+// Discovery only asks whether a composer has at least one replayable bubble, so
+// this must be an EXISTS probe. Counting every replayable bubble forces SQLite to
+// parse every bubble of every composer, which on a multi-GB `state.vscdb` turned
+// discovery into a ~20s full-database scan; EXISTS stops at the first hit.
+function hasReplayableGlobalStateBubbleSql(
   composerValueExpr: string,
   composerKeyExpr: string,
 ): string {
   const inlineBubblePredicate = replayableGlobalStateBubblePredicateSql("conversation.value");
   const referencedBubblePredicate = replayableGlobalStateBubblePredicateSql("bubble.value");
   return [
-    "COALESCE((",
-    "SELECT COUNT(*) FROM json_each(",
+    "(EXISTS(",
+    "SELECT 1 FROM json_each(",
     composerValueExpr,
     ", '$.conversation') AS conversation",
     " WHERE json_type(conversation.value) = 'object' AND (",
     inlineBubblePredicate,
     ")",
-    "), 0) + COALESCE((",
-    "SELECT COUNT(*) FROM json_each(",
+    ") OR EXISTS(",
+    "SELECT 1 FROM json_each(",
     composerValueExpr,
     ", '$.fullConversationHeadersOnly') AS header",
     " JOIN cursorDiskKV AS bubble ON bubble.key = 'bubbleId:' || substr(",
@@ -326,7 +331,7 @@ function replayableGlobalStateBubbleCountSql(
     " WHERE json_valid(bubble.value) AND (",
     referencedBubblePredicate,
     ")",
-    "), 0)",
+    "))",
   ].join("");
 }
 
@@ -1712,14 +1717,21 @@ async function hasReplayableGlobalStateComposer(
   const bubbleIds = composerHeaderBubbleIds(composer);
   if (bubbleIds.length === 0) return false;
 
-  const rows = await loadProjectedBubbleRowsByKeys(
-    globalStateDb,
-    bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
-  );
-  return rows.some((row) => {
-    const bubble = projectedCursorBubbleRowToBubble(row);
-    return bubble ? isReplayableGlobalStateBubble(bubble) : false;
-  });
+  // Probe in small chunks and stop at the first replayable bubble: loading every
+  // bubble of a long composer just to answer "is there any?" dominates discovery.
+  const keys = bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`);
+  for (let i = 0; i < keys.length; i += REPLAYABLE_PROBE_CHUNK_SIZE) {
+    const rows = await loadProjectedBubbleRowsByKeys(
+      globalStateDb,
+      keys.slice(i, i + REPLAYABLE_PROBE_CHUNK_SIZE),
+    );
+    const found = rows.some((row) => {
+      const bubble = projectedCursorBubbleRowToBubble(row);
+      return bubble ? isReplayableGlobalStateBubble(bubble) : false;
+    });
+    if (found) return true;
+  }
+  return false;
 }
 
 function meaningfulCursorTitle(...candidates: unknown[]): string | undefined {
@@ -1802,7 +1814,7 @@ export async function discoverGlobalStateOnlySessions(
             "AND length(trim(json_extract(kv.value,'$.latestConversationSummary.summary.summary'))) > 0",
             "THEN 1 ELSE 0 END AS hasLatestConversationSummary,",
             "length(kv.value) AS fileSize,",
-            `${replayableGlobalStateBubbleCountSql("kv.value", "kv.key")} AS replayableBubbleCount`,
+            `${hasReplayableGlobalStateBubbleSql("kv.value", "kv.key")} AS hasReplayableBubble`,
             `FROM cursorDiskKV AS kv WHERE ${sqlKeyPrefixRange(
               "composerData:",
               "kv.key",
@@ -1829,7 +1841,7 @@ export async function discoverGlobalStateOnlySessions(
 
       const hasReplayableBubble = composer
         ? await hasReplayableGlobalStateComposer(globalStateDb, sessionId, composer)
-        : toNonNegativeInt(row.replayableBubbleCount) > 0;
+        : toNonNegativeInt(row.hasReplayableBubble) > 0;
       if (!hasReplayableBubble) continue;
 
       // Track only replayable global-state sessions for downstream hasSqlite marking.

@@ -595,6 +595,16 @@ export const DASHBOARD_PARAMS = [
   "replay",
 ] as const;
 
+/** Fresh tab navigation; returning from a replay uses navigateTo's saved state instead. */
+export function dashboardTabParams(tab: string): Record<string, NavigationValue> {
+  return {
+    ...Object.fromEntries(DASHBOARD_PARAMS.map((param) => [param, null])),
+    view: "dashboard",
+    session: null,
+    tab,
+  };
+}
+
 /**
  * Selection links are stable permalinks while visible, but must not be
  * restored after leaving the dashboard via sessionStorage. Otherwise a

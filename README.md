@@ -35,6 +35,8 @@ npx vibe-replay
 
 Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, Muse, Pi, and Grok Bot session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, tool, MCP server/tool, skill, or context compaction, expand any session to see its own tool/MCP breakdown, and generate any replay in one click.
 
+Switching dashboard tabs starts a fresh list; returning from a replay restores your previous filters. Clear a search with Escape or the × button, and use **Clear filters** when a search has no matches. Replay playback supports 1×, 5×, and 10× speed on desktop and mobile.
+
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
 </p>

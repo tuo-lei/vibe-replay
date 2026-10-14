@@ -1,11 +1,13 @@
 /// <reference path="../sql-js.d.ts" />
 import { execFile } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   assertSqliteSnapshotCurrent,
+  isSqliteReadOnlyScope,
   readSqliteSnapshot,
   assertSqliteWalReadable,
   withSqliteReadSource,
@@ -181,19 +183,32 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   const dbPaths = await listSdkIndexDbPaths(CURSOR_PROJECTS_ROOT);
   const index = new Map<string, SdkAgent>();
   const blocked: SqliteSnapshotRequiredError[] = [];
-  for (const dbPath of dbPaths) {
+
+  // Every automation run owns its own index.db, so a machine can hold hundreds.
+  // Finished runs never change again: reuse their agent rows while the file
+  // (and WAL) fingerprint is unchanged instead of spawning sqlite3 for each one.
+  const persisted = (await readFileCache<SdkAgentIndexCache>(SDK_AGENT_INDEX_CACHE_KEY))?.data;
+  const results = await mapLimit(dbPaths, SDK_INDEX_READ_CONCURRENCY, async (dbPath) => {
+    // Fingerprint before reading: a write that lands mid-read leaves the cached
+    // fingerprint stale, so the next scan re-reads instead of trusting old rows.
+    const fingerprint = await sdkIndexDbFingerprint(dbPath);
+    const hit = persisted?.[dbPath];
+    if (fingerprint && hit && sameSdkIndexFingerprint(hit, fingerprint)) {
+      return { agents: hit.agents, entry: hit, fresh: false };
+    }
     let handle: IndexDbHandle | null = null;
     try {
       handle = await openIndexDb(dbPath);
-      if (!handle) continue;
+      if (!handle) return { agents: [] as SdkAgent[], fresh: false };
       const rows = await queryIndexDb(
         handle,
         "SELECT agent_id, workspace_ref, status, name, created_at, updated_at FROM agents",
       );
+      const agents: SdkAgent[] = [];
       for (const row of rows) {
         const agentId = stringOrEmpty(row.agent_id);
         if (!agentId) continue;
-        index.set(agentId, {
+        agents.push({
           agentId,
           workspaceRef: stringOrEmpty(row.workspace_ref),
           status: stringOrEmpty(row.status) || "UNKNOWN",
@@ -203,13 +218,33 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
           dbPath,
         });
       }
+      return { agents, entry: fingerprint ? { ...fingerprint, agents } : undefined, fresh: true };
     } catch (error) {
       if (error instanceof SqliteSnapshotRequiredError) blocked.push(error);
       // SDK schema differs across Cursor versions; skip databases we can't read.
+      return { agents: [] as SdkAgent[], fresh: false };
     } finally {
       closeIndexDb(handle);
     }
+  });
+
+  // Merge in path order so duplicate agent ids resolve exactly as a serial scan did.
+  // Unreadable databases get no cache entry, so they are retried on the next scan.
+  const nextCache: SdkAgentIndexCache = {};
+  let cacheChanged = false;
+  results.forEach((result, i) => {
+    for (const agent of result.agents) index.set(agent.agentId, agent);
+    if (result.entry) nextCache[dbPaths[i]] = result.entry;
+    if (result.fresh) cacheChanged = true;
+  });
+  // Rewrite when a database was (re)read, or to drop entries for databases that vanished.
+  if (persisted && Object.keys(persisted).length !== Object.keys(nextCache).length) {
+    cacheChanged = true;
   }
+  if (cacheChanged && !isSqliteReadOnlyScope()) {
+    await writeFileCache<SdkAgentIndexCache>(SDK_AGENT_INDEX_CACHE_KEY, nextCache);
+  }
+
   // Do not cache partial coverage as a successful full index.
   if (blocked.length) {
     throw new SdkIndexSnapshotRequiredError(blocked[0].message, [...index.values()]);
@@ -217,6 +252,60 @@ async function getSdkAgentIndexOnce(): Promise<Map<string, SdkAgent>> {
   cachedAgentIndex = index;
   cachedAgentIndexAt = Date.now();
   return index;
+}
+
+interface SdkIndexDbFingerprint {
+  size: number;
+  mtimeMs: number;
+  walSize: number;
+  walMtimeMs: number;
+}
+
+type SdkAgentIndexCache = Record<string, SdkIndexDbFingerprint & { agents: SdkAgent[] }>;
+
+const SDK_AGENT_INDEX_CACHE_KEY = "cursor-sdk-agent-index-v1";
+const SDK_INDEX_READ_CONCURRENCY = 8;
+
+async function sdkIndexDbFingerprint(dbPath: string): Promise<SdkIndexDbFingerprint | null> {
+  const [db, wal] = await Promise.all([
+    stat(dbPath).catch(() => null),
+    stat(`${dbPath}-wal`).catch(() => null),
+  ]);
+  if (!db?.isFile()) return null;
+  return {
+    size: db.size,
+    mtimeMs: db.mtimeMs,
+    walSize: wal?.size ?? 0,
+    walMtimeMs: wal?.mtimeMs ?? 0,
+  };
+}
+
+function sameSdkIndexFingerprint(a: SdkIndexDbFingerprint, b: SdkIndexDbFingerprint): boolean {
+  return (
+    a.size === b.size &&
+    a.mtimeMs === b.mtimeMs &&
+    (a.walSize ?? 0) === b.walSize &&
+    (a.walMtimeMs ?? 0) === b.walMtimeMs
+  );
+}
+
+/** Run `worker` over `items` with bounded concurrency, preserving result order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+  return results;
 }
 
 /**
@@ -228,14 +317,110 @@ export function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentEnrichm
 }
 
 async function loadSdkAgentEnrichmentOnce(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
+  // Each sqlite3 spawn blocks the event loop for tens of milliseconds once the process
+  // heap is large, so a scan of hundreds of agents must not pay five of them per agent.
+  // Small databases without WAL frames are read in-process by `openIndexDb`; the rest
+  // answer both queries with a single spawn.
+  if (!(await prefersInProcessSqlJs(agent.dbPath))) {
+    const fast = await loadEnrichmentWithOneSpawn(agent);
+    if (fast !== undefined) return fast;
+  }
+  return loadEnrichmentStepwise(agent);
+}
+
+/** Shared by every read path so they cannot drift apart. */
+function enrichmentFromRows(
+  agent: SdkAgent,
+  runRows: Record<string, any>[],
+  readEventRows: () => Record<string, any>[] | Promise<Record<string, any>[]>,
+): Promise<SdkAgentEnrichment | null> | SdkAgentEnrichment | null {
+  if (runRows.length === 0) return null;
+
+  const runs: SdkRun[] = runRows.map((row) => {
+    const tokenUsage = parseRunUsage(row.usage_json);
+    return {
+      runId: stringOrEmpty(row.run_id),
+      agentId: stringOrEmpty(row.agent_id),
+      turnNumber: typeof row.turn_number === "number" ? row.turn_number : Number(row.turn_number),
+      status: stringOrEmpty(row.status),
+      model: row.model ? String(row.model) : undefined,
+      startedAt: row.started_at ? String(row.started_at) : undefined,
+      finishedAt: row.finished_at ? String(row.finished_at) : undefined,
+      result: row.result ? String(row.result) : undefined,
+      ...(tokenUsage ? { tokenUsage } : {}),
+    };
+  });
+
+  const runIds = runs.map((r) => r.runId).filter(Boolean);
+  if (runIds.length === 0) return { agent, runs, toolCallsByRun: new Map() };
+  const finish = (eventRows: Record<string, any>[]) =>
+    finalizeEnrichment(agent, runs, collectToolCalls(eventRows));
+  const eventRows = readEventRows();
+  return Array.isArray(eventRows) ? finish(eventRows) : eventRows.then(finish);
+}
+
+/** Split concatenated `sqlite3 -json` arrays. Raw newlines never occur inside JSON strings. */
+function parseConcatenatedJsonArrays(stdout: string): Record<string, any>[][] {
+  const trimmed = stdout.trim();
+  if (!trimmed) return [];
+  return trimmed.split(/(?<=\])\n(?=\[)/).map((part) => JSON.parse(part));
+}
+
+/**
+ * Read runs and run_events with one `sqlite3` spawn. Resolves `undefined` when the fast
+ * path cannot answer (older schema, missing CLI, ...) so the caller falls back to the
+ * step-by-step reader, which understands every schema variant.
+ */
+async function loadEnrichmentWithOneSpawn(
+  agent: SdkAgent,
+): Promise<SdkAgentEnrichment | null | undefined> {
+  const st = await stat(agent.dbPath).catch(() => null);
+  if (!st?.isFile() || st.size < MIN_INDEX_DB_SIZE) return undefined;
+  try {
+    await assertSqliteSnapshotCurrent(agent.dbPath);
+    const agentSql = sqlString(agent.agentId);
+    const { stdout } = await withSqliteReadSource(agent.dbPath, (source) =>
+      execFileAsync(
+        "sqlite3",
+        [
+          "-readonly",
+          "-json",
+          source,
+          // One explicit read transaction: separate statements would each see their own
+          // snapshot, so a run committed between them could surface events without its run.
+          [
+            "BEGIN;",
+            `SELECT * FROM runs WHERE agent_id = ${agentSql} ORDER BY turn_number ASC, created_at ASC;`,
+            `SELECT * FROM run_events WHERE run_id IN (SELECT run_id FROM runs WHERE agent_id = ${agentSql}) ORDER BY run_id, seq;`,
+            "COMMIT;",
+          ].join(" "),
+        ],
+        { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
+      ),
+    );
+    // sqlite3 prints nothing for an empty result set. Events can only exist for existing
+    // runs, so zero arrays mean no runs, one means runs without events, two mean both.
+    const [runRows = [], eventRows = []] = parseConcatenatedJsonArrays(stdout);
+    return await enrichmentFromRows(agent, runRows, () => eventRows);
+  } catch (error) {
+    if (error instanceof SqliteSnapshotRequiredError) throw error;
+    return undefined;
+  }
+}
+
+async function loadEnrichmentStepwise(agent: SdkAgent): Promise<SdkAgentEnrichment | null> {
   let handle: IndexDbHandle | null = null;
   try {
     handle = await openIndexDb(agent.dbPath);
     if (!handle) return null;
+    const open = handle;
+    // An in-memory snapshot cannot change under us, so it is validated once after the last
+    // query rather than before each one; sqlite3 handles keep the per-query check.
+    const perQuery = open.backend !== "sqljs";
 
     // `usage_json` only exists on newer SDK schemas, so it is selected only when
     // the column is present rather than failing the whole read.
-    const runColumns = await tableColumns(handle, "runs");
+    const runColumns = await tableColumns(open, "runs", perQuery);
     const runSelect = [
       "run_id",
       "agent_id",
@@ -248,54 +433,42 @@ async function loadSdkAgentEnrichmentOnce(agent: SdkAgent): Promise<SdkAgentEnri
       ...(runColumns.has("usage_json") ? ["usage_json"] : []),
     ].join(", ");
     const runRows = await queryIndexDb(
-      handle,
+      open,
       [
         `SELECT ${runSelect}`,
         `FROM runs WHERE agent_id = ${sqlString(agent.agentId)}`,
         "ORDER BY turn_number ASC, created_at ASC",
       ].join(" "),
+      perQuery,
     );
-    if (runRows.length === 0) return null;
 
-    const runs: SdkRun[] = runRows.map((row) => {
-      const tokenUsage = parseRunUsage(row.usage_json);
-      return {
-        runId: stringOrEmpty(row.run_id),
-        agentId: stringOrEmpty(row.agent_id),
-        turnNumber: typeof row.turn_number === "number" ? row.turn_number : Number(row.turn_number),
-        status: stringOrEmpty(row.status),
-        model: row.model ? String(row.model) : undefined,
-        startedAt: row.started_at ? String(row.started_at) : undefined,
-        finishedAt: row.finished_at ? String(row.finished_at) : undefined,
-        result: row.result ? String(row.result) : undefined,
-        ...(tokenUsage ? { tokenUsage } : {}),
-      };
+    const enrichment = await enrichmentFromRows(agent, runRows, async () => {
+      // The dynamic IN list is built from run_id values read from this same local
+      // DB. Values are still SQLite-escaped, and the sqlite3 backend uses execFile
+      // (no shell), so this stays local-data-only and shell-injection safe.
+      const inList = runRows
+        .map((row) => stringOrEmpty(row.run_id))
+        .filter(Boolean)
+        .map(sqlString)
+        .join(", ");
+      const eventColumns = await tableColumns(open, "run_events", perQuery);
+      const eventSelect = [
+        "run_id",
+        "seq",
+        "payload_json",
+        ...(eventColumns.has("created_at") ? ["created_at"] : []),
+      ].join(", ");
+      return queryIndexDb(
+        open,
+        [
+          `SELECT ${eventSelect} FROM run_events`,
+          `WHERE run_id IN (${inList}) ORDER BY run_id, seq`,
+        ].join(" "),
+        perQuery,
+      );
     });
-
-    const runIds = runs.map((r) => r.runId).filter(Boolean);
-    if (runIds.length === 0) return { agent, runs, toolCallsByRun: new Map() };
-    // The dynamic IN list is built from run_id values read from this same local
-    // DB. Values are still SQLite-escaped, and the sqlite3 backend uses execFile
-    // (no shell), so this stays local-data-only and shell-injection safe.
-    const inList = runIds.map(sqlString).join(", ");
-    const eventColumns = await tableColumns(handle, "run_events");
-    const eventSelect = [
-      "run_id",
-      "seq",
-      "payload_json",
-      ...(eventColumns.has("created_at") ? ["created_at"] : []),
-    ].join(", ");
-    const eventRows = await queryIndexDb(
-      handle,
-      [
-        `SELECT ${eventSelect} FROM run_events`,
-        `WHERE run_id IN (${inList}) ORDER BY run_id, seq`,
-      ].join(" "),
-    );
-
-    const toolCallsByRun = collectToolCalls(eventRows);
-
-    return finalizeEnrichment(agent, runs, toolCallsByRun);
+    if (!perQuery) await assertSqliteSnapshotCurrent(open.dbPath);
+    return enrichment;
   } catch (error) {
     if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
@@ -337,9 +510,13 @@ function addUsage(total: TokenUsage, next: TokenUsage): TokenUsage {
 }
 
 /** Read a table's column names so optional columns can be selected safely. */
-async function tableColumns(handle: IndexDbHandle, table: string): Promise<Set<string>> {
+async function tableColumns(
+  handle: IndexDbHandle,
+  table: string,
+  checkSnapshot = true,
+): Promise<Set<string>> {
   try {
-    const rows = await queryIndexDb(handle, `PRAGMA table_info(${table})`);
+    const rows = await queryIndexDb(handle, `PRAGMA table_info(${table})`, checkSnapshot);
     return new Set(rows.map((row) => stringOrEmpty(row.name)).filter(Boolean));
   } catch (error) {
     if (error instanceof SqliteSnapshotRequiredError) throw error;
@@ -714,29 +891,74 @@ function findMatchingSdkCall(
 // SQLite plumbing — kept minimal and isolated from the IDE-chat reader.
 // ---------------------------------------------------------------------------
 
-async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
+// Reading a small database into WASM is far cheaper than spawning sqlite3, but sql.js
+// only sees the main file, so it is used only when no WAL or journal can hold newer pages.
+const SQLJS_PREFERRED_MAX_BYTES = 16 * 1024 * 1024;
+
+/** True when `<db><suffix>` is absent or empty. Anything unreadable counts as "not empty". */
+async function sidecarIsEmpty(resolvedDbPath: string, suffix: string): Promise<boolean> {
+  const sidecar = await stat(`${resolvedDbPath}${suffix}`).catch((error: NodeJS.ErrnoException) =>
+    error.code === "ENOENT" ? null : undefined,
+  );
+  if (sidecar === undefined) return false;
+  return (sidecar?.size ?? 0) === 0;
+}
+
+/**
+ * sql.js only sees the main file, so it is exact only when neither the WAL nor a rollback
+ * journal can hold anything the main file lacks. Excluding the journal here also means the
+ * only `SqliteSnapshotRequiredError` the in-process read can raise is "changed while
+ * acquiring a snapshot", which callers must propagate.
+ */
+async function isMainFileComplete(dbPath: string): Promise<boolean> {
+  const resolved = await realpath(dbPath).catch(() => dbPath);
+  return (await sidecarIsEmpty(resolved, "-wal")) && (await sidecarIsEmpty(resolved, "-journal"));
+}
+
+async function prefersInProcessSqlJs(dbPath: string): Promise<boolean> {
   const st = await stat(dbPath).catch(() => null);
-  if (!st?.isFile() || st.size < MIN_INDEX_DB_SIZE) return null;
+  return (
+    !!st?.isFile() && st.size <= SQLJS_PREFERRED_MAX_BYTES && (await isMainFileComplete(dbPath))
+  );
+}
 
-  if (await canUseSqliteCliFor(dbPath)) {
-    return { dbPath, backend: "sqlite-cli" };
-  }
-
+async function openSqlJsIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
   let SQL: any;
   try {
     SQL = await getSqlJs();
   } catch {
     return null;
   }
-  if (st.size > MAX_SQLJS_DB_BYTES) return null;
   const buffer = await readSqliteSnapshot(dbPath).catch((error) => {
     if (error instanceof SqliteSnapshotRequiredError) throw error;
     return null;
   });
   await assertSqliteSnapshotCurrent(dbPath);
   if (!buffer) return null;
-  const db = new SQL.Database(buffer);
-  return { dbPath, backend: "sqljs", db };
+  return { dbPath, backend: "sqljs", db: new SQL.Database(buffer) };
+}
+
+async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
+  const st = await stat(dbPath).catch(() => null);
+  if (!st?.isFile() || st.size < MIN_INDEX_DB_SIZE) return null;
+
+  if (await prefersInProcessSqlJs(dbPath)) {
+    // A source change during acquisition (SqliteSnapshotRequiredError) propagates exactly as
+    // it does for the WASM fallback below. Anything else (WASM unavailable, ...) falls through.
+    const handle = await openSqlJsIndexDb(dbPath);
+    if (handle) {
+      // A WAL or journal that appeared after the check means the bytes may be incomplete.
+      if (await isMainFileComplete(dbPath)) return handle;
+      closeIndexDb(handle);
+    }
+  }
+
+  if (await canUseSqliteCliFor(dbPath)) {
+    return { dbPath, backend: "sqlite-cli" };
+  }
+
+  if (st.size > MAX_SQLJS_DB_BYTES) return null;
+  return openSqlJsIndexDb(dbPath);
 }
 
 function closeIndexDb(handle: IndexDbHandle | null): void {
@@ -748,8 +970,15 @@ function closeIndexDb(handle: IndexDbHandle | null): void {
   }
 }
 
-async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<string, any>[]> {
-  await assertSqliteSnapshotCurrent(handle.dbPath);
+async function queryIndexDb(
+  handle: IndexDbHandle,
+  sql: string,
+  /** In-memory snapshots may be validated once after the last query instead of before each. */
+  checkSnapshot = true,
+): Promise<Record<string, any>[]> {
+  if (checkSnapshot || handle.backend === "sqlite-cli") {
+    await assertSqliteSnapshotCurrent(handle.dbPath);
+  }
   if (handle.backend === "sqlite-cli") {
     const { stdout } = await withSqliteReadSource(handle.dbPath, (source) =>
       execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
