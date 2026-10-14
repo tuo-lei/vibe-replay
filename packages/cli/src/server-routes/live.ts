@@ -23,6 +23,7 @@ import { getErrorMessage, safeTargetId } from "../server-core.js";
 import { transformToReplay } from "../transform.js";
 import type { SessionInfo } from "../types.js";
 import { CLI_VERSION } from "../version.js";
+import { resolveCodexRolloutPath } from "@vibe-replay/provider-codex/rollout";
 
 type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
 
@@ -257,7 +258,10 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
             lastResolvedAt = Date.now();
           }
           const info = sessionInfo!;
-          const paths = [...info.filePaths, ...(info.toolPaths || [])];
+          const sourcePaths = [...info.filePaths, ...(info.toolPaths || [])];
+          const paths = isCodexProvider
+            ? await Promise.all(sourcePaths.map(resolveCodexRolloutPath))
+            : sourcePaths;
           ensureWatchersFor(paths);
           await ensureCursorDbWatchersFor(info);
           const cursorDiagnostics =
@@ -279,7 +283,7 @@ export function registerLiveRoutes(app: Hono, deps: LiveRouteDeps = {}): void {
             return;
           }
           let parsed;
-          if (isJsonlLiveProvider) {
+          if (isJsonlLiveProvider && !paths.some((path) => path.endsWith(".jsonl.zst"))) {
             const allLines: string[] = [];
             const grokMembers: Array<{ path: string; lines: string[] }> = [];
             for (const fp of paths) {

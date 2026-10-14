@@ -81,7 +81,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v39: keep short CJK Grok Bot prompts as Explore firstPrompt instead of skipping
 // them for the 10-character English-oriented threshold.
 // v40: Codex host-trigger classification, nested exec tools, and per-model usage.
-export const SCANNER_VERSION = 40;
+// v41: parse compressed Codex rollouts previously missing from usage scans.
+export const SCANNER_VERSION = 41;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained

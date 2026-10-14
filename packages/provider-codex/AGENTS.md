@@ -1,5 +1,9 @@
 # Codex provider accounting
 
+- Cold rollouts can be `.jsonl.zst` while SQLite retains a logical `.jsonl`
+  path. Use `rollout.ts` for read-only streaming decompression and plain-first
+  sibling resolution. Never materialize or modify the Codex source files.
+
 - Classify host-injected user records before prompt discovery or parsing.
   Heartbeats and native `Automation:`/`Automation ID:` headers are automation
   triggers, not human interventions. Preserve them as replay context, and keep

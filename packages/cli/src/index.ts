@@ -190,7 +190,8 @@ function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
 // v4 → v5: Codex explicit session_index names supersede generated titles.
 // v5 → v6: provider compaction counts and Cursor storage fingerprints.
 // v6 → v7: distinguish Codex automation triggers from human prompts.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v7";
+// v7 → v8: read Codex cold .jsonl.zst rollouts and resolve logical state paths.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v8";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";

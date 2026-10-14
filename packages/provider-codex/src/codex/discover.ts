@@ -5,6 +5,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
+import { readCodexRolloutLines, resolveCodexRolloutPath } from "./rollout.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
@@ -75,6 +76,7 @@ export async function discoverCodexSessions(
   // within this discovery. Every later discovery still reads current content.
   const reads = new Map<string, { signature: string; info: SessionInfo }>();
   const readRollout = async (filePath: string): Promise<RolloutRead> => {
+    filePath = await resolveCodexRolloutPath(filePath).catch(() => filePath);
     const fileStat = await stat(filePath, { bigint: true }).catch(() => null);
     if (!fileStat?.isFile()) return { fileStat, info: null };
     const signature = rolloutSignature(fileStat);
@@ -176,7 +178,7 @@ async function sessionInfoFromThreadRow(
           ].slice(0, 2)
         : extracted?.prompts
       : undefined;
-  const sourcePath = row.rollout_path || "";
+  const sourcePath = extracted?.filePath || row.rollout_path || "";
 
   return {
     provider: "codex",
@@ -236,11 +238,9 @@ export async function extractCodexSessionInfo(
   let sawKnownRecord = false;
   let readFailed = false;
 
-  let rl: ReturnType<typeof createInterface> | undefined;
   try {
-    const input = createReadStream(filePath, { encoding: "utf-8" });
-    rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
-    for await (const raw of rl) {
+    filePath = await resolveCodexRolloutPath(filePath);
+    for await (const raw of readCodexRolloutLines(filePath)) {
       const line = raw.trim();
       if (!line) continue;
       lineCount++;
@@ -380,12 +380,10 @@ export async function extractCodexSessionInfo(
     }
   } catch {
     readFailed = true;
-  } finally {
-    rl?.close();
   }
 
   if (!sessionId) {
-    const fileName = basename(filePath);
+    const fileName = basename(filePath).replace(/\.zst$/, "");
     const uuid = fileName.match(
       /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
     );
@@ -504,7 +502,10 @@ async function findRolloutFiles(dir: string): Promise<string[]> {
     for (const entry of entries) {
       const fp = join(current, entry.name);
       if (entry.isDirectory()) await walk(fp);
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".jsonl") || entry.name.endsWith(".jsonl.zst"))
+      ) {
         out.push(fp);
       }
     }
