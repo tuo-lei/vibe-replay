@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
+  SQLITE_CLI_ROW_FLAGS,
+  parseSqliteCliResultSets,
+  parseSqliteCliRows,
+  sqliteCliResultSeparator,
+} from "@vibe-replay/provider-core/sqlite-cli";
+import {
   assertSqliteSnapshotCurrent,
   isSqliteReadOnlyScope,
   readSqliteSnapshot,
@@ -359,13 +365,6 @@ function enrichmentFromRows(
   return Array.isArray(eventRows) ? finish(eventRows) : eventRows.then(finish);
 }
 
-/** Split concatenated `sqlite3 -json` arrays. Raw newlines never occur inside JSON strings. */
-function parseConcatenatedJsonArrays(stdout: string): Record<string, any>[][] {
-  const trimmed = stdout.trim();
-  if (!trimmed) return [];
-  return trimmed.split(/(?<=\])\n(?=\[)/).map((part) => JSON.parse(part));
-}
-
 /**
  * Read runs and run_events with one `sqlite3` spawn. Resolves `undefined` when the fast
  * path cannot answer (older schema, missing CLI, ...) so the caller falls back to the
@@ -379,28 +378,25 @@ async function loadEnrichmentWithOneSpawn(
   try {
     await assertSqliteSnapshotCurrent(agent.dbPath);
     const agentSql = sqlString(agent.agentId);
+    const { marker, command } = sqliteCliResultSeparator();
     const { stdout } = await withSqliteReadSource(agent.dbPath, (source) =>
       execFileAsync(
         "sqlite3",
         [
           "-readonly",
-          "-json",
+          ...SQLITE_CLI_ROW_FLAGS,
           source,
           // One explicit read transaction: separate statements would each see their own
           // snapshot, so a run committed between them could surface events without its run.
-          [
-            "BEGIN;",
-            `SELECT * FROM runs WHERE agent_id = ${agentSql} ORDER BY turn_number ASC, created_at ASC;`,
-            `SELECT * FROM run_events WHERE run_id IN (SELECT run_id FROM runs WHERE agent_id = ${agentSql}) ORDER BY run_id, seq;`,
-            "COMMIT;",
-          ].join(" "),
+          `BEGIN; SELECT * FROM runs WHERE agent_id = ${agentSql} ORDER BY turn_number ASC, created_at ASC;`,
+          command,
+          `SELECT * FROM run_events WHERE run_id IN (SELECT run_id FROM runs WHERE agent_id = ${agentSql}) ORDER BY run_id, seq; COMMIT;`,
         ],
         { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
       ),
     );
-    // sqlite3 prints nothing for an empty result set. Events can only exist for existing
-    // runs, so zero arrays mean no runs, one means runs without events, two mean both.
-    const [runRows = [], eventRows = []] = parseConcatenatedJsonArrays(stdout);
+    // The marker separates the two result sets, so an empty one cannot shift the other.
+    const [runRows = [], eventRows = []] = parseSqliteCliResultSets(stdout, marker);
     return await enrichmentFromRows(agent, runRows, () => eventRows);
   } catch (error) {
     if (error instanceof SqliteSnapshotRequiredError) throw error;
@@ -981,15 +977,12 @@ async function queryIndexDb(
   }
   if (handle.backend === "sqlite-cli") {
     const { stdout } = await withSqliteReadSource(handle.dbPath, (source) =>
-      execFileAsync("sqlite3", ["-readonly", "-json", source, sql], {
+      execFileAsync("sqlite3", ["-readonly", ...SQLITE_CLI_ROW_FLAGS, source, sql], {
         maxBuffer: 64 * 1024 * 1024,
         timeout: 60_000,
       }),
     );
-    const trimmed = stdout.trim();
-    if (!trimmed) return [];
-    const parsed = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? (parsed as Record<string, any>[]) : [];
+    return parseSqliteCliRows(stdout);
   }
   return sqlJsRows(handle.db, sql);
 }

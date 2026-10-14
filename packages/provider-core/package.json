@@ -20,6 +20,10 @@
       "types": "./src/duration.ts",
       "import": "./src/duration.ts"
     },
+    "./sqlite-cli": {
+      "types": "./src/sqlite-cli.ts",
+      "import": "./src/sqlite-cli.ts"
+    },
     "./utils": {
       "types": "./src/utils.ts",
       "import": "./src/utils.ts"

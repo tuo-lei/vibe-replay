@@ -17,7 +17,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   }) as typeof actual.execFile;
   (execFile as any)[promisify.custom] = (...args: any[]) => {
     spawns.count++;
-    spawns.sql.push(String(args[1]?.at(-1)));
+    spawns.sql.push((args[1] as string[]).join(" "));
     return (actual.execFile as any)[promisify.custom](...args);
   };
   return { ...actual, execFile };
@@ -172,7 +172,7 @@ describe("SDK enrichment read paths", () => {
       expect(spawns.count - before).toBe(1);
       // Both SELECTs share one read transaction so a concurrent commit cannot split them.
       expect(spawns.sql.at(-1)).toMatch(
-        /^BEGIN;.*SELECT \* FROM runs.*SELECT \* FROM run_events.*COMMIT;$/,
+        /BEGIN;.*SELECT \* FROM runs.*SELECT \* FROM run_events.*COMMIT;$/,
       );
       before = spawns.count;
       const noEvents = await loadSdkAgentEnrichment(agent("agent-no-events", walPath));
