@@ -46,10 +46,10 @@ function parseQuoteRows(output: string): QuoteValue[][] {
       value = null;
       i += 4;
     } else if (code === 88 && output.charCodeAt(i + 1) === 39) {
-      // X'hex' — `-json` renders BLOBs as latin-1 text, so do the same.
+      // X'hex' — render BLOBs as UTF-8 text, like `-json` (3.45) and the sql.js readers do.
       const end = output.indexOf("'", i + 2);
       if (end < 0) throw new Error("Unterminated sqlite blob literal");
-      value = Buffer.from(output.slice(i + 2, end), "hex").toString("latin1");
+      value = Buffer.from(output.slice(i + 2, end), "hex").toString("utf8");
       i = end + 1;
     } else {
       let end = i;

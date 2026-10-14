@@ -58,7 +58,7 @@ line2' AS c_multiline,
       0.1 AS c_tenth,
       1e300 AS c_huge,
       9007199254740993 AS c_big,
-      x'41ff42' AS c_bytes,
+      x'41c3a942' AS c_bytes,
       'NULL' AS null_text,
       'X''41''' AS blob_text,
       '1,2' AS comma_text;
