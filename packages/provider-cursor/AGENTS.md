@@ -29,8 +29,9 @@ machine can hold a ~25 GB `state.vscdb` (mostly `bubbleId:*` rows) and hundreds 
   `loadSdkAgentEnrichment` now reads a database in-process with sql.js only when it is
   under `SQLJS_PREFERRED_MAX_BYTES` (16 MB) and `-wal`/`-journal` are empty
   (`isMainFileComplete`; sql.js ignores sidecars, so it must never read past a non-empty
-  one). Everything else uses one `sqlite3 -readonly -json` run with two statements
-  (`parseConcatenatedJsonArrays`: no output = no runs, one array = runs without events),
+  one). Everything else uses one `sqlite3 -readonly` run (row format below) with the runs and
+  events statements in one `BEGIN`/`COMMIT`, separated by a `.print` marker so an empty
+  result set cannot shift the other (`parseSqliteCliResultSets`),
   falling back to the stepwise path on any non-snapshot error. `SqliteSnapshotRequiredError`
   always propagates, and the fallback must never mask a main-file race. Test with spawn
   counts (`sdk-enrichment-read-paths.test.ts`), not wall time: timings on a loaded
