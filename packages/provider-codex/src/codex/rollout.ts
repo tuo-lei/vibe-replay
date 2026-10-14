@@ -1,34 +1,36 @@
 import { once } from "node:events";
-import { createReadStream } from "node:fs";
+import { createReadStream, type ReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { Decompress } from "fzstd";
 
-function createRolloutDecoder(): Transform {
+async function* decodeRollout(input: ReadStream): AsyncGenerator<Buffer> {
   // Native Node 22 zstd decoding accepts truncated frames and stops at the
   // first concatenated frame. fzstd validates EOF and streams every frame.
-  const decoder = new Decompress((bytes) => stream.push(Buffer.from(bytes)));
-  const stream = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      try {
-        decoder.push(chunk);
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    },
-    flush(callback) {
-      try {
-        decoder.push(new Uint8Array(0), true);
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    },
+  let output: Buffer[] = [];
+  const decoder = new Decompress((bytes) => {
+    if (bytes.length) output.push(Buffer.from(bytes));
   });
-  return stream;
+  try {
+    for await (const chunk of input) {
+      const bytes = chunk as Buffer;
+      // fzstd cannot pause inside push(). Feed at most 64 compressed bytes at
+      // once: a zstd block expands to at most 128 KiB and a nonempty RLE block
+      // occupies at least four bytes. This bounds a batch to about 2 MiB even
+      // for pathological compression ratios, then yields to the consumer.
+      for (let offset = 0; offset < bytes.length; offset += 64) {
+        decoder.push(bytes.subarray(offset, offset + 64));
+        yield* output;
+        output = [];
+      }
+    }
+    decoder.push(new Uint8Array(0), true);
+    yield* output;
+  } finally {
+    input.destroy();
+  }
 }
 
 function rolloutPaths(path: string): string[] {
@@ -55,19 +57,20 @@ async function openRollout(path: string) {
   const candidates = rolloutPaths(path);
   for (let attempt = 0; attempt < 2; attempt++) {
     for (const candidate of candidates) {
-      // Highly repetitive histories can expand a small compressed chunk into
-      // many blocks before the decoder yields. Limit that queued output.
-      const input = createReadStream(
-        candidate,
-        candidate.endsWith(".jsonl.zst") ? { highWaterMark: 4096 } : undefined,
-      );
+      const input = createReadStream(candidate);
       try {
         await once(input, "open");
         if (!candidate.endsWith(".jsonl.zst")) return { input, completion: undefined };
-        const decoded = createRolloutDecoder();
-        const completion = pipeline(input, decoded);
+        const decoded = Readable.from(decodeRollout(input), {
+          objectMode: false,
+          highWaterMark: 128 * 1024,
+        });
+        // Destroying a prefix reader must also close a source that its
+        // generator has not started reading yet.
+        decoded.once("close", () => input.destroy());
+        const completion = finished(decoded, { cleanup: true });
         // The consumer observes errors through the decoded stream/completion.
-        // A bounded prefix intentionally cancels the pipeline before EOF.
+        // A bounded prefix intentionally cancels decoding before EOF.
         void completion.catch(() => {});
         return { input: decoded, completion };
       } catch (error) {
