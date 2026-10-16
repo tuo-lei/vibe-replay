@@ -262,6 +262,35 @@ describe("Cloud API integration", () => {
     expect(rawId).toBeNull();
   });
 
+  it("accepts telemetry when D1 cannot persist optional telemetry writes", async () => {
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_telemetry_insert BEFORE INSERT ON telemetry_daily
+      BEGIN SELECT RAISE(FAIL, 'simulated D1 write quota exhaustion'); END;
+    `).run();
+
+    try {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            installationId: "123e4567-e89b-12d3-a456-426614174000",
+            event: "scan.completed",
+            version: "0.2.9",
+            platform: "darwin",
+            properties: { sessions: "10-99" },
+          }),
+        }),
+        env,
+        createCtx(),
+      );
+
+      expect(response.status).toBe(204);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_telemetry_insert").run();
+    }
+  });
+
   it("keeps Better Auth account writes compatible with the issuer migration", async () => {
     await env.DB.prepare(
       `INSERT INTO account (id, account_id, provider_id, user_id) VALUES (?, ?, ?, ?)`,
@@ -399,6 +428,10 @@ describe("Cloud API integration", () => {
     const readBody = (await read.json()) as ReturnType<typeof sampleReplay>;
     expect(readBody.meta.sessionId).toBe("session-cloud-api-e2e");
     expect(readBody.scenes[0]).toMatchObject({ type: "user-prompt" });
+    const viewed = await env.DB.prepare("SELECT view_count FROM cloud_replays WHERE id = ?")
+      .bind(uploaded.id)
+      .first<{ view_count: number }>();
+    expect(viewed?.view_count).toBe(1);
 
     const list = await dispatch("/api/cloud-replays");
     expect(list.status).toBe(200);
@@ -420,6 +453,67 @@ describe("Cloud API integration", () => {
     const deleted = await dispatch(`/api/cloud-replays/${uploaded.id}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
     expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
+  });
+
+  it("returns an R2 replay when its optional view-count update fails", async () => {
+    const uploaded = await uploadReplay();
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_cloud_replay_view_count BEFORE UPDATE OF view_count ON cloud_replays
+      BEGIN SELECT RAISE(FAIL, 'simulated D1 write quota exhaustion'); END;
+    `).run();
+
+    try {
+      const response = await dispatch(`/api/cloud-replays/${uploaded.id}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      const body = (await response.json()) as ReturnType<typeof sampleReplay>;
+      expect(body.meta.sessionId).toBe("session-cloud-api-e2e");
+      expect(body.scenes[0]).toMatchObject({ type: "user-prompt" });
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_cloud_replay_view_count").run();
+    }
+  });
+
+  it("returns gist redirects when optional view-count updates fail", async () => {
+    const uploaded = await uploadReplay();
+    const gistId = "c".repeat(20);
+    await env.DB.prepare("UPDATE cloud_replays SET storage_type = 'gist', gist_id = ? WHERE id = ?")
+      .bind(gistId, uploaded.id)
+      .run();
+
+    const successful = await dispatch(`/api/cloud-replays/${uploaded.id}`);
+    expect(successful.status).toBe(200);
+    await expect(successful.json()).resolves.toEqual({
+      redirect: true,
+      gistId,
+      viewerUrl: `/view/?gist=${gistId}`,
+    });
+    const viewed = await env.DB.prepare("SELECT view_count FROM cloud_replays WHERE id = ?")
+      .bind(uploaded.id)
+      .first<{ view_count: number }>();
+    expect(viewed?.view_count).toBe(1);
+
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_cloud_replay_view_count BEFORE UPDATE OF view_count ON cloud_replays
+      BEGIN SELECT RAISE(FAIL, 'simulated D1 write quota exhaustion'); END;
+    `).run();
+    try {
+      const failedCount = await dispatch(`/api/cloud-replays/${uploaded.id}`);
+      expect(failedCount.status).toBe(200);
+      await expect(failedCount.json()).resolves.toEqual({
+        redirect: true,
+        gistId,
+        viewerUrl: `/view/?gist=${gistId}`,
+      });
+
+      const viewEndpoint = await dispatch(`/api/cloud-replays/view-gist/${gistId}`, {
+        method: "POST",
+      });
+      expect(viewEndpoint.status).toBe(200);
+      await expect(viewEndpoint.json()).resolves.toEqual({ ok: true });
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_cloud_replay_view_count").run();
+    }
   });
 
   it("does not register secret gists in the public legacy replay index", async () => {
@@ -884,7 +978,7 @@ describe("Cloud API integration", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const html = await response.text();
-    expect(html).toContain('/view/?relay=abcdefghijklmnopqrstuv');
+    expect(html).toContain("/view/?relay=abcdefghijklmnopqrstuv");
     expect(html).toContain("+location.hash");
   });
 });
