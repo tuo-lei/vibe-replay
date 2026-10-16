@@ -364,4 +364,55 @@ describe("discoverMuseSessions", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].sessionId).toBe(agentId);
   });
+
+  it("keeps records containing raw U+2028 line separators on one line", async () => {
+    // Real transcripts have been observed with raw U+2028 (LINE SEPARATOR)
+    // inside tool output strings. It is legal JSON, but Node's readline
+    // splits lines on it, which used to turn one valid record into two
+    // unparseable fragments that discovery silently dropped. Discovery must
+    // split exactly like the parser (on "\n" only).
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-u2028";
+    const sep = String.fromCodePoint(0x2028);
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: "Check the output" }),
+      itemLine({ type: "function_call", call_id: "c1", name: "exec", arguments: "{}" }),
+      itemLine({
+        type: "function_call_output",
+        call_id: "c1",
+        output: `first${sep}second`,
+        success: true,
+      }),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].promptCount).toBe(1);
+    expect(sessions[0].toolCallCount).toBe(1);
+    // The U+2028 record stays one line: the old splitter divided it into
+    // two unparseable fragments and counted 5 lines.
+    expect(sessions[0].lineCount).toBe(4);
+  });
+
+  it("counts a user prompt containing a raw U+2028", async () => {
+    // The latent miscount case: with readline splitting, the only user
+    // message fragmented into unparseable pieces, promptCount stayed 0, and
+    // the session vanished from discovery even though the parser reads it.
+    const root = await mkdtemp(join(tmpdir(), "vibe-muse-discover-"));
+    tempDirs.push(root);
+    const agentId = "agent-u2028-prompt";
+    const sep = String.fromCodePoint(0x2028);
+    await writeAgentSession(root, agentId, [
+      headerLine(agentId),
+      itemLine({ type: "message", role: "user", text: `line one${sep}line two` }),
+    ]);
+
+    const sessions = await discoverMuseSessions(root);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].promptCount).toBe(1);
+    // cleanPromptText normalizes the exotic separator to a plain space.
+    expect(sessions[0].firstPrompt).toBe("line one line two");
+  });
 });

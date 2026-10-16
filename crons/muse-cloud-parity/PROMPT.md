@@ -83,7 +83,13 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    (`packages/cli/src/server-core.ts`) requires at least one `user-prompt`
    scene, so generation would reject it — that gap is a parity failure
    until the CLI actually supports tool-only replays. Shapes and type names
-   only — never raw prompts, tool arguments, or tool outputs.
+   only — never raw prompts, tool arguments, or tool outputs. Split lines on
+   `"\n"` only, exactly like the parser: Node's `readline` also splits on
+   U+2028/U+2029 (legal inside JSON strings — observed raw in real tool
+   output), which turns one valid record into unparseable fragments. In an
+   integrity census that false-positives as corrupt lines; in discovery it
+   silently drops the record (2026-10-16: fixed the Muse provider to split
+   like the parser).
 5. **Drift.** Collect from every stable session file in the 14-day window
    (same coverage rule as step 4 — a new record shape outside a sample
    would otherwise go unseen): top-level record types, item `type` values,

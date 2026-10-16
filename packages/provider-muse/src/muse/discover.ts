@@ -1,6 +1,5 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import { FILE_EDIT_TOOLS } from "@vibe-replay/provider-core/utils";
@@ -145,6 +144,36 @@ function estimateMuseDurationMs(first: string, last: string): number | undefined
   return span > 0 ? span : undefined;
 }
 
+/**
+ * Yield lines split on "\n" only, streaming.
+ *
+ * Node's readline also splits on U+2028/U+2029 (and lone \r), which are
+ * legal inside JSON strings — transcript tool output has been observed
+ * containing raw U+2028 line separators. Splitting there turns one valid
+ * record into unparseable fragments that discovery would silently drop,
+ * while the parser (`content.split("\n")`) sees the true line. Splitting
+ * here exactly the way the parser does keeps discovery and parsing in
+ * agreement.
+ *
+ * Newline search runs over each chunk once (a lone "\n" cannot straddle a
+ * chunk boundary), so scanning stays linear even when one record spans
+ * many chunks.
+ */
+async function* splitLinesNewlineOnly(input: AsyncIterable<string>): AsyncGenerator<string> {
+  let pending = ""; // bytes of the current unfinished line
+  for await (const chunk of input) {
+    let start = 0;
+    let index: number;
+    while ((index = chunk.indexOf("\n", start)) >= 0) {
+      yield pending + chunk.slice(start, index);
+      pending = "";
+      start = index + 1;
+    }
+    pending += chunk.slice(start);
+  }
+  if (pending) yield pending;
+}
+
 async function extractMuseSessionInfo(
   filePath: string,
   sessionsDir: string,
@@ -155,8 +184,7 @@ async function extractMuseSessionInfo(
   const state = newScanState();
   try {
     const stream = createReadStream(filePath, { encoding: "utf-8" });
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
+    for await (const line of splitLinesNewlineOnly(stream)) {
       if (line.trim()) scanLine(state, line);
     }
   } catch {
