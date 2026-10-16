@@ -391,6 +391,9 @@ describe("discoverMuseSessions", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].promptCount).toBe(1);
     expect(sessions[0].toolCallCount).toBe(1);
+    // The U+2028 record stays one line: the old splitter divided it into
+    // two unparseable fragments and counted 5 lines.
+    expect(sessions[0].lineCount).toBe(4);
   });
 
   it("counts a user prompt containing a raw U+2028", async () => {

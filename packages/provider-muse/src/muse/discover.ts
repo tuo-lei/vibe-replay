@@ -154,18 +154,24 @@ function estimateMuseDurationMs(first: string, last: string): number | undefined
  * while the parser (`content.split("\n")`) sees the true line. Splitting
  * here exactly the way the parser does keeps discovery and parsing in
  * agreement.
+ *
+ * Newline search runs over each chunk once (a lone "\n" cannot straddle a
+ * chunk boundary), so scanning stays linear even when one record spans
+ * many chunks.
  */
-async function* splitLinesNewlineOnly(input: NodeJS.ReadableStream): AsyncGenerator<string> {
-  let buffered = "";
+async function* splitLinesNewlineOnly(input: AsyncIterable<string>): AsyncGenerator<string> {
+  let pending = ""; // bytes of the current unfinished line
   for await (const chunk of input) {
-    buffered += chunk;
+    let start = 0;
     let index: number;
-    while ((index = buffered.indexOf("\n")) >= 0) {
-      yield buffered.slice(0, index);
-      buffered = buffered.slice(index + 1);
+    while ((index = chunk.indexOf("\n", start)) >= 0) {
+      yield pending + chunk.slice(start, index);
+      pending = "";
+      start = index + 1;
     }
+    pending += chunk.slice(start);
   }
-  if (buffered) yield buffered;
+  if (pending) yield pending;
 }
 
 async function extractMuseSessionInfo(
