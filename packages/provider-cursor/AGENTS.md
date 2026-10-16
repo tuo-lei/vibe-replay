@@ -53,5 +53,15 @@ machine can hold a ~25 GB `state.vscdb` (mostly `bubbleId:*` rows) and hundreds 
   snapshot is staged in the scope). Fixing it needs a fingerprint-validated, idle-expiring
   snapshot pool; do not simply wrap a whole scan in one `withSqliteSnapshotScope`, which
   would let cached scan results record a newer fingerprint than the data they hold.
+- **Transcript content scans are persisted per file.** Discovery used to read every
+  `agent-transcripts` JSONL on each call (~200 MB / 1500 files here). `scanTranscriptContent`
+  now derives only byte-dependent fields (counts, first prompt, model, delegated prompts) and
+  `cursor-transcript-scan-v1` reuses them while a file's size/mtime are unchanged; tool paths,
+  mtime-based timestamps and project data are applied fresh on every call, never cached. The
+  run's seen entries replace the file wholesale (this also prunes deleted transcripts), a warm
+  run writes nothing, and nothing is written in a read-only scope. Bump the key version
+  whenever `scanTranscriptContent` changes what it derives. `extractDelegatedPrompts` skips
+  lines that cannot name a delegation tool (`DELEGATION_NAME_RE`) instead of parsing all of
+  them. Warm Cursor discovery: 1.6 s to 0.16 s; cold 5.9 s to 1.4 s.
 - **`sourceFingerprint` intentionally changes whenever the live global DB does.** That is
   by design (late tool results), not a cache bug; do not "fix" it to stabilise output.
