@@ -150,7 +150,11 @@ type HonoEnv = { Bindings: Env };
 
 function recordProductMetric(env: Env, name: string, attributes?: Record<string, string>): void {
   if (!env.SENTRY_DSN) return;
-  Sentry.metrics.count(name, 1, attributes ? { attributes } : undefined);
+  try {
+    Sentry.metrics.count(name, 1, attributes ? { attributes } : undefined);
+  } catch {
+    // Product metrics are optional and must not affect the request they observe.
+  }
 }
 
 function telemetryDimensions(value: unknown): string | null {
@@ -258,12 +262,16 @@ const app = new Hono<HonoEnv>();
 // otherwise never observe them. Preserve Hono's default 500 response while
 // reporting the exception in the active request scope.
 app.onError((error, c) => {
-  if (!c.env.SENTRY_DSN) {
-    console.error(error);
-  } else {
-    Sentry.logger.error("Unhandled Worker request error");
+  try {
+    if (!c.env.SENTRY_DSN) {
+      console.error(error);
+    } else {
+      Sentry.logger.error("Unhandled Worker request error");
+    }
+    Sentry.captureException(error);
+  } catch {
+    // Error reporting must not replace Hono's normal error response.
   }
-  Sentry.captureException(error);
   return c.text("Internal Server Error", 500);
 });
 
@@ -294,8 +302,12 @@ app.use("/api/*", async (c, next) => {
 app.use("/api/*", async (c, next) => {
   await next();
   if (!c.env.SENTRY_DSN) return;
-  Sentry.logger.info("Worker API request");
-  Sentry.metrics.count("worker.api_requests", 1);
+  try {
+    Sentry.logger.info("Worker API request");
+    Sentry.metrics.count("worker.api_requests", 1);
+  } catch {
+    // Request telemetry is optional and must not change the API response.
+  }
 });
 
 app.post("/api/telemetry", async (c) => {
@@ -328,35 +340,39 @@ app.post("/api/telemetry", async (c) => {
   const dimensions = telemetryDimensions(body.properties);
   if (dimensions === null) return c.json({ error: "Invalid telemetry properties" }, 400);
 
-  const now = new Date();
-  const day = now.toISOString().slice(0, 10);
-  const month = day.slice(0, 7);
-  const installationHash = await hashTelemetryInstallation(
-    c.env.TELEMETRY_HASH_SECRET,
-    month,
-    installationId,
-  );
-  const dailyTotal = await c.env.DB.prepare(
-    "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?",
-  )
-    .bind(day)
-    .first<{ count: number }>();
-  if ((dailyTotal?.count || 0) >= MAX_TELEMETRY_EVENTS_PER_DAY) return c.body(null, 204);
-  if (!allowTelemetryInstallation(day, installationHash)) return c.body(null, 204);
+  try {
+    const now = new Date();
+    const day = now.toISOString().slice(0, 10);
+    const month = day.slice(0, 7);
+    const installationHash = await hashTelemetryInstallation(
+      c.env.TELEMETRY_HASH_SECRET,
+      month,
+      installationId,
+    );
+    const dailyTotal = await c.env.DB.prepare(
+      "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?",
+    )
+      .bind(day)
+      .first<{ count: number }>();
+    if ((dailyTotal?.count || 0) >= MAX_TELEMETRY_EVENTS_PER_DAY) return c.body(null, 204);
+    if (!allowTelemetryInstallation(day, installationHash)) return c.body(null, 204);
 
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO telemetry_daily (day, event, version, platform, dimensions, count)
-       VALUES (?, ?, ?, ?, ?, 1)
-       ON CONFLICT(day, event, version, platform, dimensions)
-       DO UPDATE SET count = telemetry_daily.count + 1`,
-    ).bind(day, event, version, platform, dimensions),
-    c.env.DB.prepare(
-      `INSERT OR IGNORE INTO telemetry_monthly_users
-       (month, event, installation_hash)
-       VALUES (?, ?, ?)`,
-    ).bind(month, event, installationHash),
-  ]);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO telemetry_daily (day, event, version, platform, dimensions, count)
+         VALUES (?, ?, ?, ?, ?, 1)
+         ON CONFLICT(day, event, version, platform, dimensions)
+         DO UPDATE SET count = telemetry_daily.count + 1`,
+      ).bind(day, event, version, platform, dimensions),
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO telemetry_monthly_users
+         (month, event, installation_hash)
+         VALUES (?, ?, ?)`,
+      ).bind(month, event, installationHash),
+    ]);
+  } catch {
+    // Telemetry is optional; D1 quota or availability must not turn it into an API failure.
+  }
 
   return c.body(null, 204);
 });
@@ -845,7 +861,8 @@ app.get("/api/cloud-replays/:id", async (c) => {
     await db
       .update(cloudReplays)
       .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
-      .where(eq(cloudReplays.id, id));
+      .where(eq(cloudReplays.id, id))
+      .catch(() => {});
     recordProductMetric(c.env, "replay.views", { storage: "gist" });
     return c.json({
       redirect: true,
@@ -860,7 +877,8 @@ app.get("/api/cloud-replays/:id", async (c) => {
   await db
     .update(cloudReplays)
     .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
-    .where(eq(cloudReplays.id, id));
+    .where(eq(cloudReplays.id, id))
+    .catch(() => {});
   recordProductMetric(c.env, "replay.views", { storage: "r2" });
 
   return new Response(obj.body, {
@@ -1386,12 +1404,18 @@ app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
     return c.json({ ok: false }, 400);
   }
   const db = drizzle(c.env.DB);
-  const result = await db
-    .update(cloudReplays)
-    .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
-    .where(and(eq(cloudReplays.gistId, gistId), ne(cloudReplays.visibility, "private")));
+  let changed: boolean;
+  try {
+    const result = await db
+      .update(cloudReplays)
+      .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
+      .where(and(eq(cloudReplays.gistId, gistId), ne(cloudReplays.visibility, "private")));
+    changed = Boolean(result.meta.changes);
+  } catch {
+    return c.json({ ok: true });
+  }
   // D1 meta.changes is 0 if the gist doesn't exist or is private
-  if (!result.meta.changes) {
+  if (!changed) {
     return c.json({ ok: false }, 404);
   }
   recordProductMetric(c.env, "replay.views", { storage: "gist" });
