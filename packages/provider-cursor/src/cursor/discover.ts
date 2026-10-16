@@ -2,7 +2,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ProviderDiscoveryOptions, SessionInfo } from "@vibe-replay/provider-contract";
+import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
+  isSqliteReadOnlyScope,
   readGitRepo,
   shortenPath,
   SqliteSnapshotRequiredError,
@@ -47,6 +49,7 @@ async function discoverCursorSessionsOnce(
 ): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
   const snapshotErrors: SqliteSnapshotRequiredError[] = [];
+  const transcriptCache = await loadTranscriptScanCache();
   // SDK databases are independent from IDE transcript/store discovery. Start
   // their machine-wide index in parallel instead of paying both costs serially.
   let sdkSnapshotError: SqliteSnapshotRequiredError | undefined;
@@ -64,11 +67,12 @@ async function discoverCursorSessionsOnce(
     }
 
     const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
-      discoverProjectSessions(projDir),
+      discoverProjectSessions(projDir, transcriptCache),
     );
     for (const projectSessionList of projectSessions) {
       sessions.push(...projectSessionList);
     }
+    await persistTranscriptScanCache(transcriptCache);
     const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
     const hiddenTranscriptSessionIds = findTopLevelSubagentSessionIds(mergedTranscriptSessions);
     sessions.length = 0;
@@ -200,7 +204,10 @@ function mergeDuplicateTranscriptSessions(sessions: SessionInfo[]): SessionInfo[
   return merged;
 }
 
-async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> {
+async function discoverProjectSessions(
+  projDir: string,
+  transcriptCache?: TranscriptScanCache,
+): Promise<SessionInfo[]> {
   const transcriptsDir = join(CURSOR_DIR, projDir, "agent-transcripts");
   const dirStat = await stat(transcriptsDir).catch(() => null);
   if (!dirStat?.isDirectory()) return [];
@@ -239,6 +246,7 @@ async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> 
       job.mtimeMs,
       project,
       job.toolPaths,
+      transcriptCache,
     );
     if (!info) return null;
     info.workspacePath = project;
@@ -436,84 +444,178 @@ async function resolveEncodedProjectParts(
   return deepest;
 }
 
+/** Everything derived from a transcript's bytes; independent of paths, tools and mtimes. */
+interface TranscriptScan {
+  valid: boolean;
+  lineCount: number;
+  firstPrompt: string;
+  promptCount: number;
+  toolCallCount: number;
+  editCountEst: number;
+  model?: string;
+  delegatedPrompts: string[];
+}
+
+interface TranscriptScanCacheEntry {
+  size: number;
+  mtimeMs: number;
+  scan: TranscriptScan;
+}
+
+/**
+ * Cursor transcripts total hundreds of MB across thousands of files and mostly never change,
+ * so the content scan is persisted and reused while a file's size/mtime are unchanged. Bump
+ * the version whenever `scanTranscriptContent` changes what it derives.
+ */
+const TRANSCRIPT_SCAN_CACHE_KEY = "cursor-transcript-scan-v1";
+
+export interface TranscriptScanCache {
+  previous: Record<string, TranscriptScanCacheEntry>;
+  /** Entries seen by this run (reused or rescanned); they replace the persisted cache. */
+  fresh: Map<string, TranscriptScanCacheEntry>;
+  scannedAny: boolean;
+}
+
+async function loadTranscriptScanCache(): Promise<TranscriptScanCache> {
+  const persisted = (
+    await readFileCache<Record<string, TranscriptScanCacheEntry>>(TRANSCRIPT_SCAN_CACHE_KEY)
+  )?.data;
+  return {
+    previous:
+      persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {},
+    fresh: new Map(),
+    scannedAny: false,
+  };
+}
+
+/**
+ * Discovery always walks every project, so the entries it saw are exactly the live ones:
+ * writing them wholesale also prunes deleted transcripts. A warm run changes nothing and
+ * writes nothing; read-only scopes never write.
+ */
+async function persistTranscriptScanCache(cache: TranscriptScanCache): Promise<void> {
+  if (isSqliteReadOnlyScope()) return;
+  if (!cache.scannedAny && cache.fresh.size === Object.keys(cache.previous).length) return;
+  await writeFileCache(TRANSCRIPT_SCAN_CACHE_KEY, Object.fromEntries(cache.fresh));
+}
+
+function isReusableTranscriptScan(
+  entry: TranscriptScanCacheEntry | undefined,
+  fileSize: number,
+  mtimeMs: number,
+): entry is TranscriptScanCacheEntry {
+  return (
+    !!entry &&
+    entry.size === fileSize &&
+    entry.mtimeMs === mtimeMs &&
+    !!entry.scan &&
+    Array.isArray(entry.scan.delegatedPrompts) &&
+    typeof entry.scan.valid === "boolean"
+  );
+}
+
+function scanTranscriptContent(content: string): TranscriptScan {
+  let firstPrompt = "";
+
+  // Count user prompts and tool calls — data already in memory, zero extra I/O
+  // Only count user messages that are actual prompts, not tool_result messages.
+  // NOTE: The `!line.includes('"tool_result"')` heuristic could theoretically under-count
+  // if a user's actual prompt text literally contains the string "tool_result". This is an
+  // accepted edge case — it's extremely rare in practice and the fast string check avoids
+  // JSON-parsing every line.
+  let promptCount = 0;
+  let toolCallCount = 0;
+  let editCountEst = 0;
+  let model: string | undefined;
+  let lineCount = 0;
+  let userPromptCandidateCount = 0;
+  const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+  const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
+  const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
+  const userRoleRe = /"role"\s*:\s*"user"/;
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (isCursorJsonlLifecycleLine(line)) continue;
+    lineCount++;
+
+    // Cursor may prepend many metadata/assistant records before the first
+    // user turn. Bound the expensive JSON parsing by user candidates rather
+    // than raw lines, otherwise eleven harmless records make a valid
+    // session disappear from discovery.
+    if (
+      !firstPrompt &&
+      userPromptCandidateCount < 10 &&
+      userRoleRe.test(line) &&
+      !line.includes('"tool_result"')
+    ) {
+      userPromptCandidateCount++;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.role === "user") {
+          const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
+          if (textBlock?.text) {
+            firstPrompt = sanitizeCursorUserText(textBlock.text).slice(0, 200);
+          }
+        }
+      } catch {}
+    }
+
+    if (userRoleRe.test(line) && !line.includes('"tool_result"')) {
+      promptCount++;
+    }
+    const toolMatches = line.match(toolUseRe);
+    if (toolMatches) {
+      toolCallCount += toolMatches.length;
+      if (editToolRe.test(line)) editCountEst++;
+    }
+    // Extract model from first assistant message
+    if (!model && line.includes('"assistant"') && line.includes('"model')) {
+      const m = line.match(modelRe);
+      if (m) model = m[1];
+    }
+  }
+
+  return {
+    valid: lineCount >= 2 && !!firstPrompt, // too short to be useful otherwise
+    lineCount,
+    firstPrompt,
+    promptCount,
+    toolCallCount,
+    editCountEst,
+    ...(model !== undefined ? { model } : {}),
+    delegatedPrompts: extractDelegatedPrompts(content),
+  };
+}
+
 async function extractSessionInfo(
   filePath: string,
   fileSize: number,
   mtimeMs: number,
   project: string,
   toolPaths: string[],
+  cache?: TranscriptScanCache,
 ): Promise<SessionInfo | null> {
   try {
-    const content = await readFile(filePath, "utf-8");
-    transcriptDelegatedPrompts.set(filePath, extractDelegatedPrompts(content));
-
-    const sessionId = basename(filePath, ".jsonl");
-    let firstPrompt = "";
-
-    // Count user prompts and tool calls — data already in memory, zero extra I/O
-    // Only count user messages that are actual prompts, not tool_result messages.
-    // NOTE: The `!line.includes('"tool_result"')` heuristic could theoretically under-count
-    // if a user's actual prompt text literally contains the string "tool_result". This is an
-    // accepted edge case — it's extremely rare in practice and the fast string check avoids
-    // JSON-parsing every line.
-    let promptCount = 0;
-    let toolCallCount = 0;
-    let editCountEst = 0;
-    let model: string | undefined;
-    let lineCount = 0;
-    let userPromptCandidateCount = 0;
-    const toolUseRe = /"type"\s*:\s*"tool_use"/g;
-    const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
-    const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
-    const userRoleRe = /"role"\s*:\s*"user"/;
-    for (const rawLine of content.split("\n")) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      if (isCursorJsonlLifecycleLine(line)) continue;
-      lineCount++;
-
-      // Cursor may prepend many metadata/assistant records before the first
-      // user turn. Bound the expensive JSON parsing by user candidates rather
-      // than raw lines, otherwise eleven harmless records make a valid
-      // session disappear from discovery.
-      if (
-        !firstPrompt &&
-        userPromptCandidateCount < 10 &&
-        userRoleRe.test(line) &&
-        !line.includes('"tool_result"')
-      ) {
-        userPromptCandidateCount++;
-        try {
-          const obj = JSON.parse(line);
-          if (obj.role === "user") {
-            const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
-            if (textBlock?.text) {
-              firstPrompt = sanitizeCursorUserText(textBlock.text).slice(0, 200);
-            }
-          }
-        } catch {}
-      }
-
-      if (userRoleRe.test(line) && !line.includes('"tool_result"')) {
-        promptCount++;
-      }
-      const toolMatches = line.match(toolUseRe);
-      if (toolMatches) {
-        toolCallCount += toolMatches.length;
-        if (editToolRe.test(line)) editCountEst++;
-      }
-      // Extract model from first assistant message
-      if (!model && line.includes('"assistant"') && line.includes('"model')) {
-        const m = line.match(modelRe);
-        if (m) model = m[1];
+    const cached = cache?.previous[filePath];
+    let scan: TranscriptScan;
+    if (isReusableTranscriptScan(cached, fileSize, mtimeMs)) {
+      scan = cached.scan;
+      cache?.fresh.set(filePath, cached);
+    } else {
+      scan = scanTranscriptContent(await readFile(filePath, "utf-8"));
+      if (cache) {
+        cache.scannedAny = true;
+        cache.fresh.set(filePath, { size: fileSize, mtimeMs, scan });
       }
     }
-    if (lineCount < 2) return null; // too short to be useful
-    if (!firstPrompt) return null;
+    transcriptDelegatedPrompts.set(filePath, scan.delegatedPrompts);
+    if (!scan.valid) return null;
 
+    const sessionId = basename(filePath, ".jsonl");
     // Cursor transcript markers can be missing in some flows; tool artifacts are
     // a better lower bound for real tool activity in the same time window.
-    toolCallCount = Math.max(toolCallCount, toolPaths.length);
+    const toolCallCount = Math.max(scan.toolCallCount, toolPaths.length);
 
     // Use file mtime as timestamp (Cursor doesn't store timestamps in JSONL)
     const timestamp = new Date(mtimeMs).toISOString();
@@ -526,16 +628,16 @@ async function extractSessionInfo(
       cwd: project,
       version: "",
       timestamp,
-      lineCount,
+      lineCount: scan.lineCount,
       fileSize,
       filePath,
       filePaths: [filePath],
       toolPaths,
-      firstPrompt,
-      promptCount,
+      firstPrompt: scan.firstPrompt,
+      promptCount: scan.promptCount,
       toolCallCount,
-      model,
-      editCountEst: editCountEst || undefined,
+      model: scan.model,
+      editCountEst: scan.editCountEst || undefined,
     };
   } catch {
     return null;
@@ -635,7 +737,9 @@ async function mapLimit<T, R>(
 
 export const __testables = {
   decodeProjectDir,
+  extractDelegatedPrompts,
   extractSessionInfo,
+  persistTranscriptScanCache,
   findTopLevelSubagentSessionIds,
   mergeDuplicateTranscriptSessions,
 };
@@ -650,10 +754,15 @@ function isCursorJsonlLifecycleLine(line: string): boolean {
   }
 }
 
+// Only a tool_use block named like a delegation tool can yield a prompt, and its name is
+// always written as a plain `"name":"..."` pair. Skipping every other line avoids parsing
+// whole transcripts (~half a second of discovery on a machine with thousands of them).
+const DELEGATION_NAME_RE = /"name"\s*:\s*"(?:agent|subagent|task|task_v2)"/i;
+
 function extractDelegatedPrompts(content: string): string[] {
   const prompts: string[] = [];
   for (const rawLine of content.split("\n")) {
-    if (!rawLine.trim()) continue;
+    if (!DELEGATION_NAME_RE.test(rawLine)) continue;
     let record: any;
     try {
       record = JSON.parse(rawLine);
