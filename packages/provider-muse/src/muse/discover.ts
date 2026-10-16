@@ -1,6 +1,5 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import { FILE_EDIT_TOOLS } from "@vibe-replay/provider-core/utils";
@@ -145,6 +144,30 @@ function estimateMuseDurationMs(first: string, last: string): number | undefined
   return span > 0 ? span : undefined;
 }
 
+/**
+ * Yield lines split on "\n" only, streaming.
+ *
+ * Node's readline also splits on U+2028/U+2029 (and lone \r), which are
+ * legal inside JSON strings — transcript tool output has been observed
+ * containing raw U+2028 line separators. Splitting there turns one valid
+ * record into unparseable fragments that discovery would silently drop,
+ * while the parser (`content.split("\n")`) sees the true line. Splitting
+ * here exactly the way the parser does keeps discovery and parsing in
+ * agreement.
+ */
+async function* splitLinesNewlineOnly(input: NodeJS.ReadableStream): AsyncGenerator<string> {
+  let buffered = "";
+  for await (const chunk of input) {
+    buffered += chunk;
+    let index: number;
+    while ((index = buffered.indexOf("\n")) >= 0) {
+      yield buffered.slice(0, index);
+      buffered = buffered.slice(index + 1);
+    }
+  }
+  if (buffered) yield buffered;
+}
+
 async function extractMuseSessionInfo(
   filePath: string,
   sessionsDir: string,
@@ -155,8 +178,7 @@ async function extractMuseSessionInfo(
   const state = newScanState();
   try {
     const stream = createReadStream(filePath, { encoding: "utf-8" });
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
+    for await (const line of splitLinesNewlineOnly(stream)) {
       if (line.trim()) scanLine(state, line);
     }
   } catch {
