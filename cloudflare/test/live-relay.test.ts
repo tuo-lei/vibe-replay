@@ -904,6 +904,7 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     store: Map<string, unknown>;
     failNextGet: (key: string) => void;
     failNextPut: (key: string) => void;
+    clearAlarm: () => void;
   }
 
   function makeStorageRelay(
@@ -970,6 +971,9 @@ describe("LiveRelay box lifecycle (session ended)", () => {
       },
       failNextPut: (key: string) => {
         failPutKey = key;
+      },
+      clearAlarm: () => {
+        alarmAt = null;
       },
     };
   }
@@ -1363,6 +1367,32 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.store.size).toBe(0);
     expect(await probe()).toEqual({ status: "unknown" });
     expect(h.store.size).toBe(0);
+  });
+
+  it("rearms after ended-state persistence fails at grace expiry", async () => {
+    const h = makeStorageRelay();
+    const { ws: vm, p } = helloVm(h);
+    await p;
+    await helloViewer(h, LEI_CIPHER);
+
+    h.sockets.splice(h.sockets.indexOf(vm), 1);
+    await h.relay.webSocketClose(vm as unknown as WebSocket);
+    const expiredGraceAt = Date.now() - 120_000;
+    h.store.set("vmGoneAt", expiredGraceAt);
+    h.clearAlarm();
+    h.failNextPut("ended");
+
+    await h.relay.alarm();
+    expect(h.store.get("ended")).toBeUndefined();
+    expect(h.store.get("vmGoneAt")).toBe(expiredGraceAt);
+    expect(h.alarmAt()).not.toBeNull();
+
+    // Simulate the rearmed alarm firing after the one-time storage failure.
+    h.clearAlarm();
+    await h.relay.alarm();
+    expect(h.store.get("ended")).toBe(true);
+    expect(h.store.get("vmGoneAt")).toBeUndefined();
+    expect(h.alarmAt()).toBeNull();
   });
 
   it("serves the box liveness probe: unknown / live / unknown / ended", async () => {

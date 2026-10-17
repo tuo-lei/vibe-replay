@@ -703,7 +703,8 @@ export class LiveRelay {
           // Shipper reconnected inside the grace — the box lives on.
           await this.ctx.storage.delete(VM_GONE_AT_KEY);
         } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
-          await this.endBox();
+          const ended = await this.endBox();
+          if (!ended) this.ensureSweepAlarm();
           return;
         } else {
           gracePending = true;
@@ -1149,13 +1150,17 @@ export class LiveRelay {
    * their sockets. A restart mints a fresh box id — this one never revives.
    * The relay still sees no plaintext: only the lifecycle flag is stored.
    */
-  private async endBox(): Promise<void> {
+  private async endBox(): Promise<boolean> {
+    let persisted = false;
     try {
       await this.ctx.storage.put(ENDED_KEY, true);
+      persisted = true;
       await this.ctx.storage.delete(VM_GONE_AT_KEY);
       await this.ctx.storage.deleteAlarm();
     } catch {
-      // storage best-effort (some harnesses lack it)
+      // If persisting ENDED_KEY fails, leave the grace timestamp intact so
+      // alarm() can retry. Storage cleanup after the terminal flag is durable
+      // remains best-effort.
     }
     const msg = JSON.stringify({ t: "session-ended" });
     // Every attached viewer socket — not just the presence-filtered roster:
@@ -1165,6 +1170,7 @@ export class LiveRelay {
       this.sendQuietly(ws, msg);
       this.closeQuietly(ws, 1000, "session ended");
     }
+    return persisted;
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
