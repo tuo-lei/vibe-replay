@@ -695,6 +695,7 @@ export class LiveRelay {
     // within VM_GONE_GRACE_MS the box is dead for good (restarts mint fresh
     // box ids, so the old URL never revives).
     let gracePending = false;
+    let endGracePersistenceRetry = false;
     try {
       const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
       if (typeof vmGoneAt === "number") {
@@ -704,8 +705,8 @@ export class LiveRelay {
           await this.ctx.storage.delete(VM_GONE_AT_KEY);
         } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
           const ended = await this.endBox();
-          if (!ended) this.ensureSweepAlarm();
-          return;
+          if (ended) return;
+          endGracePersistenceRetry = true;
         } else {
           gracePending = true;
         }
@@ -714,6 +715,13 @@ export class LiveRelay {
       // A transient grace-state read must not disarm the only retry path for
       // a reaped half-open VM whose close callback may never arrive.
       gracePersistenceRetry = true;
+    }
+    // Keep scheduling outside the state-read catch above: the alarm is the
+    // retry path if ENDED_KEY could not be persisted, and a failed schedule
+    // must escape so Durable Objects retries this handler.
+    if (endGracePersistenceRetry) {
+      await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+      return;
     }
     if (live > 0 || gracePending || gracePersistenceRetry) {
       this.ensureSweepAlarm();
