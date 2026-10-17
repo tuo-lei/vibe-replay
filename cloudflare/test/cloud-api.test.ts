@@ -129,6 +129,16 @@ async function uploadReplay(visibility = "unlisted") {
   return (await response.json()) as { id: string; url: string; expiresAt: string };
 }
 
+async function uploadTestFile() {
+  const response = await dispatch("/api/files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: btoa("<svg></svg>"), contentType: "image/svg+xml" }),
+  });
+  expect(response.status).toBe(200);
+  return (await response.json()) as { id: string };
+}
+
 describe("Cloud API integration", () => {
   beforeAll(async () => {
     mf = new Miniflare({
@@ -480,6 +490,39 @@ describe("Cloud API integration", () => {
     } finally {
       env.REPLAY_BUCKET = originalBucket;
     }
+
+    const retried = await dispatch(`/api/cloud-replays/${uploaded.id}`, { method: "DELETE" });
+    expect(retried.status).toBe(200);
+    expect(
+      await env.DB.prepare("SELECT id FROM cloud_replays WHERE id = ?").bind(uploaded.id).first(),
+    ).toBeNull();
+    expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
+  });
+
+  it("retains replay tracking after a D1 delete failure and succeeds on retry", async () => {
+    const uploaded = await uploadReplay();
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_cloud_replay_delete BEFORE DELETE ON cloud_replays
+      BEGIN SELECT RAISE(FAIL, 'simulated D1 delete failure'); END;
+    `).run();
+
+    try {
+      const failed = await dispatch(`/api/cloud-replays/${uploaded.id}`, { method: "DELETE" });
+      expect(failed.status).toBe(500);
+      const row = await env.DB.prepare("SELECT id FROM cloud_replays WHERE id = ?")
+        .bind(uploaded.id)
+        .first<{ id: string }>();
+      expect(row?.id).toBe(uploaded.id);
+      expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_cloud_replay_delete").run();
+    }
+
+    const retried = await dispatch(`/api/cloud-replays/${uploaded.id}`, { method: "DELETE" });
+    expect(retried.status).toBe(200);
+    expect(
+      await env.DB.prepare("SELECT id FROM cloud_replays WHERE id = ?").bind(uploaded.id).first(),
+    ).toBeNull();
   });
 
   it("keeps the replay tracking row when quota rollback cannot delete its R2 object", async () => {
@@ -507,7 +550,7 @@ describe("Cloud API integration", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ replay: sampleReplay(), visibility: "unlisted" }),
       });
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(413);
 
       const row = await env.DB.prepare(
         "SELECT id FROM cloud_replays WHERE user_id = ? AND storage_type = 'r2' LIMIT 1",
@@ -519,6 +562,157 @@ describe("Cloud API integration", () => {
     } finally {
       env.REPLAY_BUCKET = originalBucket;
       await env.DB.prepare("DROP TRIGGER force_cloud_replay_over_quota").run();
+    }
+  });
+
+  it("cleans up an over-quota replay upload while returning 413", async () => {
+    await env.DB.prepare(`
+      CREATE TRIGGER force_cloud_replay_over_quota AFTER INSERT ON cloud_replays
+      BEGIN
+        UPDATE cloud_replays SET size_bytes = 20971521 WHERE id = NEW.id;
+      END;
+    `).run();
+
+    try {
+      const response = await dispatch("/api/cloud-replays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replay: sampleReplay(), visibility: "unlisted" }),
+      });
+      expect(response.status).toBe(413);
+      const row = await env.DB.prepare(
+        "SELECT id FROM cloud_replays WHERE user_id = ? AND storage_type = 'r2' LIMIT 1",
+      )
+        .bind(TEST_USER_ID)
+        .first();
+      expect(row).toBeNull();
+      const objects = await env.REPLAY_BUCKET.list({ prefix: "replays/" });
+      expect(objects.objects).toHaveLength(0);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER force_cloud_replay_over_quota").run();
+    }
+  });
+
+  it("keeps a file row and object when explicit R2 deletion fails, then deletes on retry", async () => {
+    const uploaded = await uploadTestFile();
+    const originalBucket = env.REPLAY_BUCKET;
+    env.REPLAY_BUCKET = new Proxy(originalBucket, {
+      get(target, property) {
+        if (property === "delete")
+          return async () => {
+            throw new Error("simulated R2 outage");
+          };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    try {
+      const failed = await dispatch(`/api/files/${uploaded.id}`, { method: "DELETE" });
+      expect(failed.status).toBe(500);
+      const row = await env.DB.prepare("SELECT id FROM user_files WHERE id = ?")
+        .bind(uploaded.id)
+        .first<{ id: string }>();
+      expect(row?.id).toBe(uploaded.id);
+      expect(await originalBucket.get(`files/${uploaded.id}.svg`)).not.toBeNull();
+    } finally {
+      env.REPLAY_BUCKET = originalBucket;
+    }
+
+    const retried = await dispatch(`/api/files/${uploaded.id}`, { method: "DELETE" });
+    expect(retried.status).toBe(200);
+    expect(
+      await env.DB.prepare("SELECT id FROM user_files WHERE id = ?").bind(uploaded.id).first(),
+    ).toBeNull();
+    expect(await originalBucket.get(`files/${uploaded.id}.svg`)).toBeNull();
+  });
+
+  it("retains file tracking after a D1 delete failure and succeeds on retry", async () => {
+    const uploaded = await uploadTestFile();
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_user_file_delete BEFORE DELETE ON user_files
+      BEGIN SELECT RAISE(FAIL, 'simulated D1 delete failure'); END;
+    `).run();
+
+    try {
+      const failed = await dispatch(`/api/files/${uploaded.id}`, { method: "DELETE" });
+      expect(failed.status).toBe(500);
+      const row = await env.DB.prepare("SELECT id FROM user_files WHERE id = ?")
+        .bind(uploaded.id)
+        .first<{ id: string }>();
+      expect(row?.id).toBe(uploaded.id);
+      expect(await env.REPLAY_BUCKET.get(`files/${uploaded.id}.svg`)).toBeNull();
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_user_file_delete").run();
+    }
+
+    const retried = await dispatch(`/api/files/${uploaded.id}`, { method: "DELETE" });
+    expect(retried.status).toBe(200);
+    expect(
+      await env.DB.prepare("SELECT id FROM user_files WHERE id = ?").bind(uploaded.id).first(),
+    ).toBeNull();
+  });
+
+  it("preserves file tracking when quota rollback cannot delete its R2 object", async () => {
+    await env.DB.prepare(`
+      CREATE TRIGGER force_user_file_over_quota AFTER INSERT ON user_files
+      BEGIN
+        UPDATE user_files SET size_bytes = 20971521 WHERE id = NEW.id;
+      END;
+    `).run();
+    const originalBucket = env.REPLAY_BUCKET;
+    env.REPLAY_BUCKET = new Proxy(originalBucket, {
+      get(target, property) {
+        if (property === "delete")
+          return async () => {
+            throw new Error("simulated R2 outage");
+          };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    try {
+      const response = await dispatch("/api/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: btoa("<svg></svg>"), contentType: "image/svg+xml" }),
+      });
+      expect(response.status).toBe(413);
+      const row = await env.DB.prepare("SELECT id FROM user_files WHERE user_id = ?")
+        .bind(TEST_USER_ID)
+        .first<{ id: string }>();
+      expect(row?.id).toMatch(/^[a-zA-Z0-9_-]{12}$/);
+      expect(await originalBucket.get(`files/${row?.id}.svg`)).not.toBeNull();
+    } finally {
+      env.REPLAY_BUCKET = originalBucket;
+      await env.DB.prepare("DROP TRIGGER force_user_file_over_quota").run();
+    }
+  });
+
+  it("cleans up an over-quota file upload while returning 413", async () => {
+    await env.DB.prepare(`
+      CREATE TRIGGER force_user_file_over_quota AFTER INSERT ON user_files
+      BEGIN
+        UPDATE user_files SET size_bytes = 20971521 WHERE id = NEW.id;
+      END;
+    `).run();
+
+    try {
+      const response = await dispatch("/api/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: btoa("<svg></svg>"), contentType: "image/svg+xml" }),
+      });
+      expect(response.status).toBe(413);
+      const row = await env.DB.prepare("SELECT id FROM user_files WHERE user_id = ?")
+        .bind(TEST_USER_ID)
+        .first();
+      expect(row).toBeNull();
+      const objects = await env.REPLAY_BUCKET.list({ prefix: "files/" });
+      expect(objects.objects).toHaveLength(0);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER force_user_file_over_quota").run();
     }
   });
 
