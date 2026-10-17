@@ -815,10 +815,15 @@ app.post("/api/cloud-replays", async (c) => {
   // Post-insert quota re-check to guard against concurrent uploads
   const postInsertUsed = await getUserR2Storage(db, userId);
   if (postInsertUsed > MAX_TOTAL_STORAGE) {
-    // Keep the D1 row until R2 confirms deletion so a failed cleanup remains
-    // visible and can be retried instead of leaving an untracked object.
-    await c.env.REPLAY_BUCKET.delete(r2Key);
-    await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
+    // Remove R2 before its D1 tracking row. If cleanup fails, retain the row
+    // so the object remains discoverable and the original quota response stays
+    // stable for the client.
+    try {
+      await c.env.REPLAY_BUCKET.delete(r2Key);
+      await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
+    } catch (error) {
+      console.error("Failed to roll back over-quota replay upload:", error);
+    }
     return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
@@ -2268,10 +2273,14 @@ app.post("/api/files", async (c) => {
   // Post-insert quota re-check to guard against concurrent uploads
   const postInsertUsed = await getUserR2Storage(db, userId);
   if (postInsertUsed > MAX_TOTAL_STORAGE) {
-    await Promise.all([
-      db.delete(userFiles).where(eq(userFiles.id, id)),
-      c.env.REPLAY_BUCKET.delete(r2Key),
-    ]).catch(() => {});
+    // Keep the tracking row until R2 confirms deletion. A failed cleanup must
+    // remain visible and retryable while preserving the quota response.
+    try {
+      await c.env.REPLAY_BUCKET.delete(r2Key);
+      await db.delete(userFiles).where(eq(userFiles.id, id));
+    } catch (error) {
+      console.error("Failed to roll back over-quota file upload:", error);
+    }
     return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
@@ -2328,10 +2337,9 @@ app.delete("/api/files/:id", async (c) => {
   }
 
   const ext = ALLOWED_FILE_TYPES.get(record.contentType) || "bin";
-  await Promise.all([
-    db.delete(userFiles).where(eq(userFiles.id, id)),
-    c.env.REPLAY_BUCKET.delete(`files/${id}.${ext}`),
-  ]);
+  // Delete the object first so an R2 failure leaves a retryable D1 row.
+  await c.env.REPLAY_BUCKET.delete(`files/${id}.${ext}`);
+  await db.delete(userFiles).where(eq(userFiles.id, id));
 
   return c.json({ ok: true });
 });
