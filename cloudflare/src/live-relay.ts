@@ -695,6 +695,7 @@ export class LiveRelay {
     // within VM_GONE_GRACE_MS the box is dead for good (restarts mint fresh
     // box ids, so the old URL never revives).
     let gracePending = false;
+    let endGracePersistenceRetry = false;
     try {
       const vmGoneAt = await this.ctx.storage.get<number>(VM_GONE_AT_KEY);
       if (typeof vmGoneAt === "number") {
@@ -703,8 +704,9 @@ export class LiveRelay {
           // Shipper reconnected inside the grace — the box lives on.
           await this.ctx.storage.delete(VM_GONE_AT_KEY);
         } else if (now - vmGoneAt > VM_GONE_GRACE_MS) {
-          await this.endBox();
-          return;
+          const ended = await this.endBox();
+          if (ended) return;
+          endGracePersistenceRetry = true;
         } else {
           gracePending = true;
         }
@@ -713,6 +715,13 @@ export class LiveRelay {
       // A transient grace-state read must not disarm the only retry path for
       // a reaped half-open VM whose close callback may never arrive.
       gracePersistenceRetry = true;
+    }
+    // Keep scheduling outside the state-read catch above: the alarm is the
+    // retry path if ENDED_KEY could not be persisted, and a failed schedule
+    // must escape so Durable Objects retries this handler.
+    if (endGracePersistenceRetry) {
+      await this.ctx.storage.setAlarm(now + SWEEP_ALARM_EVERY_MS);
+      return;
     }
     if (live > 0 || gracePending || gracePersistenceRetry) {
       this.ensureSweepAlarm();
@@ -1149,13 +1158,17 @@ export class LiveRelay {
    * their sockets. A restart mints a fresh box id — this one never revives.
    * The relay still sees no plaintext: only the lifecycle flag is stored.
    */
-  private async endBox(): Promise<void> {
+  private async endBox(): Promise<boolean> {
+    let persisted = false;
     try {
       await this.ctx.storage.put(ENDED_KEY, true);
+      persisted = true;
       await this.ctx.storage.delete(VM_GONE_AT_KEY);
       await this.ctx.storage.deleteAlarm();
     } catch {
-      // storage best-effort (some harnesses lack it)
+      // If persisting ENDED_KEY fails, leave the grace timestamp intact so
+      // alarm() can retry. Storage cleanup after the terminal flag is durable
+      // remains best-effort.
     }
     const msg = JSON.stringify({ t: "session-ended" });
     // Every attached viewer socket — not just the presence-filtered roster:
@@ -1165,6 +1178,7 @@ export class LiveRelay {
       this.sendQuietly(ws, msg);
       this.closeQuietly(ws, 1000, "session ended");
     }
+    return persisted;
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
