@@ -86,9 +86,12 @@ const TELEMETRY_ALLOWED_VALUES: Record<string, Set<string>> = {
   size: new Set(["0", "<1mb", "1-9mb", "10-99mb", "100mb+"]),
   storage: new Set(["r2", "gist", "legacy-gist"]),
 };
-const MAX_TELEMETRY_EVENTS_PER_DAY = 100_000;
-const MAX_TELEMETRY_EVENTS_PER_INSTALLATION = 1_000;
-const telemetryRateLimits = new Map<string, { day: string; count: number }>();
+// This is a telemetry budget, not the Cloudflare account-wide rows-written quota.
+// Leave substantial headroom for indexes, authentication, and other D1 workloads.
+const MAX_TELEMETRY_EVENTS_PER_DAY = 2_000;
+const MAX_TELEMETRY_EVENTS_PER_INSTALLATION = 20;
+const MIN_TELEMETRY_INTERVAL_MS = 60 * 60 * 1000;
+const telemetryRateLimits = new Map<string, { day: string; count: number; lastWrite: number }>();
 
 // GitHub API constants — shared across user gist routes and worker-side fetches.
 const GITHUB_API_ACCEPT = "application/vnd.github+json";
@@ -194,16 +197,18 @@ async function hashTelemetryInstallation(
     .join("");
 }
 
-function allowTelemetryInstallation(day: string, installationHash: string): boolean {
+function allowTelemetryInstallation(day: string, installationHash: string, now: number): boolean {
   const key = `${day}:${installationHash}`;
   const previous = telemetryRateLimits.get(key);
   if (!previous || previous.day !== day) {
     if (telemetryRateLimits.size > 10_000) telemetryRateLimits.clear();
-    telemetryRateLimits.set(key, { day, count: 1 });
+    telemetryRateLimits.set(key, { day, count: 1, lastWrite: now });
     return true;
   }
   if (previous.count >= MAX_TELEMETRY_EVENTS_PER_INSTALLATION) return false;
+  if (now - previous.lastWrite < MIN_TELEMETRY_INTERVAL_MS) return false;
   previous.count += 1;
+  previous.lastWrite = now;
   return true;
 }
 
@@ -349,13 +354,15 @@ app.post("/api/telemetry", async (c) => {
       month,
       installationId,
     );
+    // Reject repeated reports before consuming any D1 reads or writes. This is
+    // per-isolate backpressure; the shared daily D1 counter remains the fallback.
+    if (!allowTelemetryInstallation(day, installationHash, now.getTime())) return c.body(null, 204);
     const dailyTotal = await c.env.DB.prepare(
       "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?",
     )
       .bind(day)
       .first<{ count: number }>();
     if ((dailyTotal?.count || 0) >= MAX_TELEMETRY_EVENTS_PER_DAY) return c.body(null, 204);
-    if (!allowTelemetryInstallation(day, installationHash)) return c.body(null, 204);
 
     await c.env.DB.batch([
       c.env.DB.prepare(
