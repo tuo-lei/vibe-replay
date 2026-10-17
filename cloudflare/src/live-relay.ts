@@ -389,15 +389,21 @@ export class LiveRelay {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
     const maybeBoxId = parts.at(-1) === "status" ? parts.at(-2) : parts.at(-1);
+    const isWebSocket = request.headers.get("Upgrade") === "websocket";
     if (maybeBoxId && BOX_ID_RE.test(maybeBoxId)) {
+      // Keep the request's identity in memory for this active instance. The
+      // status endpoint is a read-only probe, so persist it only when a
+      // websocket connection can use the value across hibernation.
       this.boxId = maybeBoxId;
-      try {
-        await this.ctx.storage.put(BOX_ID_KEY, maybeBoxId);
-      } catch {
-        // The current instance can still validate commitments in memory.
+      if (isWebSocket) {
+        try {
+          await this.ctx.storage.put(BOX_ID_KEY, maybeBoxId);
+        } catch {
+          // The current instance can still validate commitments in memory.
+        }
       }
     }
-    if (request.headers.get("Upgrade") !== "websocket") {
+    if (!isWebSocket) {
       // Box liveness probe for the viewer shell: lets the viewer show the
       // "session ended" page before the name gate instead of hanging on
       // "Connecting…". Only the lifecycle flag is exposed — never content.

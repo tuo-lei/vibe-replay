@@ -1352,6 +1352,19 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     expect(h.alarmAt()).toBeNull();
   });
 
+  it("keeps fresh and repeated status probes read-only", async () => {
+    const h = makeStorageRelay();
+    const probe = () =>
+      h.relay
+        .fetch(new Request(`https://relay.test/live/${VM_CLAIM_BOX_ID}/status`))
+        .then((response) => response.json() as Promise<{ status: string }>);
+
+    expect(await probe()).toEqual({ status: "unknown" });
+    expect(h.store.size).toBe(0);
+    expect(await probe()).toEqual({ status: "unknown" });
+    expect(h.store.size).toBe(0);
+  });
+
   it("serves the box liveness probe: unknown / live / unknown / ended", async () => {
     const h = makeStorageRelay();
     const probe = () =>
@@ -1363,11 +1376,13 @@ describe("LiveRelay box lifecycle (session ended)", () => {
     // conservative (a shipper hello may still be on its way); the viewer
     // websocket gets the fast session-ended instead of hanging.
     expect(await probe()).toEqual({ status: "unknown" });
+    expect(h.store.get("boxId")).toBeUndefined();
 
     // Shipper attached.
     const { ws: vm, p } = helloVm(h);
     await p;
     expect(await probe()).toEqual({ status: "live" });
+    expect(h.store.get("boxId")).toBeUndefined();
 
     // Shipper lost uncleanly: inside the end grace it may still come back.
     await h.relay.webSocketClose(vm as unknown as WebSocket, 1006, "boom");
