@@ -815,10 +815,10 @@ app.post("/api/cloud-replays", async (c) => {
   // Post-insert quota re-check to guard against concurrent uploads
   const postInsertUsed = await getUserR2Storage(db, userId);
   if (postInsertUsed > MAX_TOTAL_STORAGE) {
-    await Promise.all([
-      db.delete(cloudReplays).where(eq(cloudReplays.id, id)),
-      c.env.REPLAY_BUCKET.delete(r2Key),
-    ]).catch(() => {});
+    // Keep the D1 row until R2 confirms deletion so a failed cleanup remains
+    // visible and can be retried instead of leaving an untracked object.
+    await c.env.REPLAY_BUCKET.delete(r2Key);
+    await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
     return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
@@ -987,11 +987,12 @@ app.delete("/api/cloud-replays/:id", async (c) => {
     return c.json({ error: "Not found" }, 404);
   }
 
-  const deletes: Promise<unknown>[] = [db.delete(cloudReplays).where(eq(cloudReplays.id, id))];
   if (record.storageType === "r2") {
-    deletes.push(c.env.REPLAY_BUCKET.delete(`replays/${id}.json`));
+    // Delete the object first. If R2 is unavailable, preserve its D1 tracking
+    // row so the replay remains discoverable and deletion can be retried.
+    await c.env.REPLAY_BUCKET.delete(`replays/${id}.json`);
   }
-  await Promise.all(deletes);
+  await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
 
   return c.json({ ok: true });
 });

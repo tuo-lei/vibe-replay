@@ -455,6 +455,73 @@ describe("Cloud API integration", () => {
     expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
   });
 
+  it("keeps the replay tracking row when deleting its R2 object fails", async () => {
+    const uploaded = await uploadReplay();
+    const originalBucket = env.REPLAY_BUCKET;
+    env.REPLAY_BUCKET = new Proxy(originalBucket, {
+      get(target, property) {
+        if (property === "delete")
+          return async () => {
+            throw new Error("simulated R2 outage");
+          };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    try {
+      const response = await dispatch(`/api/cloud-replays/${uploaded.id}`, { method: "DELETE" });
+      expect(response.status).toBe(500);
+      const row = await env.DB.prepare("SELECT id FROM cloud_replays WHERE id = ?")
+        .bind(uploaded.id)
+        .first<{ id: string }>();
+      expect(row?.id).toBe(uploaded.id);
+      expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).not.toBeNull();
+    } finally {
+      env.REPLAY_BUCKET = originalBucket;
+    }
+  });
+
+  it("keeps the replay tracking row when quota rollback cannot delete its R2 object", async () => {
+    await env.DB.prepare(`
+      CREATE TRIGGER force_cloud_replay_over_quota AFTER INSERT ON cloud_replays
+      BEGIN
+        UPDATE cloud_replays SET size_bytes = 20971521 WHERE id = NEW.id;
+      END;
+    `).run();
+    const originalBucket = env.REPLAY_BUCKET;
+    env.REPLAY_BUCKET = new Proxy(originalBucket, {
+      get(target, property) {
+        if (property === "delete")
+          return async () => {
+            throw new Error("simulated R2 outage");
+          };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    try {
+      const response = await dispatch("/api/cloud-replays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replay: sampleReplay(), visibility: "unlisted" }),
+      });
+      expect(response.status).toBe(500);
+
+      const row = await env.DB.prepare(
+        "SELECT id FROM cloud_replays WHERE user_id = ? AND storage_type = 'r2' LIMIT 1",
+      )
+        .bind(TEST_USER_ID)
+        .first<{ id: string }>();
+      expect(row?.id).toMatch(/^[a-zA-Z0-9_-]{12}$/);
+      expect(await env.REPLAY_BUCKET.get(`replays/${row?.id}.json`)).not.toBeNull();
+    } finally {
+      env.REPLAY_BUCKET = originalBucket;
+      await env.DB.prepare("DROP TRIGGER force_cloud_replay_over_quota").run();
+    }
+  });
+
   it("returns an R2 replay when its optional view-count update fails", async () => {
     const uploaded = await uploadReplay();
     await env.DB.prepare(`
