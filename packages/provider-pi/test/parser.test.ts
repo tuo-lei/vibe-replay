@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +17,73 @@ async function withPiFixture(lines: unknown[], fn: (path: string) => Promise<voi
 }
 
 describe("Pi parser", () => {
+  it("loads model context windows from the explicit agent root with a separate sessions root", async () => {
+    const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const originalSessionsDir = process.env.PI_CODING_AGENT_SESSION_DIR;
+    const root = await mkdtemp(join(tmpdir(), "vibe-replay-pi-roots-"));
+    const agentDir = join(root, "agent-config");
+    const sessionsDir = join(root, "session-storage", "sessions");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, "independent-roots.jsonl");
+    await writeFile(
+      join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: [{ models: [{ id: "fixture-model", contextWindow: 100_000 }] }],
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      path,
+      `${[
+        {
+          type: "session",
+          version: 3,
+          id: "independent-roots",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/project",
+        },
+        {
+          type: "message",
+          id: "assistant",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: {
+            role: "assistant",
+            model: "fixture-model",
+            stopReason: "length",
+            content: [{ type: "text", text: "Truncated" }],
+          },
+        },
+        {
+          type: "compaction",
+          id: "compact",
+          parentId: "assistant",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          tokensBefore: 90_000,
+          summary: "Summary",
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n")}\n`,
+      "utf-8",
+    );
+
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env.PI_CODING_AGENT_SESSION_DIR = sessionsDir;
+    try {
+      const parsed = await parsePiSession(path);
+      expect(parsed.contextLimit).toBe(100_000);
+      expect(parsed.diagnostics?.[0]).toMatchObject({ contextLimit: 100_000, preTokens: 90_000 });
+    } finally {
+      if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+      if (originalSessionsDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = originalSessionsDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("parses Pi JSONL tree sessions and enriches tools", async () => {
     const lines = [
       {
