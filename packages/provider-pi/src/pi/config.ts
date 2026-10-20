@@ -48,6 +48,9 @@ export function getPiSessionsDirForSession(filePath: string): string {
 }
 
 export function getPiAgentDirForSession(filePath: string): string {
+  const configuredAgentDir = getConfiguredAgentDir();
+  if (configuredAgentDir) return configuredAgentDir;
+
   const absolutePath = resolve(filePath);
   const roots = getPiSessionsDirs();
   const root = roots.find((sessionsDir) => {
