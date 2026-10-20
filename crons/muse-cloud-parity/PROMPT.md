@@ -67,7 +67,9 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    Never use `--no-verify` to bypass it.
 3. **Discover.** Run `packages/provider-muse`'s own discovery
    (`src/muse/discover.ts` — do not reimplement it) against this machine's
-   Muse sessions (`~/agents/<agent-id>/sessions/<agent-id>.jsonl`) and
+   Muse sessions (`~/agents/agent-<id>/sessions/<id>.jsonl` — the transcript
+   filename drops the `agent-` prefix, so do not glob
+   `~/agents/<agent-id>/sessions/<agent-id>.jsonl` literally) and
    confirm sessions from the last 14 days are found.
 4. **Integrity.** Stream (never fully load) every stable session file from
    the 14-day window — not just a recent sample; a malformed or
