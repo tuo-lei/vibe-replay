@@ -12,6 +12,7 @@ interface OtlpAttribute {
 }
 
 interface OtlpLogRecord {
+  eventName?: string;
   timeUnixNano?: string;
   severityNumber?: number;
   severityText?: string;
@@ -62,8 +63,12 @@ function tokenAttributes(usage: TokenUsage): OtlpAttribute[] {
 function toolLogRecord(
   scene: Extract<Scene, { type: "tool-call" }>,
   replay: ReplaySession,
+  parentAgentId?: string,
 ): OtlpLogRecord {
-  const status = scene.isError ? "error" : scene.hasResult ? "success" : "unknown";
+  const hasResultEvidence =
+    scene.hasResult === true ||
+    (scene.hasResult === undefined && scene.resultUnavailable !== true && scene.result.length > 0);
+  const status = scene.isError ? "error" : hasResultEvidence ? "success" : "unknown";
   const timestamp = timeUnixNano(scene.timestamp);
   const durationQuality =
     scene.durationMs === undefined
@@ -74,6 +79,7 @@ function toolLogRecord(
           ? "estimated"
           : "unknown";
   return {
+    eventName: "vibe_replay.tool_call",
     ...(timestamp ? { timeUnixNano: timestamp } : {}),
     ...(scene.isError ? { severityNumber: 17, severityText: "ERROR" } : {}),
     body: { stringValue: "vibe_replay.tool_call" },
@@ -83,9 +89,10 @@ function toolLogRecord(
       ["gen_ai.conversation.id", replay.meta.sessionId],
       ["gen_ai.operation.name", "execute_tool"],
       ["gen_ai.tool.name", scene.toolName],
+      ["gen_ai.agent.id", parentAgentId],
       ["vibe_replay.source.provider", replay.meta.provider],
       ["vibe_replay.tool.status", status],
-      ["vibe_replay.quality.status", scene.isError || scene.hasResult ? "exact" : "partial"],
+      ["vibe_replay.quality.status", status === "unknown" ? "partial" : "exact"],
       ["vibe_replay.quality.timestamp", timestamp ? "exact" : "unavailable"],
       ["vibe_replay.tool.duration_ms", scene.durationMs],
       ["vibe_replay.quality.duration", durationQuality],
@@ -101,6 +108,7 @@ function tokenLogRecord(
   replay: ReplaySession,
 ): OtlpLogRecord {
   return {
+    eventName: "vibe_replay.model_usage",
     body: { stringValue: "vibe_replay.model_usage" },
     attributes: [
       ...attributes([
@@ -119,12 +127,20 @@ function tokenLogRecord(
 
 /** Build an OTLP/JSON ExportLogsServiceRequest from evidence in a saved replay. */
 export function generateOtlpJson(replay: ReplaySession): string {
-  const toolRecords = replay.scenes
-    .filter(
-      (scene): scene is Extract<Scene, { type: "tool-call" }> =>
-        scene.type === "tool-call" && !scene.isToolContainer,
-    )
-    .map((scene) => toolLogRecord(scene, replay));
+  const toolScenes = (
+    scenes: readonly Scene[],
+    parentAgentId?: string,
+  ): Array<{ scene: Extract<Scene, { type: "tool-call" }>; parentAgentId?: string }> =>
+    scenes.flatMap((scene) => {
+      if (scene.type !== "tool-call") return [];
+      return [
+        ...(!scene.isToolContainer ? [{ scene, parentAgentId }] : []),
+        ...(scene.subAgent ? toolScenes(scene.subAgent.scenes, scene.subAgent.agentId) : []),
+      ];
+    });
+  const toolRecords = toolScenes(replay.scenes).map(({ scene, parentAgentId }) =>
+    toolLogRecord(scene, replay, parentAgentId),
+  );
   const tokenRecords = (replay.meta.stats.turnStats ?? []).flatMap((turn) =>
     turn.tokenUsage ? [tokenLogRecord(turn.turnIndex, turn.tokenUsage, turn.model, replay)] : [],
   );

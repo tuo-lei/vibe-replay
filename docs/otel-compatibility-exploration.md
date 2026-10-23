@@ -20,8 +20,10 @@ quality.
 - Tool names, call outcomes, timestamps, and durations are emitted only when
   saved in the replay. Unknown outcomes stay `unknown`; missing timestamps and
   durations are omitted and marked unavailable.
+- Nested subagent tool scenes are included; delegation wrapper calls are
+  excluded so the same work is not counted twice.
 - Token counts are emitted per turn when present. `gen_ai.usage.input_tokens`
-  includes cache-read and cache-creation input, as the GenAI convention
+  includes cache-read and cache-write input, as the GenAI convention
   specifies; `vibe_replay.usage.uncached_input_tokens` preserves vibe-replay's
   separately normalized uncached portion.
 - The export does not fabricate trace IDs, parent spans, causal relationships,

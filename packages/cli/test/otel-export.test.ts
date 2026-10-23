@@ -58,6 +58,27 @@ const replay: ReplaySession = {
       result: "",
       hasResult: true,
       isError: false,
+      subAgent: {
+        agentId: "child-agent-1",
+        agentType: "general-purpose",
+        prompt: "PRIVATE_SUBAGENT_PROMPT",
+        toolCalls: 1,
+        thinkingBlocks: 0,
+        textResponses: 0,
+        scenes: [
+          {
+            type: "tool-call",
+            toolName: "SubRead",
+            input: { file_path: "/private/project/child.txt" },
+            result: "child result",
+            hasResult: true,
+            isError: false,
+            timestamp: "2026-09-01T12:00:03.000Z",
+            durationMs: 5,
+            durationSource: "timestamp",
+          },
+        ],
+      },
     },
   ],
 };
@@ -72,9 +93,10 @@ describe("OTLP JSON export", () => {
       key: "service.name",
       value: { stringValue: "vibe-replay" },
     });
-    expect(records).toHaveLength(3);
+    expect(records).toHaveLength(4);
 
     const toolRecord = records[0];
+    expect(toolRecord.eventName).toBe("vibe_replay.tool_call");
     expect(toolRecord.timeUnixNano).toBe("1788264002000000000");
     expect(toolRecord.attributes).toContainEqual({
       key: "gen_ai.operation.name",
@@ -93,7 +115,21 @@ describe("OTLP JSON export", () => {
       value: { stringValue: "provider" },
     });
 
-    const unresolvedToolRecord = records[1];
+    const childToolRecord = records[1];
+    expect(childToolRecord.attributes).toContainEqual({
+      key: "gen_ai.tool.name",
+      value: { stringValue: "SubRead" },
+    });
+    expect(childToolRecord.attributes).toContainEqual({
+      key: "gen_ai.agent.id",
+      value: { stringValue: "child-agent-1" },
+    });
+    expect(childToolRecord.attributes).toContainEqual({
+      key: "vibe_replay.quality.duration",
+      value: { stringValue: "estimated" },
+    });
+
+    const unresolvedToolRecord = records[2];
     expect(unresolvedToolRecord.timeUnixNano).toBeUndefined();
     expect(unresolvedToolRecord.attributes).toContainEqual({
       key: "vibe_replay.tool.status",
@@ -114,6 +150,7 @@ describe("OTLP JSON export", () => {
       "PRIVATE_RESULT",
       "PRIVATE_COMMAND",
       "PRIVATE_WRAPPER",
+      "PRIVATE_SUBAGENT_PROMPT",
       "/private/project",
       "file_path",
     ]) {
@@ -125,8 +162,9 @@ describe("OTLP JSON export", () => {
 
   it("exports cache-inclusive GenAI input tokens and preserves uncached input", () => {
     const payload = JSON.parse(generateOtlpJson(replay));
-    const tokenRecord = payload.resourceLogs[0].scopeLogs[0].logRecords[2];
+    const tokenRecord = payload.resourceLogs[0].scopeLogs[0].logRecords[3];
 
+    expect(tokenRecord.eventName).toBe("vibe_replay.model_usage");
     expect(tokenRecord.body.stringValue).toBe("vibe_replay.model_usage");
     expect(tokenRecord.attributes).toContainEqual({
       key: "gen_ai.usage.input_tokens",
@@ -147,6 +185,23 @@ describe("OTLP JSON export", () => {
     expect(tokenRecord.attributes).toContainEqual({
       key: "vibe_replay.quality.timestamp",
       value: { stringValue: "unavailable" },
+    });
+  });
+
+  it("uses recorded result text as success evidence for legacy scenes", () => {
+    const legacyTool = { ...replay.scenes[1] };
+    if (legacyTool.type !== "tool-call") throw new Error("Expected tool scene fixture");
+    delete legacyTool.hasResult;
+    const payload = JSON.parse(generateOtlpJson({ ...replay, scenes: [legacyTool] }));
+    const [record] = payload.resourceLogs[0].scopeLogs[0].logRecords;
+
+    expect(record.attributes).toContainEqual({
+      key: "vibe_replay.tool.status",
+      value: { stringValue: "success" },
+    });
+    expect(record.attributes).toContainEqual({
+      key: "vibe_replay.quality.status",
+      value: { stringValue: "exact" },
     });
   });
 });
