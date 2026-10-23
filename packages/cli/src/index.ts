@@ -1214,16 +1214,19 @@ workflowCommand(
       }
   });
 
-workflowCommand("export", "Export a session as Markdown, replay JSON, or standalone HTML")
-  .option("--format <type>", "markdown, json, or html", "markdown")
+workflowCommand(
+  "export",
+  "Export a session as Markdown, replay JSON, OTLP JSON, or standalone HTML",
+)
+  .option("--format <type>", "markdown, json, otlp-json, or html", "markdown")
   .option("--output <directory>", "Output directory (default: ~/.vibe-replay/<slug>/exports)")
-  .option("--stdout", "Write only Markdown or replay JSON to stdout, without saving output files")
+  .option("--stdout", "Write only the selected export to stdout, without saving output files")
   .action(async (ref: string, opts: WorkflowOptions, command: Command) => {
-    if (!["markdown", "json", "html"].includes(opts.format || ""))
-      throw new Error("--format must be markdown, json, or html");
+    if (!["markdown", "json", "html", "otlp-json"].includes(opts.format || ""))
+      throw new Error("--format must be markdown, json, html, or otlp-json");
     if (opts.stdout && (opts.json || opts.output || opts.format === "html"))
       throw new Error(
-        "--stdout supports markdown/json and cannot be combined with --json or --output",
+        "--stdout supports markdown/json/otlp-json and cannot be combined with --json or --output",
       );
     const { replay, outputDir, publicationDir, provenance } = await loadCliSession(ref, {
       ...opts,
