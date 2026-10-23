@@ -95,11 +95,13 @@ remove the 30-minute exception in PR #702's review: keep the exception.
 5. **Drift.** Collect from every stable session file in the 14-day window
    (same coverage rule as step 4 — a new record shape outside a sample
    would otherwise go unseen): top-level record types, item `type` values,
-   the shallow field-name set per type, the nested
-   `message_parts.parts[].type` values with their nested key/type
+   the shallow field-name set per type, the `message_parts`-item `parts[].type`
+   values with their nested key/type
    signatures (the parser's `textFromItem` only accepts `{type: "text",
    text}` parts, so a new part type with unchanged outer keys would
-   otherwise slip past the census), the tool names actually invoked with
+   otherwise slip past the census; note: the `parts` array sits directly
+   on the `message_parts`-typed item — there is no `message_parts` wrapper
+   field on it), the tool names actually invoked with
    their privacy-safe decoded argument-key sets (the `arguments` field is
    a JSON string — collect key names only, never values), the
    `record.source` provenance-label set (the parser's
