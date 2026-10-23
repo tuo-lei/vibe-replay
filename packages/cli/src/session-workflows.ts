@@ -13,6 +13,7 @@ import { transformToReplay } from "./transform.js";
 import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
 import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
 import { generateOutput } from "./generator.js";
+import { generateOtlpJson } from "./otel-export.js";
 import { generateGitHubMarkdown } from "./formatters/github.js";
 import { loadSavedCloudInfo } from "./publishers/cloud.js";
 import { loadSavedGistInfo } from "./publishers/gist.js";
@@ -1124,8 +1125,8 @@ export async function exportText(
   format: string,
 ): Promise<string> {
   const shareable = sessionForExternalOutput(replay);
-  if (!["markdown", "json", "html"].includes(format))
-    throw new Error("--format must be markdown, json, or html");
+  if (!["markdown", "json", "html", "otlp-json"].includes(format))
+    throw new Error("--format must be markdown, json, html, or otlp-json");
   const savedCloud =
     publicationDir && format === "markdown" ? await loadSavedCloudInfo(publicationDir) : undefined;
   const savedGist =
@@ -1134,9 +1135,9 @@ export async function exportText(
     savedCloud && Date.parse(savedCloud.expiresAt) > Date.now()
       ? savedCloud.url
       : savedGist?.viewerUrl;
-  return format === "markdown"
-    ? generateGitHubMarkdown(shareable, { replayUrl })
-    : JSON.stringify(shareable);
+  if (format === "markdown") return generateGitHubMarkdown(shareable, { replayUrl });
+  if (format === "otlp-json") return generateOtlpJson(shareable);
+  return JSON.stringify(shareable);
 }
 
 export async function exportSession(
@@ -1151,7 +1152,14 @@ export async function exportSession(
   const path =
     format === "html"
       ? await generateOutput(shareable, outputDir, { writeReplayJson: false })
-      : join(outputDir, format === "markdown" ? "github-summary.md" : "replay.json");
+      : join(
+          outputDir,
+          format === "markdown"
+            ? "github-summary.md"
+            : format === "otlp-json"
+              ? "session.otlp.json"
+              : "replay.json",
+        );
   if (format !== "html") await writeFile(path, `${text}\n`, "utf-8");
   const report = {
     version: 1,

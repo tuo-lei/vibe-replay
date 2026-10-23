@@ -219,6 +219,7 @@ npx vibe-replay inspect <session-id> --json
 npx vibe-replay inspect <session-id> --query "EUSAGE" --json
 npx vibe-replay diagnose <session-id> --query "EUSAGE" --json
 npx vibe-replay export <session-id> --format markdown --stdout > session.md
+npx vibe-replay export <session-id> --format otlp-json --stdout > session.otlp.json
 npx vibe-replay export <session-id> --format html --output ./replay
 npx vibe-replay share <session-id> --dry-run --json
 npx vibe-replay share ./replay --visibility unlisted --json
@@ -227,6 +228,8 @@ npx vibe-replay share ./replay --visibility unlisted --json
 References accept full IDs, unique prefixes of at least four characters, and source paths.
 Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
 selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+The `otlp-json` format exports a privacy-bounded historical view as OTLP logs;
+it does not invent trace relationships or include prompts and tool payloads.
 Session pages include `pagination.total`, `returned`, `truncated`, `nextOffset`, and
 `revision`. Keep the same filters and pass `--offset <nextOffset> --revision <hash>`
 to continue. Changed matching membership or order requires restarting the search; live metric
@@ -275,14 +278,15 @@ first page; use `inspect --query` for scene-based evidence continuation.
 Metadata search does not search tool results: use `inspect --query`
 after selecting a session.
 
-`export` supports `markdown`, `json`, and `html`, defaulting to Markdown with no
+`export` supports `markdown`, `json`, `otlp-json`, and `html`, defaulting to Markdown with no
 preview images. Files go under `~/.vibe-replay/<slug>/exports` unless `--output` is
-provided. `--stdout` emits only Markdown or replay JSON and creates no files,
+provided. `--stdout` emits Markdown, replay JSON, or OTLP JSON and creates no files,
 including discovery caches and telemetry. SSH stdout exports use already staged
 sessions; run `sessions --refresh` first if the session is not staged.
 File exports return a format-specific `redactionsPath`: Markdown retains
 `redactions.json`, JSON uses `replay.redactions.json`, and HTML uses
-`index.redactions.json`. Each report records its source, format, actual artifact
+`index.redactions.json`; OTLP JSON uses `session.otlp.json` and
+`session.otlp.redactions.json`. Each report records its source, format, actual artifact
 SHA-256, and effective content revision. Formats can coexist without overwriting
 one another's reports; re-exporting a format replaces its artifact and report. `--github` remains available for the
 Markdown + animated GIF + SVG bundle. Export/share by ID uses an existing saved
