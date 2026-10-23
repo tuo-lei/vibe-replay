@@ -87,7 +87,7 @@ describe("transformToReplay cost precedence", () => {
     // first path should stay (boundary guard), second should be redacted
     const inputs = replay.scenes
       .filter((s) => s.type === "tool-call")
-      .map((s: any) => s.input?.file_path);
+      .map((s) => s.input?.file_path);
     expect(inputs[0]).toBe("/home/alice2/secret.txt");
     expect(inputs[1]).toBe("~/project/file.ts");
   });
@@ -118,7 +118,7 @@ describe("transformToReplay cost precedence", () => {
       location: { kind: "ssh", id: "r", label: "R" },
     });
     // command field is redacted via remoteHome
-    const cmd = (r2.scenes.find((s) => s.type === "tool-call") as any)?.bashOutput?.command;
+    const cmd = r2.scenes.find((s) => s.type === "tool-call")?.bashOutput?.command;
     // Exact match or path with boundary should be ~; preceding alphanum case stays
     expect(cmd).toContain("~/project");
   });
