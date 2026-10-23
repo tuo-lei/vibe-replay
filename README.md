@@ -219,6 +219,7 @@ npx vibe-replay inspect <session-id> --json
 npx vibe-replay inspect <session-id> --query "EUSAGE" --json
 npx vibe-replay diagnose <session-id> --query "EUSAGE" --json
 npx vibe-replay export <session-id> --format markdown --stdout > session.md
+npx vibe-replay export <session-id> --format otlp-json --stdout > session.otlp.json
 npx vibe-replay export <session-id> --format html --output ./replay
 npx vibe-replay share <session-id> --dry-run --json
 npx vibe-replay share ./replay --visibility unlisted --json
@@ -227,6 +228,8 @@ npx vibe-replay share ./replay --visibility unlisted --json
 References accept full IDs, unique prefixes of at least four characters, and source paths.
 Use `--provider` or `--target <ssh-id|local>` to disambiguate. `sessions --session <ref>`
 selects one exact session; `--refresh` bypasses the 30-second discovery cache.
+The `otlp-json` format exports a privacy-bounded historical view as OTLP logs;
+it does not invent trace relationships or include prompts and tool payloads.
 Session pages include `pagination.total`, `returned`, `truncated`, `nextOffset`, and
 `revision`. Keep the same filters and pass `--offset <nextOffset> --revision <hash>`
 to continue. Changed matching membership or order requires restarting the search; live metric
