@@ -188,6 +188,52 @@ describe("OTLP JSON export", () => {
     });
   });
 
+  it("timestamps model usage and omits synthetic model placeholders", () => {
+    const replayWithSyntheticModel: ReplaySession = {
+      ...replay,
+      scenes: [],
+      meta: {
+        ...replay.meta,
+        stats: {
+          ...replay.meta.stats,
+          turnStats: [
+            {
+              turnIndex: 0,
+              segmentIndex: 1,
+              timestamp: "2026-09-01T12:00:01.000Z",
+              model: "<synthetic>",
+              tokenUsage: {
+                inputTokens: 10,
+                outputTokens: 2,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
+              },
+            },
+          ],
+        },
+      },
+    };
+    const payload = JSON.parse(generateOtlpJson(replayWithSyntheticModel));
+    const [record] = payload.resourceLogs[0].scopeLogs[0].logRecords;
+
+    expect(record.timeUnixNano).toBe("1788264001000000000");
+    expect(record.attributes).toContainEqual({
+      key: "vibe_replay.turn.segment_index",
+      value: { intValue: "1" },
+    });
+    expect(record.attributes).not.toContainEqual(
+      expect.objectContaining({ key: "gen_ai.response.model" }),
+    );
+    expect(record.attributes).toContainEqual({
+      key: "vibe_replay.quality.model",
+      value: { stringValue: "synthetic" },
+    });
+    expect(record.attributes).toContainEqual({
+      key: "vibe_replay.quality.timestamp",
+      value: { stringValue: "exact" },
+    });
+  });
+
   it("uses recorded result text as success evidence for legacy scenes", () => {
     const legacyTool = { ...replay.scenes[1] };
     if (legacyTool.type !== "tool-call") throw new Error("Expected tool scene fixture");

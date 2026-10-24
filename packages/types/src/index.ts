@@ -88,6 +88,8 @@ export function deriveTokenUsageMetrics(usage: TokenUsage): TokenUsageMetrics {
 
 export interface TurnStat {
   turnIndex: number;
+  /** Timestamp of the first assistant message that contributed to this usage row. */
+  timestamp?: string;
   /**
    * Optional assistant-segment index within the session. Providers that split
    * one user prompt at a compaction or context-injection boundary can use this

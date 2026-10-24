@@ -571,7 +571,9 @@ export async function parseClaudeCodeLines(
           _images: images,
           ...(isError ? { _isError: true } : {}),
           ...(subAgent ? { _subAgent: subAgent } : {}),
-          ...(toolDurationMs ? { _durationMs: toolDurationMs } : {}),
+          ...(toolDurationMs
+            ? { _durationMs: toolDurationMs, _durationSource: "timestamp" as const }
+            : {}),
         };
       }
       return block;
@@ -869,10 +871,16 @@ function buildTurnStats(
   // Only ordinary user prompts are turn boundaries. Context injections and
   // compaction summaries are persisted as user-role records, but do not start
   // a new user turn in the replay UI.
-  const turnGroups: Array<{ msgIds: string[]; startTimestamp: string; endTimestamp: string }> = [];
+  const turnGroups: Array<{
+    msgIds: string[];
+    startTimestamp: string;
+    endTimestamp: string;
+    usageTimestamp?: string;
+  }> = [];
   let currentMsgIds: string[] = [];
   let lastTimestamp = "";
   let turnStartTimestamp = "";
+  let usageTimestamp: string | undefined;
 
   for (const turn of finalTurns) {
     if (turn.role === "user" && !turn.subtype) {
@@ -882,14 +890,24 @@ function buildTurnStats(
           msgIds: currentMsgIds,
           startTimestamp: turnStartTimestamp,
           endTimestamp: lastTimestamp,
+          usageTimestamp,
         });
         currentMsgIds = [];
+        usageTimestamp = undefined;
       }
       turnStartTimestamp = turn.timestamp || "";
     }
     if (turn.role === "assistant" && turn.messageId) {
       currentMsgIds.push(turn.messageId);
       lastTimestamp = turn.timestamp || lastTimestamp;
+      const usage = usageByMsgId.get(turn.messageId);
+      if (
+        !usageTimestamp &&
+        usage &&
+        Object.values(usage).some((count) => typeof count === "number" && count > 0)
+      ) {
+        usageTimestamp = turn.timestamp;
+      }
     }
   }
   // Close last group (only if it has assistant messages to avoid empty trailing entry)
@@ -898,6 +916,7 @@ function buildTurnStats(
       msgIds: currentMsgIds,
       startTimestamp: turnStartTimestamp,
       endTimestamp: lastTimestamp,
+      usageTimestamp,
     });
   }
 
@@ -950,6 +969,7 @@ function buildTurnStats(
     }
 
     const stat: TurnStat = { turnIndex: i };
+    if (group.usageTimestamp) stat.timestamp = group.usageTimestamp;
     if (turnModel) stat.model = turnModel;
     if (durationMs !== undefined) stat.durationMs = durationMs;
     if (turnTokens) stat.tokenUsage = turnTokens;

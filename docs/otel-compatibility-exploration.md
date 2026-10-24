@@ -27,7 +27,12 @@ quality.
   specifies; `vibe_replay.usage.uncached_input_tokens` preserves vibe-replay's
   separately normalized uncached portion.
 - The export does not fabricate trace IDs, parent spans, causal relationships,
-  tool call IDs, timestamps for token snapshots, or duration measurements.
+  tool call IDs, timestamps, or duration measurements. Token usage records carry
+  a timestamp only when the provider recorded one and the parser retained it;
+  compaction segments retain their segment index, and timestamp-derived tool
+  durations are marked as estimated. Synthetic model
+  placeholders are omitted from `gen_ai.response.model` and identified through
+  `vibe_replay.quality.model`.
   These records therefore appear under OTLP logs, not as reconstructed traces.
 - Session-level estimated cost is not currently exported. It has no standard
   GenAI log field and should only be added with an explicit unit and quality

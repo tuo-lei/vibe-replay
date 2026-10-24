@@ -782,7 +782,7 @@ function buildOpencodeTurnStats(
   >,
 ): NonNullable<ProviderParseResult["turnStats"]> {
   const stats: NonNullable<ProviderParseResult["turnStats"]> = [];
-  let current: { turnIndex: number; messageIds: string[] } | undefined;
+  let current: { turnIndex: number; messageIds: string[]; timestamp?: string } | undefined;
   let turnIndex = -1;
 
   const flushCurrent = (): void => {
@@ -808,6 +808,7 @@ function buildOpencodeTurnStats(
     );
     stats.push({
       turnIndex: current.turnIndex,
+      ...(current.timestamp ? { timestamp: current.timestamp } : {}),
       ...(statModel ? { model: statModel } : {}),
       ...(durationMs > 0 ? { durationMs } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
@@ -825,6 +826,10 @@ function buildOpencodeTurnStats(
     if (turn.role === "assistant" && turn.messageId && turnIndex >= 0) {
       current ??= { turnIndex, messageIds: [] };
       current.messageIds.push(turn.messageId);
+      const usage = usageByMessageId.get(turn.messageId)?.usage;
+      if (!current.timestamp && usage && Object.values(usage).some((count) => count > 0)) {
+        current.timestamp = turn.timestamp;
+      }
     }
   }
   flushCurrent();
