@@ -900,7 +900,14 @@ function buildTurnStats(
     if (turn.role === "assistant" && turn.messageId) {
       currentMsgIds.push(turn.messageId);
       lastTimestamp = turn.timestamp || lastTimestamp;
-      if (!usageTimestamp && usageByMsgId.has(turn.messageId)) usageTimestamp = turn.timestamp;
+      const usage = usageByMsgId.get(turn.messageId);
+      if (
+        !usageTimestamp &&
+        usage &&
+        Object.values(usage).some((count) => typeof count === "number" && count > 0)
+      ) {
+        usageTimestamp = turn.timestamp;
+      }
     }
   }
   // Close last group (only if it has assistant messages to avoid empty trailing entry)

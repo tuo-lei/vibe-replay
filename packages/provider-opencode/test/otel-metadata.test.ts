@@ -15,11 +15,20 @@ describe("OpenCode OTel metadata", () => {
           parts: [{ type: "text", text: "Prompt" }],
         },
         {
-          id: "msg_assistant",
+          id: "msg_assistant_zero_usage",
           sessionId: "ses_otel",
           role: "assistant",
           modelID: "fixture-model",
           timeCreated: 1_800_000_002_000,
+          tokens: { input: 0, output: 0 },
+          parts: [{ type: "text", text: "No usage" }],
+        },
+        {
+          id: "msg_assistant",
+          sessionId: "ses_otel",
+          role: "assistant",
+          modelID: "fixture-model",
+          timeCreated: 1_800_000_003_000,
           tokens: { input: 10, output: 2 },
           parts: [{ type: "text", text: "Response" }],
         },
@@ -29,7 +38,7 @@ describe("OpenCode OTel metadata", () => {
     try {
       const parsed = parseSessionFromDb(db, "ses_otel");
       expect(parsed.turnStats?.[0]).toMatchObject({
-        timestamp: "2027-01-15T08:00:02.000Z",
+        timestamp: "2027-01-15T08:00:03.000Z",
       });
     } finally {
       db.close();

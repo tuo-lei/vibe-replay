@@ -826,8 +826,10 @@ function buildOpencodeTurnStats(
     if (turn.role === "assistant" && turn.messageId && turnIndex >= 0) {
       current ??= { turnIndex, messageIds: [] };
       current.messageIds.push(turn.messageId);
-      if (!current.timestamp && usageByMessageId.has(turn.messageId))
+      const usage = usageByMessageId.get(turn.messageId)?.usage;
+      if (!current.timestamp && usage && Object.values(usage).some((count) => count > 0)) {
         current.timestamp = turn.timestamp;
+      }
     }
   }
   flushCurrent();
