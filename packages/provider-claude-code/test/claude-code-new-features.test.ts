@@ -80,6 +80,22 @@ describe("New features: subagent, duration, metadata, api errors", () => {
     expect(editBlock._durationMs).toBe(1000); // 10:00:16 - 10:00:15
   });
 
+  it("marks timestamp-derived tool durations and timestamps token usage turns", async () => {
+    const result = await parseClaudeCodeSession(FIXTURE);
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use" && block._durationMs !== undefined);
+
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _durationMs: expect.any(Number),
+      _durationSource: "timestamp",
+    });
+    expect(result.turnStats?.[0]).toMatchObject({
+      timestamp: "2026-03-20T10:00:05Z",
+    });
+  });
+
   // --- Transform: new fields pass through ---
   it("passes new metadata through to ReplaySession", async () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);

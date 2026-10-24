@@ -827,6 +827,10 @@ function buildAssistantBlocks(
                 (value): value is string => typeof value === "string" && value.trim().length > 0,
               )
           : undefined;
+      const durationMs =
+        assistantTimestamp && result?.timestamp
+          ? toolDurationMs(assistantTimestamp, result.timestamp)
+          : undefined;
       blocks.push({
         type: "tool_use",
         id: block.id,
@@ -837,8 +841,8 @@ function buildAssistantBlocks(
         ...(result?.images.length ? { _images: result.images } : {}),
         ...(result?.isError ? { _isError: true } : {}),
         ...(skillName ? { _skillName: skillName.trim() } : {}),
-        ...(assistantTimestamp && result?.timestamp
-          ? { _durationMs: toolDurationMs(assistantTimestamp, result.timestamp) }
+        ...(durationMs !== undefined
+          ? { _durationMs: durationMs, _durationSource: "timestamp" as const }
           : {}),
       });
     }
@@ -1095,7 +1099,9 @@ function buildTurnStats(
   usageByMessageId: Map<string, { usage: TokenUsage; model?: string; contextTokens?: number }>,
 ): NonNullable<ProviderParseResult["turnStats"]> {
   const stats: NonNullable<ProviderParseResult["turnStats"]> = [];
-  let current: { turnIndex: number; segmentIndex: number; messageIds: string[] } | undefined;
+  let current:
+    | { turnIndex: number; segmentIndex: number; messageIds: string[]; timestamp?: string }
+    | undefined;
   let turnIndex = -1;
   let segmentIndex = 0;
 
@@ -1116,6 +1122,8 @@ function buildTurnStats(
     } else if (turn.role === "assistant" && turn.messageId && turnIndex >= 0) {
       current ??= { turnIndex, segmentIndex: segmentIndex++, messageIds: [] };
       current.messageIds.push(turn.messageId);
+      if (!current.timestamp && usageByMessageId.has(turn.messageId))
+        current.timestamp = turn.timestamp;
     }
   }
 
@@ -1124,7 +1132,7 @@ function buildTurnStats(
 }
 
 function buildTurnStat(
-  turn: { turnIndex: number; segmentIndex: number; messageIds: string[] },
+  turn: { turnIndex: number; segmentIndex: number; messageIds: string[]; timestamp?: string },
   usageByMessageId: Map<string, { usage: TokenUsage; model?: string; contextTokens?: number }>,
 ): NonNullable<ProviderParseResult["turnStats"]>[number] {
   const usages: TokenUsage[] = [];
@@ -1141,6 +1149,7 @@ function buildTurnStat(
   return {
     turnIndex: turn.turnIndex,
     segmentIndex: turn.segmentIndex,
+    ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
     ...(model ? { model } : {}),
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(contextTokens ? { contextTokens } : {}),

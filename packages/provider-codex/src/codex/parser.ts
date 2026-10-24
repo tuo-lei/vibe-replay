@@ -1129,6 +1129,7 @@ function buildCodexTurnStats(
     const inTurn = snapshots.filter((s) => s.sourceIndex > start && s.sourceIndex < end);
     const stat: {
       turnIndex: number;
+      timestamp?: string;
       model?: string;
       tokenUsage?: TokenUsage;
       contextTokens?: number;
@@ -1145,6 +1146,11 @@ function buildCodexTurnStats(
       for (const delta of usageDeltas) addUsage(usage, delta.usage);
       if (Object.values(usage).some((count) => count > 0) || !inTurn.some((s) => s.attributionGap))
         stat.tokenUsage = usage;
+      const usageTimestamp = usageDeltas.find(
+        ({ snapshot, usage: delta }) =>
+          snapshot.timestamp && Object.values(delta).some((count) => count > 0),
+      )?.snapshot.timestamp;
+      if (usageTimestamp) stat.timestamp = usageTimestamp;
     }
     const last = inTurn.at(-1)?.last;
     if (last) stat.contextTokens = last.input_tokens;

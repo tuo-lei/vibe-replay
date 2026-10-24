@@ -917,6 +917,7 @@ describe("Pi parser", () => {
           {
             turnIndex: 0,
             segmentIndex: 0,
+            timestamp: "2026-01-01T00:00:02.000Z",
             model: "gpt-5.5",
             tokenUsage: {
               inputTokens: 100,
@@ -973,6 +974,7 @@ describe("Pi parser", () => {
           {
             turnIndex: 0,
             segmentIndex: 0,
+            timestamp: "2026-01-01T00:00:02.000Z",
             model: "gpt-5.5",
             tokenUsage: {
               inputTokens: 100,
@@ -985,6 +987,7 @@ describe("Pi parser", () => {
           {
             turnIndex: 0,
             segmentIndex: 1,
+            timestamp: "2026-01-01T00:00:04.000Z",
             model: "gpt-5.5",
             tokenUsage: {
               inputTokens: 200,

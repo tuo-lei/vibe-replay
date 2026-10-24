@@ -103,22 +103,32 @@ function toolLogRecord(
 
 function tokenLogRecord(
   turnIndex: number,
+  segmentIndex: number | undefined,
   usage: TokenUsage,
   model: string | undefined,
+  timestamp: string | undefined,
   replay: ReplaySession,
 ): OtlpLogRecord {
+  const normalizedModel = model === "<synthetic>" ? undefined : model;
+  const time = timeUnixNano(timestamp);
   return {
     eventName: "vibe_replay.model_usage",
+    ...(time ? { timeUnixNano: time } : {}),
     body: { stringValue: "vibe_replay.model_usage" },
     attributes: [
       ...attributes([
         ["event.name", "vibe_replay.model_usage"],
         ["event.domain", "vibe_replay"],
         ["gen_ai.conversation.id", replay.meta.sessionId],
-        ["gen_ai.response.model", model],
+        ["gen_ai.response.model", normalizedModel],
         ["vibe_replay.source.provider", replay.meta.provider],
         ["vibe_replay.turn.index", turnIndex],
-        ["vibe_replay.quality.timestamp", "unavailable"],
+        ["vibe_replay.turn.segment_index", segmentIndex],
+        ["vibe_replay.quality.timestamp", time ? "exact" : "unavailable"],
+        [
+          "vibe_replay.quality.model",
+          normalizedModel ? "exact" : model === "<synthetic>" ? "synthetic" : "unavailable",
+        ],
       ]),
       ...tokenAttributes(usage),
     ],
@@ -142,7 +152,18 @@ export function generateOtlpJson(replay: ReplaySession): string {
     toolLogRecord(scene, replay, parentAgentId),
   );
   const tokenRecords = (replay.meta.stats.turnStats ?? []).flatMap((turn) =>
-    turn.tokenUsage ? [tokenLogRecord(turn.turnIndex, turn.tokenUsage, turn.model, replay)] : [],
+    turn.tokenUsage
+      ? [
+          tokenLogRecord(
+            turn.turnIndex,
+            turn.segmentIndex,
+            turn.tokenUsage,
+            turn.model,
+            turn.timestamp,
+            replay,
+          ),
+        ]
+      : [],
   );
   const logRecords = [...toolRecords, ...tokenRecords].sort((left, right) => {
     const leftTime = left.timeUnixNano ? BigInt(left.timeUnixNano) : undefined;
