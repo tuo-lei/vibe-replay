@@ -197,6 +197,14 @@ describe("discoverPiSessions", () => {
     });
   });
 
+  it("ignores headerless JSONL files in a custom session dir", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-flat-headerless-"));
+    tempDirs.push(root);
+    await writeFile(join(root, "export.jsonl"), '{"note":"not a Pi transcript"}\n', "utf-8");
+
+    expect(await discoverPiSessions(root, false, true)).toEqual([]);
+  });
+
   it("uses file mtime for unreadable transcript fallback timestamps", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-pi-unreadable-"));
     tempDirs.push(root);

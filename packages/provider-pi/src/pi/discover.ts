@@ -416,6 +416,9 @@ async function buildPiSessionInfo(
     sawParseableRecord,
     readFailed,
   } = scan;
+  // A flat custom session dir has no project directory to fall back on, so a
+  // file there is only a transcript if its header says where it ran.
+  if (encodedProjectDir === "" && !header?.cwd) return null;
   if (readFailed && !includeUnreplayable) return null;
 
   const sessionId = header?.id || basename(filePath, ".jsonl");

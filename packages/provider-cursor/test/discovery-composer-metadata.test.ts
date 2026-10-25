@@ -15,6 +15,7 @@ const { parseCursorSession } = await import("../src/cursor/parser.js");
 
 const REPLAYABLE_ID = "33333333-3333-4333-8333-333333333333";
 const TRANSCRIPT_ID = "44444444-4444-4444-8444-444444444444";
+const DELEGATING_ID = "55555555-5555-4555-8555-555555555555";
 
 beforeAll(async () => {
   const SQL = await testSqlite();
@@ -74,6 +75,39 @@ beforeAll(async () => {
       .map((line) => JSON.stringify(line))
       .join("\n"),
   );
+
+  const delegatingDir = join(
+    home,
+    ".cursor",
+    "projects",
+    "tmp-project",
+    "agent-transcripts",
+    DELEGATING_ID,
+  );
+  await mkdir(delegatingDir, { recursive: true });
+  await writeFile(
+    join(delegatingDir, `${DELEGATING_ID}.jsonl`),
+    [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>\nReview it\n</user_query>" }] },
+      },
+      {
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Subagent",
+              input: { subagent_type: "explore", model: "inherit", prompt: "Review it" },
+            },
+          ],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n"),
+  );
 });
 afterAll(async () => {
   await rm(home, { recursive: true, force: true });
@@ -95,4 +129,11 @@ it("reports the composer model and name for global-state and transcript sessions
   const parsed = await parseCursorSession(transcript!.filePaths, transcript);
   expect(parsed.title).toBe("Current progress summary");
   expect(parsed.model).toBe("gpt-5.6-sol");
+});
+
+it("does not take a tool argument as the transcript session model", async () => {
+  const sessions = await discoverCursorSessions({ readOnly: true });
+  const delegating = sessions.find((session) => session.sessionId === DELEGATING_ID);
+  expect(delegating).toBeDefined();
+  expect(delegating?.model).toBeUndefined();
 });

@@ -833,8 +833,12 @@ function unavailableRemoteFileSession(file: RemoteFileEntry): SessionInfo {
 function isRemoteTranscriptFile(file: RemoteFileEntry): boolean {
   if (file.relativePath === ".codex/session_index.jsonl") return false;
   // Claude Code subagent transcripts belong to their parent session, which reads
-  // them from `<session>/subagents/` while parsing.
-  return !(file.provider === "claude-code" && file.relativePath.includes("/subagents/"));
+  // them from `<session>/subagents/` while parsing. Match local discovery, which
+  // only treats `<project>/*.jsonl` as sessions.
+  if (file.provider === "claude-code") {
+    return /^\.claude\/projects\/[^/]+\/[^/]+\.jsonl$/.test(file.relativePath);
+  }
+  return true;
 }
 
 function unavailableRemoteSessions(

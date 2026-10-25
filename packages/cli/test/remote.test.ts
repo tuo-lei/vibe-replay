@@ -851,6 +851,32 @@ describe("remote placeholder sessions", () => {
     }
   });
 
+  it("treats only top-level project JSONL files as Claude sessions", () => {
+    const file = (relativePath: string) => ({
+      provider: "claude-code" as const,
+      remotePath: `/remote/home/${relativePath}`,
+      relativePath,
+      size: 10,
+      mtimeMs: 1_700_000_000_000,
+    });
+    const sessions = __testables.unavailableRemoteSessions(
+      {
+        home: "/remote/home",
+        files: [
+          file(".claude/projects/subagents/session.jsonl"),
+          file(".claude/projects/-p/session/tool-results/output.jsonl"),
+        ],
+      },
+      [],
+      new Map(),
+      cacheRoot,
+      location,
+    );
+    expect(sessions.map((candidate) => candidate.sessionId)).toEqual([
+      "claude-code:.claude/projects/subagents/session.jsonl",
+    ]);
+  });
+
   it("keeps the SSH location on metadata-only Codex sessions", () => {
     const sessions = __testables.unavailableRemoteSessions(
       { home: "/remote/home", files: [] },
