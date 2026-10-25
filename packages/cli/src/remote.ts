@@ -8,6 +8,7 @@ import {
   mkdtemp,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -401,6 +402,8 @@ export const __testables = {
   parseRemoteGitMetadata,
   parseRemoteIndex,
   preservedRemoteEntries,
+  pruneOrphanRemoteCaches,
+  removeLeftoverStagingDirs,
   safeRelativePath,
   unavailableRemoteSessions,
 };
@@ -1877,6 +1880,7 @@ function discoverRemoteTarget(
         return discoverRemoteTargetFromCache(target, availableProviders, cacheRootBase);
       }
       try {
+        await removeLeftoverStagingDirs(lockKey);
         return await discoverRemoteTargetUnlocked(target, availableProviders, cacheRootBase);
       } finally {
         await release();
@@ -1893,6 +1897,54 @@ function discoverRemoteTarget(
   remoteDiscoveryLocks.set(lockKey, tracked);
   remoteDiscoveryRequests.set(discoveryKey, tracked);
   return tracked;
+}
+
+/**
+ * `.sync-*` staging dirs are only created while holding the cross-process
+ * cache lock, so any present once the lock is acquired belong to an
+ * interrupted sync. `.transaction-*` dirs may hold backups and are left alone.
+ */
+async function removeLeftoverStagingDirs(cacheRoot: string): Promise<void> {
+  const entries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(".sync-"))
+      .map((entry) =>
+        rm(join(cacheRoot, entry.name), { recursive: true, force: true }).catch(() => {}),
+      ),
+  );
+}
+
+const ORPHAN_REMOTE_CACHE_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+const orphanCachePrunes = new Map<string, Promise<void>>();
+
+/**
+ * Repointing or removing a target leaves its cache dir behind (hundreds of MB
+ * of staged transcripts). Drop dirs that no configured target maps to, that
+ * hold no lock, and that have been idle for 30 days.
+ */
+async function pruneOrphanRemoteCaches(
+  targets: readonly RemoteSourceConfig[],
+  cacheRootBase: string,
+  now = Date.now(),
+): Promise<void> {
+  const keep = new Set(targets.map((target) => cacheRootForTarget(target, cacheRootBase)));
+  const entries = await readdir(cacheRootBase, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^[0-9a-f]{20}$/.test(entry.name)) continue;
+    const dir = join(cacheRootBase, entry.name);
+    if (keep.has(dir) || (await lstat(`${dir}.lock`).catch(() => null))) continue;
+    const touched = await Promise.all(
+      [dir, manifestPathForCache(dir)].map((path) =>
+        lstat(path).then(
+          (entryStat) => entryStat.mtimeMs,
+          () => 0,
+        ),
+      ),
+    );
+    if (now - Math.max(...touched) < ORPHAN_REMOTE_CACHE_IDLE_MS) continue;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Return the remote home prefix for replay path redaction after discovery. */
@@ -1918,6 +1970,17 @@ export async function discoverConfiguredRemoteSessions(
 ): Promise<{ sessions: SessionInfo[]; failedTargets: string[] }> {
   const targets = await loadRemoteSourceConfigs(options?.configPath);
   if (targets.length === 0) return { sessions: [], failedTargets: [] };
+
+  // An alternate config sees only its own targets and must not judge the
+  // default cache root's dirs as orphans.
+  const usesDefaultCache = !options?.configPath && !process.env.VIBE_REPLAY_CONFIG;
+  if (!options?.readOnly && (options?.cacheRoot || usesDefaultCache)) {
+    const base = options?.cacheRoot || REMOTE_CACHE_ROOT;
+    if (!orphanCachePrunes.has(base)) {
+      orphanCachePrunes.set(base, pruneOrphanRemoteCaches(targets, base));
+    }
+    await orphanCachePrunes.get(base);
+  }
 
   const providerSet = new Set(availableProviders);
   const results = await Promise.all(
