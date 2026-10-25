@@ -92,7 +92,7 @@ export async function discoverCodexSessions(
   const reads = new Map<string, RolloutScanEntry>();
   let scannedAny = false;
   const readRollout = async (filePath: string): Promise<RolloutRead> => {
-    filePath = await resolveCodexRolloutPath(filePath).catch(() => filePath);
+    filePath = resolve(await resolveCodexRolloutPath(filePath).catch(() => filePath));
     const fileStat = await stat(filePath, { bigint: true }).catch(() => null);
     if (!fileStat?.isFile()) return { fileStat, info: null };
     const signature = rolloutSignature(fileStat);
@@ -126,7 +126,8 @@ export async function discoverCodexSessions(
     if (existing) existing.title = threadName;
   }
 
-  for (const filePath of await findRolloutFiles(join(codexHome, "sessions"))) {
+  const rollouts = await findRolloutFiles(join(codexHome, "sessions"));
+  for (const filePath of rollouts.files) {
     const { fileStat, info } = await readRollout(filePath);
     if (!fileStat?.isFile()) continue;
     if (!info) continue;
@@ -142,7 +143,7 @@ export async function discoverCodexSessions(
   }
 
   if (!isSqliteReadOnlyScope()) {
-    await persistRolloutScans(resolve(codexHome), reads, scannedAny);
+    await persistRolloutScans(resolve(codexHome), reads, scannedAny, rollouts.complete);
   }
 
   return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -153,34 +154,38 @@ let rolloutScanWrite: Promise<void> = Promise.resolve();
 /**
  * Local and staged SSH Codex homes share one cache and are discovered
  * concurrently, so the read-merge-write is serialized against the cache as it
- * is now. Entries under `root` that this run did not see belong to deleted
- * rollouts and are dropped; other entries are kept while their file exists. A
+ * is now. After a complete listing, entries under `root` that this run did
+ * not see belong to deleted rollouts and are dropped; other entries (and all
+ * of them after an incomplete listing) are kept while their file exists. A
  * warm run that rescanned and pruned nothing writes nothing.
  */
 function persistRolloutScans(
   root: string,
   fresh: Map<string, RolloutScanEntry>,
   scannedAny: boolean,
+  listingComplete: boolean,
 ): Promise<void> {
-  const run = rolloutScanWrite.then(() => mergeRolloutScans(root, fresh, scannedAny));
+  const run = rolloutScanWrite.then(() =>
+    mergeRolloutScans(listingComplete ? root : undefined, fresh, scannedAny),
+  );
   rolloutScanWrite = run.catch(() => undefined);
   return run.catch(() => undefined);
 }
 
 async function mergeRolloutScans(
-  root: string,
+  root: string | undefined,
   fresh: Map<string, RolloutScanEntry>,
   scannedAny: boolean,
 ): Promise<void> {
   const persisted = (await readFileCache<RolloutScanCache>(SCAN_CACHE_KEY))?.data;
   const previous =
     persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
-  const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  const rootPrefix = root && (root.endsWith(sep) ? root : `${root}${sep}`);
   const foreign: Array<[string, RolloutScanEntry]> = [];
   let pruned = false;
   for (const [path, entry] of Object.entries(previous)) {
     if (fresh.has(path)) continue;
-    if (path.startsWith(rootPrefix)) pruned = true;
+    if (rootPrefix && path.startsWith(rootPrefix)) pruned = true;
     else foreign.push([path, entry]);
   }
   if (!scannedAny && !pruned) return;
@@ -569,13 +574,17 @@ async function readThreadRowsFromStateDb(codexHome: string): Promise<CodexThread
   }
 }
 
-async function findRolloutFiles(dir: string): Promise<string[]> {
+/** `complete` is false when a directory existed but could not be listed. */
+async function findRolloutFiles(dir: string): Promise<{ files: string[]; complete: boolean }> {
   const out: string[] = [];
+  let complete = true;
   async function walk(current: string): Promise<void> {
     let entries: import("node:fs").Dirent[];
     try {
       entries = await readdir(current, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") complete = false;
       return;
     }
     for (const entry of entries) {
@@ -590,7 +599,7 @@ async function findRolloutFiles(dir: string): Promise<string[]> {
     }
   }
   await walk(dir);
-  return out;
+  return { files: out, complete };
 }
 
 export function getCodexHome(): string {

@@ -1,6 +1,6 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
 
@@ -100,6 +100,40 @@ describe("Codex discovery scan cache", () => {
     expect(state.writes).toBe(0);
     expect(state.rolloutReads).toBe(1);
   });
+
+  it("keys relative Codex homes by absolute path so pruning still applies", async () => {
+    const root = await codexHome();
+    const removed = join(root, "sessions", "rollout-removed.jsonl");
+    await writeFile(removed, rollout("removed", ["Prompt"]));
+    await discoverCodexSessions(relative(process.cwd(), root), false, false);
+    expect(cachedPaths()).toEqual([removed]);
+
+    await rm(removed);
+    await discoverCodexSessions(relative(process.cwd(), root), false, false);
+    expect(cachedPaths()).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "keeps entries whose directory could not be listed",
+    async () => {
+      const root = await codexHome();
+      const day = join(root, "sessions", "2026");
+      await mkdir(day);
+      const hidden = join(day, "rollout-hidden.jsonl");
+      await writeFile(hidden, rollout("hidden", ["Prompt"]));
+      await discoverCodexSessions(root, false, false);
+      expect(cachedPaths()).toEqual([hidden]);
+
+      await chmod(day, 0o300);
+      try {
+        await writeFile(join(root, "sessions", "rollout-new.jsonl"), rollout("new", ["New"]));
+        await discoverCodexSessions(root, false, false);
+        expect(cachedPaths()).toEqual([hidden, join(root, "sessions", "rollout-new.jsonl")].sort());
+      } finally {
+        await chmod(day, 0o700);
+      }
+    },
+  );
 
   it("drops deleted rollouts under the scanned home and keeps other homes' entries", async () => {
     const local = await codexHome();

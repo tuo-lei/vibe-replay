@@ -829,11 +829,12 @@ describe("remote placeholder sessions", () => {
       },
     ],
   };
+  const parentPath = join(cacheRoot, ".claude", "projects", "-p", "parent.jsonl");
   const parent = session({
     provider: "claude-code",
     sessionId: "parent",
-    filePath: `${cacheRoot}/.claude/projects/-p/parent.jsonl`,
-    filePaths: [`${cacheRoot}/.claude/projects/-p/parent.jsonl`],
+    filePath: parentPath,
+    filePaths: [parentPath],
     location,
   });
 
