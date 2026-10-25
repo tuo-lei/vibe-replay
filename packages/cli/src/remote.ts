@@ -393,6 +393,7 @@ function preservedRemoteEntries(
 
 export const __testables = {
   acquireRemoteCacheLock,
+  addMissingRemoteFileSessions,
   cacheRootForTarget,
   classifyRemoteCacheLockFailure,
   inspectCachedPath,
@@ -401,6 +402,7 @@ export const __testables = {
   parseRemoteIndex,
   preservedRemoteEntries,
   safeRelativePath,
+  unavailableRemoteSessions,
 };
 
 function localPathForRemoteFile(cacheRoot: string, relativePath: string): string | null {
@@ -829,7 +831,10 @@ function unavailableRemoteFileSession(file: RemoteFileEntry): SessionInfo {
 }
 
 function isRemoteTranscriptFile(file: RemoteFileEntry): boolean {
-  return file.relativePath !== ".codex/session_index.jsonl";
+  if (file.relativePath === ".codex/session_index.jsonl") return false;
+  // Claude Code subagent transcripts belong to their parent session, which reads
+  // them from `<session>/subagents/` while parsing.
+  return !(file.provider === "claude-code" && file.relativePath.includes("/subagents/"));
 }
 
 function unavailableRemoteSessions(
@@ -837,6 +842,7 @@ function unavailableRemoteSessions(
   cachedSessions: SessionInfo[],
   codexMetadata: ReadonlyMap<string, CodexSessionMetadata>,
   cacheRoot: string,
+  location: SessionLocation,
 ): SessionInfo[] {
   const sessions = [...cachedSessions];
   const knownIds = new Set(sessions.map((session) => `${session.provider}::${session.sessionId}`));
@@ -845,7 +851,7 @@ function unavailableRemoteSessions(
     const key = `${session.provider}::${session.sessionId}`;
     if (knownIds.has(key)) return;
     knownIds.add(key);
-    sessions.push(session);
+    sessions.push({ ...session, location });
   };
 
   for (const metadata of codexMetadata.values()) {
@@ -880,6 +886,7 @@ function addMissingRemoteFileSessions(
   sessions: SessionInfo[],
   codexMetadata: ReadonlyMap<string, CodexSessionMetadata>,
   cacheRoot: string,
+  location: SessionLocation,
 ): SessionInfo[] {
   const result = [...sessions];
   const knownIds = new Set(result.map((session) => `${session.provider}::${session.sessionId}`));
@@ -888,7 +895,7 @@ function addMissingRemoteFileSessions(
     const idKey = `${session.provider}::${session.sessionId}`;
     if (knownIds.has(idKey)) return;
     knownIds.add(idKey);
-    result.push(session);
+    result.push({ ...session, location });
   };
 
   for (const file of index.files) {
@@ -1748,6 +1755,7 @@ async function discoverRemoteTargetUnlocked(
       ),
       new Map(Object.entries(syncedManifest.codexMetadata)),
       cacheRoot,
+      targetLocation(effectiveTarget),
     );
     const queriedRepos = await queryRemoteGitMetadata(
       effectiveTarget,
@@ -1789,6 +1797,7 @@ async function discoverRemoteTargetUnlocked(
           cachedSessions,
           currentCodexMetadata.entries,
           cacheRoot,
+          targetLocation(effectiveTarget),
         )
       : cachedSessions;
     return {

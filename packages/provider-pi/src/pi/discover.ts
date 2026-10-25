@@ -48,6 +48,20 @@ export async function discoverPiSessions(
   for (const projectDir of projectDirs) {
     const projectPath = join(sessionsRoot, projectDir);
     const projectStat = await stat(projectPath).catch(() => null);
+    // A custom session dir (`--session-dir`, PI_CODING_AGENT_SESSION_DIR, or the
+    // `sessionDir` setting) holds transcripts directly, with no per-cwd directory;
+    // the header's cwd is their only project source.
+    if (projectStat?.isFile() && projectDir.endsWith(".jsonl")) {
+      candidates.push({
+        filePath: projectPath,
+        cacheKey: resolve(projectPath),
+        projectDir: "",
+        size: projectStat.size,
+        mtimeMs: projectStat.mtimeMs,
+        mtime: projectStat.mtime.toISOString(),
+      });
+      continue;
+    }
     if (!projectStat?.isDirectory()) continue;
 
     let files: string[];
