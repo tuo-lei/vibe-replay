@@ -160,6 +160,51 @@ describe("discoverPiSessions", () => {
     });
   });
 
+  it("discovers transcripts stored directly in a custom session dir", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-flat-"));
+    tempDirs.push(root);
+    await writeFile(
+      join(root, "2026-01-01T00-00-00-000Z_flat-session.jsonl"),
+      [
+        {
+          type: "session",
+          version: 3,
+          id: "pi-flat-session",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/Users/test/flat-project",
+        },
+        {
+          type: "message",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: [{ type: "text", text: "Check the proxy" }] },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf-8",
+    );
+    await writeFile(join(root, "notes.txt"), "not a transcript", "utf-8");
+
+    const sessions = await discoverPiSessions(root, false, false);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "pi-flat-session",
+      slug: "flat-session",
+      cwd: "/Users/test/flat-project",
+      project: "/Users/test/flat-project",
+      firstPrompt: "Check the proxy",
+      promptCount: 1,
+    });
+  });
+
+  it("ignores headerless JSONL files in a custom session dir", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-flat-headerless-"));
+    tempDirs.push(root);
+    await writeFile(join(root, "export.jsonl"), '{"note":"not a Pi transcript"}\n', "utf-8");
+
+    expect(await discoverPiSessions(root, false, true)).toEqual([]);
+  });
+
   it("uses file mtime for unreadable transcript fallback timestamps", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-pi-unreadable-"));
     tempDirs.push(root);

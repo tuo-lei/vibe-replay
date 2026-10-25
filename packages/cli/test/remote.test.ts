@@ -800,6 +800,100 @@ esac
   }, 15_000);
 });
 
+describe("remote placeholder sessions", () => {
+  const location = { kind: "ssh" as const, id: "fake-remote", label: "Test remote" };
+  const cacheRoot = "/cache/root";
+  const index = {
+    home: "/remote/home",
+    files: [
+      {
+        provider: "claude-code" as const,
+        remotePath: "/remote/home/.claude/projects/-p/parent.jsonl",
+        relativePath: ".claude/projects/-p/parent.jsonl",
+        size: 10,
+        mtimeMs: 1_700_000_000_000,
+      },
+      {
+        provider: "claude-code" as const,
+        remotePath: "/remote/home/.claude/projects/-p/parent/subagents/agent-a1.jsonl",
+        relativePath: ".claude/projects/-p/parent/subagents/agent-a1.jsonl",
+        size: 10,
+        mtimeMs: 1_700_000_000_000,
+      },
+      {
+        provider: "pi" as const,
+        remotePath: "/remote/home/.pi/agent/sessions/unreadable.jsonl",
+        relativePath: ".pi/agent/sessions/unreadable.jsonl",
+        size: 10,
+        mtimeMs: 1_700_000_000_000,
+      },
+    ],
+  };
+  const parentPath = join(cacheRoot, ".claude", "projects", "-p", "parent.jsonl");
+  const parent = session({
+    provider: "claude-code",
+    sessionId: "parent",
+    filePath: parentPath,
+    filePaths: [parentPath],
+    location,
+  });
+
+  it("leaves Claude subagent transcripts to their parent and keeps the SSH location", () => {
+    for (const sessions of [
+      __testables.addMissingRemoteFileSessions(index, [parent], new Map(), cacheRoot, location),
+      __testables.unavailableRemoteSessions(index, [parent], new Map(), cacheRoot, location),
+    ]) {
+      expect(sessions.map((candidate) => candidate.sessionId)).toEqual([
+        "parent",
+        "pi:.pi/agent/sessions/unreadable.jsonl",
+      ]);
+      expect(sessions[1]).toMatchObject({ transcriptStatus: "unreadable", location });
+    }
+  });
+
+  it("treats only top-level project JSONL files as Claude sessions", () => {
+    const file = (relativePath: string) => ({
+      provider: "claude-code" as const,
+      remotePath: `/remote/home/${relativePath}`,
+      relativePath,
+      size: 10,
+      mtimeMs: 1_700_000_000_000,
+    });
+    const sessions = __testables.unavailableRemoteSessions(
+      {
+        home: "/remote/home",
+        files: [
+          file(".claude/projects/subagents/session.jsonl"),
+          file(".claude/projects/-p/session/tool-results/output.jsonl"),
+        ],
+      },
+      [],
+      new Map(),
+      cacheRoot,
+      location,
+    );
+    expect(sessions.map((candidate) => candidate.sessionId)).toEqual([
+      "claude-code:.claude/projects/subagents/session.jsonl",
+    ]);
+  });
+
+  it("keeps the SSH location on metadata-only Codex sessions", () => {
+    const sessions = __testables.unavailableRemoteSessions(
+      { home: "/remote/home", files: [] },
+      [],
+      new Map([["metadata-only", { sessionId: "metadata-only", cwd: "/remote/home/old" }]]),
+      cacheRoot,
+      location,
+    );
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "metadata-only",
+      transcriptStatus: "unreadable",
+      location,
+    });
+  });
+});
+
 function codexRollout(prompt: string, sessionId = "remote-session"): string {
   return `${[
     {

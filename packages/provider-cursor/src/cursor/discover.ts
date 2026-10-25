@@ -109,6 +109,7 @@ async function discoverCursorSessionsOnce(
         sessions: error.sessions,
         allSessions: error.sessions,
         sessionIds: new Set(error.sessions.map((session) => session.sessionId)),
+        composerMetadata: new Map(),
       };
     });
     sessions.push(...globalState.sessions);
@@ -127,6 +128,11 @@ async function discoverCursorSessionsOnce(
           session.compactionCount || 0,
           globalStateSession.compactionCount,
         );
+      }
+      const composer = globalState.composerMetadata.get(session.sessionId);
+      if (composer) {
+        session.title ||= composer.title;
+        session.model = composer.model || session.model;
       }
     }
 
@@ -459,15 +465,20 @@ interface TranscriptScan {
 interface TranscriptScanCacheEntry {
   size: number;
   mtimeMs: number;
+  /** Absent on entries written before versioning, which count as version 1. */
+  scanVersion?: number;
   scan: TranscriptScan;
 }
 
 /**
  * Cursor transcripts total hundreds of MB across thousands of files and mostly never change,
  * so the content scan is persisted and reused while a file's size/mtime are unchanged. Bump
- * the version whenever `scanTranscriptContent` changes what it derives.
+ * `TRANSCRIPT_SCAN_VERSION` whenever `scanTranscriptContent` changes what it derives; the
+ * key stays fixed so stale entries are pruned by the next write instead of left behind.
  */
 const TRANSCRIPT_SCAN_CACHE_KEY = "cursor-transcript-scan-v1";
+// 2: the session model comes only from record-level fields, never tool arguments.
+const TRANSCRIPT_SCAN_VERSION = 2;
 
 export interface TranscriptScanCache {
   previous: Record<string, TranscriptScanCacheEntry>;
@@ -506,6 +517,7 @@ function isReusableTranscriptScan(
 ): entry is TranscriptScanCacheEntry {
   return (
     !!entry &&
+    (entry.scanVersion ?? 1) === TRANSCRIPT_SCAN_VERSION &&
     entry.size === fileSize &&
     entry.mtimeMs === mtimeMs &&
     !!entry.scan &&
@@ -527,12 +539,13 @@ function scanTranscriptContent(content: string): TranscriptScan {
   let toolCallCount = 0;
   let editCountEst = 0;
   let model: string | undefined;
+  let modelProbed = false;
   let lineCount = 0;
   let userPromptCandidateCount = 0;
   const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
-  const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
   const userRoleRe = /"role"\s*:\s*"user"/;
+  const assistantRoleRe = /"role"\s*:\s*"assistant"/;
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
     if (!line) continue;
@@ -569,10 +582,18 @@ function scanTranscriptContent(content: string): TranscriptScan {
       toolCallCount += toolMatches.length;
       if (editToolRe.test(line)) editCountEst++;
     }
-    // Extract model from first assistant message
-    if (!model && line.includes('"assistant"') && line.includes('"model')) {
-      const m = line.match(modelRe);
-      if (m) model = m[1];
+    // Only record-level fields name the session model; tool arguments such as
+    // Subagent's `"model": "inherit"` sit on the same line. A record-level field
+    // would be on every assistant record, so probing the first one is enough.
+    if (!modelProbed && assistantRoleRe.test(line)) {
+      modelProbed = true;
+      if (line.includes('"model')) {
+        try {
+          const obj = JSON.parse(line);
+          const candidate = obj.model ?? obj.modelId ?? obj.message?.model;
+          if (typeof candidate === "string" && candidate) model = candidate;
+        } catch {}
+      }
     }
   }
 
@@ -606,7 +627,12 @@ async function extractSessionInfo(
       scan = scanTranscriptContent(await readFile(filePath, "utf-8"));
       if (cache) {
         cache.scannedAny = true;
-        cache.fresh.set(filePath, { size: fileSize, mtimeMs, scan });
+        cache.fresh.set(filePath, {
+          size: fileSize,
+          mtimeMs,
+          scanVersion: TRANSCRIPT_SCAN_VERSION,
+          scan,
+        });
       }
     }
     transcriptDelegatedPrompts.set(filePath, scan.delegatedPrompts);

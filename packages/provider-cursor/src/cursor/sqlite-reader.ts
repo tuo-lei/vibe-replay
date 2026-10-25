@@ -114,6 +114,7 @@ interface GlobalStateDiscoveryCache {
   decodedPathsHash: string;
   sessions: SessionInfo[];
   sessionIds: string[];
+  composerMetadata: Record<string, CursorComposerMetadata>;
 }
 
 export interface CursorLiveDiagnostics {
@@ -160,7 +161,7 @@ function closeCachedSqlJsDb(): void {
 
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v8";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v9";
 
 interface CursorComposerHeader {
   composerId: string;
@@ -1631,11 +1632,18 @@ export async function discoverSqliteOnlySessions(
   return sessions;
 }
 
+export interface CursorComposerMetadata {
+  title?: string;
+  model?: string;
+}
+
 export interface GlobalStateDiscoveryResult {
   sessions: SessionInfo[];
   sessionIds: Set<string>;
   /** All replayable global-state sessions, including IDs already found in transcripts. */
   allSessions: SessionInfo[];
+  /** Chat name and selected model of every composer with a conversation, replayable or not. */
+  composerMetadata: Map<string, CursorComposerMetadata>;
 }
 
 export function countComposerConversationHeaders(composer: Record<string, any>): number {
@@ -1798,8 +1806,9 @@ export async function discoverGlobalStateOnlySessions(
   explicitPath?: string,
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
+  const composerMetadata = new Map<string, CursorComposerMetadata>();
   const globalStateDb = await openGlobalStateDb(explicitPath);
-  if (!globalStateDb) return { sessions: [], sessionIds, allSessions: [] };
+  if (!globalStateDb) return { sessions: [], sessionIds, allSessions: [], composerMetadata };
   const { dbPath } = globalStateDb;
   const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
   const cacheKey = `${GLOBAL_STATE_DISCOVERY_CACHE_PREFIX}-${decodedPathsHash}`;
@@ -1818,6 +1827,7 @@ export async function discoverGlobalStateOnlySessions(
       sessions: finalizeGlobalStateDiscovery(cached.data.sessions, knownSessionIds),
       sessionIds: cachedIds,
       allSessions: cached.data.sessions,
+      composerMetadata: new Map(Object.entries(cached.data.composerMetadata ?? {})),
     };
   }
 
@@ -1834,6 +1844,7 @@ export async function discoverGlobalStateOnlySessions(
             "json_extract(kv.value,'$.lastUpdatedAt') AS lastUpdatedAt,",
             "json_extract(kv.value,'$.createdAt') AS createdAt,",
             "json_extract(kv.value,'$.name') AS title,",
+            "json_extract(kv.value,'$.modelConfig.modelName') AS modelName,",
             "CASE WHEN json_type(kv.value,'$.latestConversationSummary.summary.summary') = 'text'",
             "AND length(trim(json_extract(kv.value,'$.latestConversationSummary.summary.summary'))) > 0",
             "THEN 1 ELSE 0 END AS hasLatestConversationSummary,",
@@ -1846,7 +1857,7 @@ export async function discoverGlobalStateOnlySessions(
           ].join(" ")
         : `SELECT key, value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")}`;
     const rows = await queryGlobalStateRows(globalStateDb, composerDiscoverySql);
-    if (rows.length === 0) return { sessions: [], sessionIds, allSessions: [] };
+    if (rows.length === 0) return { sessions: [], sessionIds, allSessions: [], composerMetadata };
 
     for (const row of rows) {
       const key = valueToString(row.key);
@@ -1863,6 +1874,17 @@ export async function discoverGlobalStateOnlySessions(
       // Skip sessions without conversation headers: they cannot be replayed.
       if (headerCount === 0) continue;
 
+      const title = meaningfulCursorTitle(composer?.name ?? row.title);
+      const model = normalizeCursorModelName(
+        composer ? composer.modelConfig?.modelName : row.modelName,
+      );
+      if (title || model) {
+        composerMetadata.set(sessionId, {
+          ...(title ? { title } : {}),
+          ...(model ? { model } : {}),
+        });
+      }
+
       const hasReplayableBubble = composer
         ? await hasReplayableGlobalStateComposer(globalStateDb, sessionId, composer)
         : toNonNegativeInt(row.hasReplayableBubble) > 0;
@@ -1875,7 +1897,6 @@ export async function discoverGlobalStateOnlySessions(
         toIsoTimestamp(composer?.lastUpdatedAt ?? row.lastUpdatedAt) ||
         toIsoTimestamp(composer?.createdAt ?? row.createdAt) ||
         new Date().toISOString();
-      const title = meaningfulCursorTitle(composer?.name ?? row.title);
       const firstPrompt = title || "(cursor global state session)";
       const projectPath = rawComposer
         ? inferProjectFromComposerDataFast(rawComposer, decodedWorkspacePaths)
@@ -1886,6 +1907,7 @@ export async function discoverGlobalStateOnlySessions(
         sessionId,
         slug: sessionId.slice(0, 8),
         title,
+        ...(model ? { model } : {}),
         project: projectPath ? shortenPath(projectPath) : "(globalStorage)",
         cwd: projectPath,
         version: "",
@@ -1920,12 +1942,14 @@ export async function discoverGlobalStateOnlySessions(
       decodedPathsHash,
       sessions: discoveredSessions,
       sessionIds: [...sessionIds],
+      composerMetadata: Object.fromEntries(composerMetadata),
     });
 
   return {
     sessions: finalizeGlobalStateDiscovery(discoveredSessions, knownSessionIds),
     sessionIds,
     allSessions: discoveredSessions,
+    composerMetadata,
   };
 }
 

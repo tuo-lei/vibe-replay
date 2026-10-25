@@ -82,7 +82,7 @@ import { localDayKey, shortenPath } from "./utils.js";
 // them for the 10-character English-oriented threshold.
 // v40: Codex host-trigger classification, nested exec tools, and per-model usage.
 // v41: parse compressed Codex rollouts previously missing from usage scans.
-export const SCANNER_VERSION = 41;
+export const SCANNER_VERSION = 42;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -816,6 +816,7 @@ interface ScanLine extends ScanLinePrLink {
   subtype?: string;
   durationMs?: number;
   customTitle?: string;
+  aiTitle?: string;
   title?: string;
   isApiErrorMessage?: boolean;
   isMeta?: boolean;
@@ -941,6 +942,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let endTime: string | undefined;
   let model: string | undefined;
   let title = input.title;
+  let aiTitle: string | undefined;
   let firstPrompt = input.firstPrompt;
   const gitBranches: string[] = [];
   let entrypoint: string | undefined;
@@ -1024,6 +1026,10 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       if (obj.type === "custom-title") {
         title = obj.customTitle || obj.title || title;
+        continue;
+      }
+      if (obj.type === "ai-title") {
+        if (obj.aiTitle) aiTitle = obj.aiTitle;
         continue;
       }
 
@@ -1348,7 +1354,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
-    title,
+    title: title || aiTitle,
     firstPrompt,
     startTime,
     endTime: normalizedEndTime,

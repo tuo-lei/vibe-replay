@@ -71,6 +71,28 @@ describe("cursor transcript scan cache", () => {
     expect(second.fresh.size).toBe(1);
   });
 
+  it("rescans entries written before the scan was versioned", async () => {
+    const file = await transcript([user("Fix the parser"), assistant]);
+    const first = emptyCache();
+    await __testables.extractSessionInfo(file.path, file.size, 1000, "/repo", [], first);
+    const legacy = reopen(first);
+    for (const entry of Object.values(legacy.previous)) {
+      delete entry.scanVersion;
+      entry.scan.model = "inherit";
+    }
+
+    const info = await __testables.extractSessionInfo(
+      file.path,
+      file.size,
+      1000,
+      "/repo",
+      [],
+      legacy,
+    );
+    expect(legacy.scannedAny).toBe(true);
+    expect(info?.model).toBeUndefined();
+  });
+
   it("rescans when the size or mtime changes", async () => {
     const file = await transcript([user("First prompt"), assistant]);
     const first = emptyCache();

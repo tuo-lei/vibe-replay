@@ -27,5 +27,9 @@ line by line cost about 3s per call.
   when something was rescanned or pruned, and never
   inside `withReadOnlySqlite(true, …)` (`isSqliteReadOnlyScope`), which is the shared
   zero-write contract despite its name.
+- **Two layouts.** The default sessions root holds one directory per project, but a custom
+  session dir (`--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, `sessionDir` setting) holds
+  `*.jsonl` transcripts directly. Discovery accepts both; flat files get `projectDir: ""`
+  and take their project from the transcript header `cwd`.
 - Cold scans run with bounded concurrency (8) and keep directory order, so output order and
   tie-breaking match a serial scan.

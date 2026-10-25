@@ -229,6 +229,32 @@ describe("scanSession", () => {
     },
   );
 
+  it("falls back to the Claude ai-title when the session was never renamed", async () => {
+    const path = join(tmpDir, "ai-title-session.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: { role: "user", id: "msg-ai-1", content: "Refactor the auth middleware" },
+        }),
+        makeLine({ type: "ai-title", aiTitle: "Refactor auth middleware" }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "ai-title-session",
+      provider: "claude-code",
+      project: "~/Code/my-project",
+      slug: "ai-title",
+      filePaths: [path],
+    });
+
+    expect(result.title).toBe("Refactor auth middleware");
+  });
+
   it("extracts session metadata correctly", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",

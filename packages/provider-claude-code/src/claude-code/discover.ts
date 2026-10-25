@@ -92,7 +92,7 @@ function decodeProjectDir(encoded: string): string {
 // the backing string alive while any substring view (line) is reachable, so the
 // old readFile + split approach retained ~2× file size per session across a
 // discovery sweep. Streaming caps peak memory at a single line plus a small
-// tail ring-buffer used for end-of-session title / timestamp fallbacks.
+// tail ring-buffer used for the end-of-session timestamp fallback.
 const METADATA_SCAN_LINES = 30;
 const PROMPT_SCAN_LINES = 150;
 const TAIL_BUFFER_LINES = 50;
@@ -117,7 +117,9 @@ export async function extractSessionInfo(
   // file mtime — keeping all four providers in sync.
   let timestamp = "";
   const prompts: string[] = [];
-  let title: string | undefined;
+  // Both record types are rewritten during a session; the latest of each wins.
+  let customTitle: string | undefined;
+  let aiTitle: string | undefined;
 
   let lineCount = 0;
   let promptCount = 0;
@@ -132,10 +134,9 @@ export async function extractSessionInfo(
   let sawParseableRecord = false;
   let readFailed = false;
 
-  // Ring buffer of the most recent non-empty lines. Used in two reverse-scan
-  // fallbacks after streaming completes: `custom-title` records written late
-  // in the session, and the last record's outer `timestamp` (the session's
-  // last activity time). Both rely on JSON.parse to read top-level fields
+  // Ring buffer of the most recent non-empty lines, reverse-scanned after
+  // streaming completes for the last record's outer `timestamp` (the session's
+  // last activity time). It relies on JSON.parse to read top-level fields
   // safely — a regex on the whole line would risk capturing nested timestamp
   // fields (e.g. inside user-pasted JSON content).
   const tail: string[] = [];
@@ -187,6 +188,16 @@ export async function extractSessionInfo(
         if (d) durationMsEst += Number(d[1]);
       }
       if (!hasPR && line.includes('"pr-link"')) hasPR = true;
+      if (line.includes('"custom-title"') || line.includes('"ai-title"')) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj?.type === "custom-title" && (obj.customTitle || obj.title)) {
+            customTitle = obj.customTitle || obj.title;
+          } else if (obj?.type === "ai-title" && obj.aiTitle) {
+            aiTitle = obj.aiTitle;
+          }
+        } catch {}
+      }
 
       // --- JSON-parse only the first PROMPT_SCAN_LINES lines ---
       // Metadata typically lands in the first ~30 lines; initial prompts within 150.
@@ -202,10 +213,6 @@ export async function extractSessionInfo(
             if (!cwd && obj.cwd) cwd = obj.cwd;
             if (!version && obj.version) version = obj.version;
             if (!gitBranch && obj.gitBranch) gitBranch = obj.gitBranch;
-
-            if (obj.type === "custom-title" && (obj.customTitle || obj.title)) {
-              title = obj.customTitle || obj.title;
-            }
           }
 
           // Collect meaningful user prompts (skip boilerplate).
@@ -249,21 +256,8 @@ export async function extractSessionInfo(
   const unreadable = readFailed || !sawParseableRecord;
   if (!includeUnreplayable && (unreadable || prompts.length === 0)) return null;
 
-  // Fallback title: `custom-title` is often written at session end, beyond the
-  // front-loaded metadata scan. Reverse-scan the tail ring buffer.
-  if (!title) {
-    for (let i = tail.length - 1; i >= 0; i--) {
-      const line = tail[i];
-      if (!line.includes("custom-title")) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === "custom-title" && (obj.customTitle || obj.title)) {
-          title = obj.customTitle || obj.title;
-          break;
-        }
-      } catch {}
-    }
-  }
+  // Same precedence as the parser: the user's rename wins over Claude's title.
+  const title = customTitle || aiTitle;
 
   // Last activity timestamp: reverse-scan the tail buffer for the most recent
   // record carrying a top-level `timestamp`. JSON.parse is the right primitive
