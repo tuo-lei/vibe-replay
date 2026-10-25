@@ -3,12 +3,13 @@ import { createReadStream } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { readCodexRolloutLines, resolveCodexRolloutPath } from "./rollout.js";
+import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import { isSqliteReadOnlyScope, readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
 import {
   CODEX_CONTEXT_TAGS,
   codexStripTwoPass,
@@ -64,6 +65,16 @@ function rolloutSignature(fileStat: BigIntStats): string {
   return [fileStat.dev, fileStat.ino, fileStat.size, fileStat.mtimeNs, fileStat.ctimeNs].join(":");
 }
 
+// Bump whenever extractCodexSessionInfo changes what it derives from a rollout.
+const SCAN_CACHE_KEY = "codex-rollout-scan-v1";
+
+interface RolloutScanEntry {
+  signature: string;
+  info: SessionInfo;
+}
+
+type RolloutScanCache = Record<string, RolloutScanEntry>;
+
 export async function discoverCodexSessions(
   codexHome = getCodexHome(),
   includeStateDb = true,
@@ -71,21 +82,32 @@ export async function discoverCodexSessions(
 ): Promise<SessionInfo[]> {
   const byId = new Map<string, SessionInfo>();
   const stateMetadata = new Map<string, CodexSessionMetadata>();
-  // State rows and the directory walk often refer to the same rollout. Reuse
-  // only a successful complete read whose source stayed unchanged, and only
-  // within this discovery. Every later discovery still reads current content.
-  const reads = new Map<string, { signature: string; info: SessionInfo }>();
+  // Rollouts are append-only and large (staged SSH homes hold hundreds of MB),
+  // so a complete read is persisted and reused while the file's identity, size
+  // and timestamps are unchanged. Callers mutate the returned info (git repo,
+  // titles), so cached entries are always cloned in both directions.
+  const persisted = (await readFileCache<RolloutScanCache>(SCAN_CACHE_KEY))?.data;
+  const cachedReads: RolloutScanCache =
+    persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
+  const reads = new Map<string, RolloutScanEntry>();
+  let scannedAny = false;
   const readRollout = async (filePath: string): Promise<RolloutRead> => {
     filePath = await resolveCodexRolloutPath(filePath).catch(() => filePath);
     const fileStat = await stat(filePath, { bigint: true }).catch(() => null);
     if (!fileStat?.isFile()) return { fileStat, info: null };
     const signature = rolloutSignature(fileStat);
-    const cached = reads.get(filePath);
-    if (cached?.signature === signature) return { fileStat, info: cached.info };
+    const cached = reads.get(filePath) || cachedReads[filePath];
+    if (cached?.signature === signature && cached.info) {
+      reads.set(filePath, cached);
+      return { fileStat, info: structuredClone(cached.info) };
+    }
+    scannedAny = true;
     const info = await extractCodexSessionInfo(filePath, Number(fileStat.size));
     if (info && info.transcriptStatus !== "unreadable") {
       const after = await stat(filePath, { bigint: true }).catch(() => null);
-      if (after && rolloutSignature(after) === signature) reads.set(filePath, { signature, info });
+      if (after && rolloutSignature(after) === signature) {
+        reads.set(filePath, { signature, info: structuredClone(info) });
+      }
     }
     return { fileStat, info };
   };
@@ -119,7 +141,64 @@ export async function discoverCodexSessions(
     }
   }
 
+  if (!isSqliteReadOnlyScope()) {
+    await persistRolloutScans(resolve(codexHome), reads, scannedAny);
+  }
+
   return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+let rolloutScanWrite: Promise<void> = Promise.resolve();
+
+/**
+ * Local and staged SSH Codex homes share one cache and are discovered
+ * concurrently, so the read-merge-write is serialized against the cache as it
+ * is now. Entries under `root` that this run did not see belong to deleted
+ * rollouts and are dropped; other entries are kept while their file exists. A
+ * warm run that rescanned and pruned nothing writes nothing.
+ */
+function persistRolloutScans(
+  root: string,
+  fresh: Map<string, RolloutScanEntry>,
+  scannedAny: boolean,
+): Promise<void> {
+  const run = rolloutScanWrite.then(() => mergeRolloutScans(root, fresh, scannedAny));
+  rolloutScanWrite = run.catch(() => undefined);
+  return run.catch(() => undefined);
+}
+
+async function mergeRolloutScans(
+  root: string,
+  fresh: Map<string, RolloutScanEntry>,
+  scannedAny: boolean,
+): Promise<void> {
+  const persisted = (await readFileCache<RolloutScanCache>(SCAN_CACHE_KEY))?.data;
+  const previous =
+    persisted && typeof persisted === "object" && !Array.isArray(persisted) ? persisted : {};
+  const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  const foreign: Array<[string, RolloutScanEntry]> = [];
+  let pruned = false;
+  for (const [path, entry] of Object.entries(previous)) {
+    if (fresh.has(path)) continue;
+    if (path.startsWith(rootPrefix)) pruned = true;
+    else foreign.push([path, entry]);
+  }
+  if (!scannedAny && !pruned) return;
+
+  const next: RolloutScanCache = {};
+  const alive = await Promise.all(
+    foreign.map(([path]) =>
+      stat(path).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
+  for (const [index, [path, entry]] of foreign.entries()) {
+    if (alive[index]) next[path] = entry;
+  }
+  for (const [path, entry] of fresh) next[path] = entry;
+  await writeFileCache<RolloutScanCache>(SCAN_CACHE_KEY, next);
 }
 
 /** Read the append-only rename index; the newest valid record for an id wins. */

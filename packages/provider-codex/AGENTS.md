@@ -4,6 +4,14 @@
   path. Use `rollout.ts` for read-only streaming decompression and plain-first
   sibling resolution. Never materialize or modify the Codex source files.
 
+- Discovery persists each complete rollout read in `codex-rollout-scan-v1`,
+  keyed by resolved path and invalidated by dev/inode/size/mtime/ctime. Only
+  content-derived `SessionInfo` is cached; git repo, `session_index` titles and
+  state-DB metadata are applied live on a clone. Unreadable or racing reads are
+  never cached, nothing is written inside `withReadOnlySqlite(true, …)`, and
+  local plus staged SSH homes share the key with a serialized merge (same rules
+  as `packages/provider-pi/AGENTS.md`). Bump the key when extraction output changes.
+
 - Classify host-injected user records before prompt discovery or parsing.
   Heartbeats and native `Automation:`/`Automation ID:` headers are automation
   triggers, not human interventions. Preserve them as replay context, and keep
