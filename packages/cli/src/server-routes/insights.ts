@@ -209,9 +209,14 @@ export function registerInsightsRoutes(app: Hono, deps: InsightsRouteDeps): void
 
   // --- Local insights store (durable, survives source deletion) ---
 
+  // Detail events are most of the store's bytes and no client reads them here;
+  // per-session events come from /api/usage/events.
   app.get("/api/insights/local", async (c) => {
     const store = await readInsightsStore();
-    return c.json(store);
+    return c.json({
+      ...store,
+      sessions: store.sessions.map((session) => ({ ...session, usageEvents: undefined })),
+    });
   });
 
   app.get("/api/insights/local/stats", async (c) => {

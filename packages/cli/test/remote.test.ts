@@ -3,12 +3,14 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   symlink,
   unlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -798,6 +800,65 @@ esac
       firstPrompt: "Inspect the second remote project",
     });
   }, 15_000);
+});
+
+describe("remote cache housekeeping", () => {
+  const target = {
+    id: "remote-dev",
+    label: "Remote dev",
+    sshHost: "host-a",
+    providers: ["codex"],
+    connectTimeoutMs: 10_000,
+  };
+  const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+
+  async function cacheDir(base: string, name: string, idle: boolean): Promise<string> {
+    const dir = join(base, name);
+    await mkdir(join(dir, ".codex"), { recursive: true });
+    await writeFile(join(dir, ".manifest.json"), "{}");
+    if (idle) {
+      await utimes(join(dir, ".manifest.json"), old, old);
+      await utimes(dir, old, old);
+    }
+    return dir;
+  }
+
+  it("removes only idle, unlocked cache dirs that no configured target uses", async () => {
+    const base = await mkdtemp(join(tmpdir(), "vibe-remote-prune-"));
+    try {
+      const active = __testables.cacheRootForTarget(target, base);
+      await cacheDir(base, active.slice(base.length + 1), true);
+      const orphan = await cacheDir(base, "a".repeat(20), true);
+      const recent = await cacheDir(base, "b".repeat(20), false);
+      const locked = await cacheDir(base, "c".repeat(20), true);
+      await writeFile(`${locked}.lock`, "123:token\n");
+      const unrelated = await cacheDir(base, "not-a-cache-dir", true);
+
+      await __testables.pruneOrphanRemoteCaches([target], base);
+
+      expect(existsSync(orphan)).toBe(false);
+      expect([active, recent, locked, unrelated].map((dir) => existsSync(dir))).toEqual([
+        true,
+        true,
+        true,
+        true,
+      ]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("clears interrupted staging dirs but keeps transaction backups", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-remote-staging-"));
+    try {
+      await mkdir(join(root, ".sync-abc123", ".codex"), { recursive: true });
+      await mkdir(join(root, ".transaction-def456"), { recursive: true });
+      await __testables.removeLeftoverStagingDirs(root);
+      expect((await readdir(root)).sort()).toEqual([".transaction-def456"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("remote placeholder sessions", () => {
