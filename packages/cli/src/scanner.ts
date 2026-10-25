@@ -816,6 +816,7 @@ interface ScanLine extends ScanLinePrLink {
   subtype?: string;
   durationMs?: number;
   customTitle?: string;
+  aiTitle?: string;
   title?: string;
   isApiErrorMessage?: boolean;
   isMeta?: boolean;
