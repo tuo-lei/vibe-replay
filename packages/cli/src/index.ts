@@ -1235,7 +1235,7 @@ workflowCommand(
       provider: normalizeCommandProviderOption(opts.provider, command),
     });
     if (opts.stdout) {
-      const text = await exportText(replay, publicationDir, opts.format!);
+      const text = await exportText(replay, publicationDir, opts.format!, { pretty: false });
       const findings = scanForSecrets(text);
       if (findings.length)
         process.stderr.write(`Review output: ${findings.length} potential secret(s) detected.\n`);

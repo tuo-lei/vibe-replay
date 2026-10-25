@@ -136,7 +136,7 @@ function tokenLogRecord(
 }
 
 /** Build an OTLP/JSON ExportLogsServiceRequest from evidence in a saved replay. */
-export function generateOtlpJson(replay: ReplaySession): string {
+export function generateOtlpJson(replay: ReplaySession, pretty = true): string {
   const toolScenes = (
     scenes: readonly Scene[],
     parentAgentId?: string,
@@ -194,6 +194,6 @@ export function generateOtlpJson(replay: ReplaySession): string {
       ],
     },
     null,
-    2,
+    pretty ? 2 : undefined,
   );
 }

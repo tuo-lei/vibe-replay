@@ -1123,6 +1123,7 @@ export async function exportText(
   replay: ReplaySession,
   publicationDir: string | undefined,
   format: string,
+  options: { pretty?: boolean } = {},
 ): Promise<string> {
   const shareable = sessionForExternalOutput(replay);
   if (!["markdown", "json", "html", "otlp-json"].includes(format))
@@ -1136,7 +1137,7 @@ export async function exportText(
       ? savedCloud.url
       : savedGist?.viewerUrl;
   if (format === "markdown") return generateGitHubMarkdown(shareable, { replayUrl });
-  if (format === "otlp-json") return generateOtlpJson(shareable);
+  if (format === "otlp-json") return generateOtlpJson(shareable, options.pretty);
   return JSON.stringify(shareable);
 }
 
