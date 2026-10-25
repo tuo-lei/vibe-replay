@@ -250,6 +250,14 @@ async function parseCursorSessionWithDependencies(
       }
     }
   }
+  // Discovery reads the chat name and selected model from Cursor's composer
+  // metadata even when its bubbles are not replayable; transcripts carry neither.
+  if (sessionInfo?.title && !isCursorPlaceholderTitle(sessionInfo.title)) {
+    jsonlResult.title = sessionInfo.title;
+  }
+  if (!jsonlResult.model && sessionInfo?.model) {
+    jsonlResult.model = sessionInfo.model;
+  }
   await attachCursorSubagents(jsonlResult, transcriptPaths, deps);
   return jsonlResult;
 }

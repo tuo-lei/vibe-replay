@@ -109,6 +109,7 @@ async function discoverCursorSessionsOnce(
         sessions: error.sessions,
         allSessions: error.sessions,
         sessionIds: new Set(error.sessions.map((session) => session.sessionId)),
+        composerMetadata: new Map(),
       };
     });
     sessions.push(...globalState.sessions);
@@ -127,6 +128,11 @@ async function discoverCursorSessionsOnce(
           session.compactionCount || 0,
           globalStateSession.compactionCount,
         );
+      }
+      const composer = globalState.composerMetadata.get(session.sessionId);
+      if (composer) {
+        session.title ||= composer.title;
+        session.model ||= composer.model;
       }
     }
 
