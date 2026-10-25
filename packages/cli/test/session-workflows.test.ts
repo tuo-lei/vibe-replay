@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   diagnoseSession,
   exportSession,
+  exportText,
   inspectSession,
   loadCliSession,
   resolveSessionReference,
@@ -126,6 +127,17 @@ describe("session references and evidence", () => {
 });
 
 describe("export and sharing", () => {
+  it("keeps OTLP stdout compact while file exports remain pretty", async () => {
+    const compact = await exportText(replay, undefined, "otlp-json", { pretty: false });
+    const dir = await root();
+    const fileResult = await exportSession(replay, dir, "otlp-json");
+    const pretty = await readFile(fileResult.path, "utf-8");
+
+    expect(JSON.parse(compact)).toEqual(JSON.parse(pretty));
+    expect(compact).not.toContain("\n");
+    expect(pretty.trim()).toContain("\n");
+  });
+
   it("exports Markdown without images or a viewer build, strips SSH repository identity, and leaves the original alone", async () => {
     const dir = await root();
     const remote = {

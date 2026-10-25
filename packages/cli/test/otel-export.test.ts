@@ -160,6 +160,15 @@ describe("OTLP JSON export", () => {
     expect(text).toContain('"gen_ai.response.model"');
   });
 
+  it("supports compact OTLP JSON for stdout pipelines", () => {
+    const pretty = generateOtlpJson(replay);
+    const compact = generateOtlpJson(replay, false);
+
+    expect(JSON.parse(compact)).toEqual(JSON.parse(pretty));
+    expect(compact.length).toBeLessThan(pretty.length);
+    expect(compact).not.toContain("\n");
+  });
+
   it("exports cache-inclusive GenAI input tokens and preserves uncached input", () => {
     const payload = JSON.parse(generateOtlpJson(replay));
     const tokenRecord = payload.resourceLogs[0].scopeLogs[0].logRecords[3];

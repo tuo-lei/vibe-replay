@@ -231,7 +231,8 @@ selects one exact session; `--refresh` bypasses the 30-second discovery cache.
 The `otlp-json` format exports a privacy-bounded historical view as OTLP logs;
 token usage timestamps are included only when recorded by the provider, and
 timestamp-derived tool durations are marked as estimated. It does not invent
-trace relationships or include prompts and tool payloads.
+trace relationships or include prompts and tool payloads. `--stdout` emits compact
+JSON for direct piping; file exports remain pretty-printed for inspection.
 Session pages include `pagination.total`, `returned`, `truncated`, `nextOffset`, and
 `revision`. Keep the same filters and pass `--offset <nextOffset> --revision <hash>`
 to continue. Changed matching membership or order requires restarting the search; live metric
