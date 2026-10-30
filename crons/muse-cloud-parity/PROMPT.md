@@ -137,7 +137,11 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    `window.__VIBE_REPLAY_DATA__` JSON parses and matches the generated
    `replay.json` with no unescaped `</script>` (ignore
    `meta.generator.generatedAt`, which legitimately differs between the
-   two separate export invocations). When the run changed the
+   two separate export invocations). Extract the payload from the
+   `<script id="vibe-replay-data">` tag specifically: the viewer bundle
+   also contains the `window.__VIBE_REPLAY_DATA__` string (in its
+   download-HTML code), so taking the first occurrence in the file parses
+   bundle code, not the embedded replay data. When the run changed the
    Muse parser or any replay-affecting code, validate both required replay
    sizes: a ~30-scene and a ~500-scene representative session, not just the
    single most recent one. A green unit suite alone does not
