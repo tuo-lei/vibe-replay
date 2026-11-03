@@ -121,10 +121,17 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    prominently.
 6. **Parity end-to-end.** Take the most recent non-trivial Muse session
    (skip sessions with activity in the last ~60s — this run's own session
-   is always the newest and its file is still being written to) and: run
+   is always the newest and its file is still being written to), then run
    the CLI scan so it shows up in session lists, generate a replay HTML
    from it, and verify the HTML is well-formed, non-empty, and its scene
-   inventory matches the parsed blocks — scenes are per-block, not
+   inventory matches the parsed blocks. Non-trivial means more than a
+   single-prompt/single-tool stub: concurrent short runs can flood the
+   newest slots with 1-prompt stubs, and a 3-scene replay of one proves
+   little — in that case use the most recent session with multiple user
+   turns as the E2E subject (a stub spot-check on top is cheap and
+   welcome, but never the whole check). If the chosen E2E subject has
+   no `tool_use` blocks, also replay a recent session that has one, so
+   `tool-call` scene generation is exercised. Scenes are per-block, not
    per-turn: `user-prompt` scenes == user turns, `tool-call` scenes ==
    `tool_use` blocks, `thinking` scenes == non-empty thinking blocks,
    `text-response` scenes == non-empty assistant text blocks
