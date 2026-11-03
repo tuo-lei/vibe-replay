@@ -129,7 +129,9 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    newest slots with 1-prompt stubs, and a 3-scene replay of one proves
    little — in that case use the most recent session with multiple user
    turns as the E2E subject (a stub spot-check on top is cheap and
-   welcome, but never the whole check). Scenes are per-block, not
+   welcome, but never the whole check). If the chosen E2E subject has
+   no `tool_use` blocks, also replay a recent session that has one, so
+   `tool-call` scene generation is exercised. Scenes are per-block, not
    per-turn: `user-prompt` scenes == user turns, `tool-call` scenes ==
    `tool_use` blocks, `thinking` scenes == non-empty thinking blocks,
    `text-response` scenes == non-empty assistant text blocks
