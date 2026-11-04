@@ -130,3 +130,51 @@ it("paginates stable snapshot identities, scopes duplicate IDs and rejects chang
   ).rejects.toMatchObject({ code: "revision-mismatch" });
   expect((await querySavedReplays({}, join(base, "absent"))).pagination.total).toBe(0);
 });
+
+it("keeps malformed optional metadata from aborting a saved-content search", async () => {
+  const base = await root();
+  const dir = await save(base, "malformed", "malformed-title");
+  const path = join(dir, "replay.json");
+  const data = JSON.parse(await readFile(path, "utf-8"));
+  data.meta.title = { unexpected: true };
+  data.meta.cwd = 42;
+  data.meta.project = { unexpected: true };
+  data.meta.startTime = 42;
+  await writeFile(path, JSON.stringify(data));
+  await save(base, "healthy", "healthy-id");
+  const result = await querySavedReplays({ query: "original" }, base);
+  expect(result.pagination.total).toBe(2);
+  expect(
+    result.replays.find((item) => item.sessionId === "malformed-title")?.title,
+  ).toBeUndefined();
+  expect(result.replays.find((item) => item.sessionId === "healthy-id")?.title).toBe(
+    "Saved replay",
+  );
+});
+
+it("binds list order to paths when two local snapshots share a session ID", async () => {
+  const base = await root();
+  const firstDir = await save(base, "first", "same-id");
+  const secondDir = await save(base, "second", "same-id");
+  const setTime = async (dir: string, time: string) => {
+    const path = join(dir, "replay.json");
+    const value = JSON.parse(await readFile(path, "utf-8"));
+    value.meta.startTime = time;
+    await writeFile(path, JSON.stringify(value));
+  };
+  await setTime(firstDir, "2026-11-02T00:00:00Z");
+  await setTime(secondDir, "2026-11-03T00:00:00Z");
+  const before = await querySavedReplays({}, base);
+  expect(before.replays.map((item) => item.replayPath)).toEqual([
+    join(secondDir, "replay.json"),
+    join(firstDir, "replay.json"),
+  ]);
+  await setTime(firstDir, "2026-11-03T00:00:00Z");
+  await setTime(secondDir, "2026-11-02T00:00:00Z");
+  const after = await querySavedReplays({}, base);
+  expect(after.replays.map((item) => item.replayPath)).toEqual([
+    join(firstDir, "replay.json"),
+    join(secondDir, "replay.json"),
+  ]);
+  expect(after.pagination.revision).not.toBe(before.pagination.revision);
+});

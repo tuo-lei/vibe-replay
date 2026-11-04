@@ -294,7 +294,9 @@ scenes. To read a long scene losslessly, use `--scene <index> --field result
 page is capped at 10,000 characters. JSON `content.value` is the exact page. `diagnose` separates model API errors, tool failures,
 compactions, and matching text evidence; it does not infer root causes from an error
 string alone. Both inspect and diagnose include `dataQualityNotes` and
-`toolResultCoverage` (`total`, `available`, `unavailable`, `complete`). Containers
+`toolResultCoverage` (`total`, `available`, `unavailable`, `complete`, plus
+`unknown` when legacy empty outputs lack a result-presence marker). Explicit empty
+results with `hasResult: true` remain available. Containers
 are excluded; a result explicitly marked unavailable stays unknown. Zero observed
 tool failures does not establish success for calls with missing results.
 Each diagnostic signal has its own `pagination` totals and continuation.

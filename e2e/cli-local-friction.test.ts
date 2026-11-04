@@ -95,6 +95,22 @@ it("lists saved edits offline, follows their exact revision, and reports unavail
       uploaded: false,
       provenance: { origin: "snapshot" },
     });
+    const hiddenDamaged = join(home, ".vibe-replay", "older-damaged");
+    await mkdir(hiddenDamaged);
+    await writeFile(
+      join(hiddenDamaged, "replay.json"),
+      JSON.stringify({
+        meta: { sessionId: "older-damaged", provider: "cursor", startTime: "2025-01-01T00:00:00Z" },
+        scenes: [{ type: "user-prompt", content: "Hidden original" }],
+      }),
+    );
+    await writeFile(join(hiddenDamaged, "overlays.json"), "{");
+    const partialText = await run(["replays", "--limit", "1"], home);
+    expect(partialText.code).toBe(0);
+    expect(partialText.stdout).toContain("Some saved snapshots or edits could not be read");
+    expect(partialText.stdout).toContain("use --json for details");
+    expect(partialText.stdout).not.toContain("Hidden original");
+    await rm(hiddenDamaged, { recursive: true });
     const before = (await readdir(join(home, ".vibe-replay"))).sort();
     const first = await run(
       ["replays", "--provider", "cursor", "--limit", "1", "--json"],

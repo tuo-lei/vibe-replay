@@ -87,7 +87,7 @@ If `--json` returns an empty array, verify `vibe-replay` is installed and access
 npx vibe-replay --version
 ```
 
-Then broaden or drop the query, retry with `--any`, filter by project/provider, or ask the user for a session path directly. If the source history was removed, use `vibe-replay replays --provider <provider> --json` to find edited saved snapshots independently of source discovery; follow its `replayPath` and `revision`.
+Then broaden or drop the query, retry with `--any`, filter by project/provider, or ask the user for a session path directly. If the source history was removed, use `npx vibe-replay replays --provider <provider> --json` to find edited saved snapshots independently of source discovery; follow its `replayPath` and `revision`.
 
 For search results, return a short ranked list with provider, timestamp, project, title or first prompt preview, slug/session id, why it matched, and whether deeper scan/replay is recommended. Do not dump full raw prompts unless the user asks.
 

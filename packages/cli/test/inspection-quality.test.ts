@@ -70,3 +70,31 @@ it("does not create a missing-result warning for complete or tool-free sessions"
     complete: true,
   });
 });
+
+it("keeps unmarked legacy empty output unknown while honoring explicit empty results", () => {
+  const replay = {
+    meta: {
+      sessionId: "legacy",
+      provider: "claude-code",
+      stats: { sceneCount: 3, toolCalls: 3, userPrompts: 0, thinkingBlocks: 0 },
+    },
+    scenes: [
+      { type: "tool-call", toolName: "Bash", input: {}, result: "" },
+      { type: "tool-call", toolName: "Bash", input: {}, result: "", hasResult: true },
+      { type: "tool-call", toolName: "Bash", input: {}, result: "Legacy recorded output" },
+    ],
+  } as ReplaySession;
+  for (const data of [inspectSession(replay), diagnoseSession(replay)]) {
+    expect(data.toolResultCoverage).toEqual({
+      total: 3,
+      available: 2,
+      unavailable: 0,
+      unknown: 1,
+      complete: false,
+    });
+    expect(data.dataQualityNotes).toEqual([
+      "1 legacy tool call with empty output lacks a result-presence marker; result availability is unknown.",
+    ]);
+  }
+  expect(diagnoseSession(replay).toolErrorCount).toBe(0);
+});

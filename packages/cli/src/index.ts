@@ -1095,6 +1095,10 @@ program
       console.log(
         `${result.issues.length} unreadable saved replay(s); use --json for their paths.`,
       );
+    if (result.partial)
+      console.log(
+        "Some saved snapshots or edits could not be read, including entries outside this page; use --json for details.",
+      );
     if (!result.replays.length)
       console.log("No matching saved snapshots. Use sessions to find source histories.");
   });
@@ -1184,7 +1188,7 @@ function printWorkflowResult(payload: unknown, json = false): void {
   if ("prompts" in data || "scenes" in data) {
     if (data.toolResultCoverage && !data.toolResultCoverage.complete)
       console.log(
-        `Tool results available: ${data.toolResultCoverage.available}/${data.toolResultCoverage.total}; ${data.toolResultCoverage.unavailable} unavailable.`,
+        `Tool results available: ${data.toolResultCoverage.available}/${data.toolResultCoverage.total}; ${data.toolResultCoverage.unavailable} unavailable${data.toolResultCoverage.unknown ? `; ${data.toolResultCoverage.unknown} unknown legacy outputs` : ""}.`,
       );
     for (const note of data.dataQualityNotes || []) console.log(`Data quality: ${note}`);
   }

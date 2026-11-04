@@ -975,21 +975,31 @@ function inspectionQuality(replay: ReplaySession) {
   const tools = replay.scenes.filter(
     (scene) => scene.type === "tool-call" && !scene.isToolContainer,
   );
-  const available = tools.filter(
-    (scene) => scene.type === "tool-call" && (scene.hasResult ?? scene.result !== undefined),
+  const unknown = tools.filter(
+    (scene) => scene.type === "tool-call" && scene.hasResult === undefined && scene.result === "",
   ).length;
-  const unavailable = tools.length - available;
+  const available = tools.filter(
+    (scene) =>
+      scene.type === "tool-call" &&
+      (scene.hasResult ?? (scene.result !== undefined && scene.result !== "")),
+  ).length;
+  const unavailable = tools.length - available - unknown;
   const notes = [...(replay.meta.dataSourceInfo?.notes || [])];
   if (unavailable)
     notes.push(
       `${unavailable} of ${tools.length} tool calls have no recorded result; zero observed tool errors does not establish that those calls succeeded.`,
+    );
+  if (unknown)
+    notes.push(
+      `${unknown} legacy tool call${unknown === 1 ? "" : "s"} with empty output ${unknown === 1 ? "lacks" : "lack"} a result-presence marker; result availability is unknown.`,
     );
   return {
     toolResultCoverage: {
       total: tools.length,
       available,
       unavailable,
-      complete: unavailable === 0,
+      ...(unknown ? { unknown } : {}),
+      complete: unavailable === 0 && unknown === 0,
     },
     dataQualityNotes: [...new Set(notes)],
   };

@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   contentRevision,
   readSavedReplay,
@@ -22,6 +22,50 @@ interface SavedDetails {
   error?: string;
 }
 
+const SAVED_READ_CONCURRENCY = 4;
+
+async function mapSaved<T, U>(items: T[], action: (item: T) => Promise<U>): Promise<U[]> {
+  const results: U[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(SAVED_READ_CONCURRENCY, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await action(items[index]);
+      }
+    }),
+  );
+  return results;
+}
+
+async function savedFingerprint(directory: string): Promise<string> {
+  return JSON.stringify(
+    await Promise.all(
+      ["replay.json", "overlays.json", "annotations.json"].map(async (name) => {
+        try {
+          const value = await stat(join(directory, name), { bigint: true });
+          return [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(":");
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code || "unreadable";
+        }
+      }),
+    ),
+  );
+}
+
+function savedListChanged(): Error {
+  return Object.assign(
+    new Error(
+      "Saved replay changed while listing. Retry replays from --offset 0 without --revision.",
+    ),
+    { code: "revision-mismatch" },
+  );
+}
+
+function savedText(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 /** Saved snapshots are discoverable independently of deleted or unavailable providers. */
 export async function querySavedReplays(
   options: Omit<SessionQueryOptions, "scan" | "brief" | "dedupe"> & {
@@ -38,87 +82,91 @@ export async function querySavedReplays(
   );
   const issues: Array<{ path: string; code: "unreadable-replay" }> = [];
   const details = new Map<string, SavedDetails>();
-  const found = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const directory = join(baseDir, entry.name);
-        const path = join(directory, "replay.json");
-        let raw: ReplaySession;
-        let modified: string;
-        try {
-          raw = await readSavedReplay(directory);
-          modified = (await stat(path)).mtime.toISOString();
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-            issues.push({ path, code: "unreadable-replay" });
-          return undefined;
-        }
-        if (options.provider && raw.meta.provider !== options.provider) return undefined;
-        if (
-          options.target &&
-          (raw.meta.location?.kind === "ssh" ? raw.meta.location.id : "local") !== options.target
-        )
-          return undefined;
-        let effective: ReplaySession | undefined;
-        let errorCode: SavedDetails["status"] = "ready";
-        let errorMessage: string | undefined;
-        try {
-          effective = await applySavedEdits(raw, directory);
-        } catch (error) {
-          errorCode =
-            (error as { code?: string }).code === "invalid-sidecar"
-              ? "invalid-sidecar"
-              : "unreadable";
-          errorMessage =
-            "Saved content could not be safely loaded. Restore a valid backup before inspecting or sharing.";
-        }
-        // Never reveal original prompts when saved edits could not be applied safely.
-        const prompts = effective?.scenes
-          .filter((scene) => scene.type === "user-prompt")
-          .slice(0, 2)
-          .map((scene) => scene.content.slice(0, 500));
-        const item: SessionInfo = {
-          provider: raw.meta.provider,
-          sessionId: raw.meta.sessionId,
-          slug: entry.name,
-          title: effective?.meta.title,
-          location: raw.meta.location,
-          project: raw.meta.project || raw.meta.cwd || "",
-          cwd: raw.meta.cwd || "",
-          version: raw.meta.generator?.version || "",
-          timestamp:
-            raw.meta.generator?.generatedAt || raw.meta.endTime || raw.meta.startTime || modified,
-          filePath: path,
-          filePaths: [path],
-          lineCount: 0,
-          fileSize: 0,
-          firstPrompt: prompts?.[0] || "",
-          prompts,
-          promptCount: effective?.meta.stats?.userPrompts,
-          toolCallCount: effective?.meta.stats?.toolCalls,
-          compactionCount: effective?.meta.compactions?.length,
-        };
-        details.set(path, {
-          origin: "snapshot",
-          replayPath: path,
-          status: errorCode,
-          sceneCount: raw.scenes.length,
-          error: errorMessage,
-          ...(effective
-            ? {
-                revision: contentRevision(effective),
-                annotationCount: effective.annotations?.length || 0,
-                editedSceneCount: effective.scenes.filter(
-                  (scene, index) =>
-                    "content" in scene &&
-                    scene.content !== (raw.scenes[index] as { content?: string }).content,
-                ).length,
-              }
-            : {}),
-        });
-        return item;
-      }),
+  const versions = new Map<string, string>();
+  const found = await mapSaved(
+    entries.filter((entry) => entry.isDirectory()),
+    async (entry) => {
+      const fingerprint = await savedFingerprint(join(baseDir, entry.name));
+      const directory = join(baseDir, entry.name);
+      const path = join(directory, "replay.json");
+      let raw: ReplaySession;
+      let modified: string;
+      try {
+        raw = await readSavedReplay(directory);
+        modified = (await stat(path)).mtime.toISOString();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+          issues.push({ path, code: "unreadable-replay" });
+        return undefined;
+      }
+      if (options.provider && raw.meta.provider !== options.provider) return undefined;
+      if (
+        options.target &&
+        (raw.meta.location?.kind === "ssh" ? raw.meta.location.id : "local") !== options.target
+      )
+        return undefined;
+      let effective: ReplaySession | undefined;
+      let errorCode: SavedDetails["status"] = "ready";
+      let errorMessage: string | undefined;
+      try {
+        effective = await applySavedEdits(raw, directory);
+      } catch (error) {
+        errorCode =
+          (error as { code?: string }).code === "invalid-sidecar"
+            ? "invalid-sidecar"
+            : "unreadable";
+        errorMessage =
+          "Saved content could not be safely loaded. Restore a valid backup before inspecting or sharing.";
+      }
+      // Never reveal original prompts when saved edits could not be applied safely.
+      const prompts = effective?.scenes
+        .filter((scene) => scene.type === "user-prompt")
+        .slice(0, 2)
+        .map((scene) => scene.content.slice(0, 500));
+      const item: SessionInfo = {
+        provider: raw.meta.provider,
+        sessionId: raw.meta.sessionId,
+        slug: entry.name,
+        title: savedText(effective?.meta.title),
+        location: raw.meta.location,
+        project: savedText(raw.meta.project) || savedText(raw.meta.cwd) || "",
+        cwd: savedText(raw.meta.cwd) || "",
+        version: savedText(raw.meta.generator?.version) || "",
+        timestamp:
+          [raw.meta.generator?.generatedAt, raw.meta.endTime, raw.meta.startTime].find(
+            (value) => typeof value === "string" && Number.isFinite(Date.parse(value)),
+          ) || modified,
+        filePath: path,
+        filePaths: [path],
+        lineCount: 0,
+        fileSize: 0,
+        firstPrompt: prompts?.[0] || "",
+        prompts,
+        promptCount: effective?.meta.stats?.userPrompts,
+        toolCallCount: effective?.meta.stats?.toolCalls,
+        compactionCount: effective?.meta.compactions?.length,
+      };
+      if (fingerprint !== (await savedFingerprint(directory))) throw savedListChanged();
+      versions.set(path, fingerprint);
+      details.set(path, {
+        origin: "snapshot",
+        replayPath: path,
+        status: errorCode,
+        sceneCount: raw.scenes.length,
+        error: errorMessage,
+        ...(effective
+          ? {
+              annotationCount: effective.annotations?.length || 0,
+              editedSceneCount: effective.scenes.filter(
+                (scene, index) =>
+                  "content" in scene &&
+                  scene.content !== (raw.scenes[index] as { content?: string }).content,
+              ).length,
+            }
+          : {}),
+      });
+      return item;
+    },
   );
   let sessions = found.filter((item): item is SessionInfo => item !== undefined);
   if (options.session) {
@@ -146,8 +194,26 @@ export async function querySavedReplays(
     any,
     compacted,
   });
+  // Retain metadata only during catalog ordering; full snapshots/revisions are loaded
+  // for the selected page with the same bounded concurrency and a race check.
+  const replays = await mapSaved(page.sessions, async (session) => {
+    const detail = details.get(session.filePath)!;
+    const directory = dirname(session.filePath);
+    const fingerprint = versions.get(session.filePath);
+    if (fingerprint !== (await savedFingerprint(directory))) throw savedListChanged();
+    if (detail.status !== "ready") return { ...session, ...detail };
+    let revision: string;
+    try {
+      const effective = await applySavedEdits(await readSavedReplay(directory), directory);
+      revision = contentRevision(effective);
+    } catch {
+      throw savedListChanged();
+    }
+    if (fingerprint !== (await savedFingerprint(directory))) throw savedListChanged();
+    return { ...session, ...detail, revision };
+  });
   return {
-    replays: page.sessions.map((session) => ({ ...session, ...details.get(session.filePath)! })),
+    replays,
     pagination: page.pagination,
     partial: issues.length > 0 || [...details.values()].some((item) => item.status !== "ready"),
     issues: issues.sort((a, b) => a.path.localeCompare(b.path)),
