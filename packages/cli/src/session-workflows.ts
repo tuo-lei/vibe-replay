@@ -21,7 +21,11 @@ import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } f
 import { SidecarError } from "./sidecar.js";
 import { loadAnnotations } from "./server-persistence.js";
 import { scanForSecrets } from "./scan.js";
-import { assertSqliteWalReadable, withReadOnlySqlite } from "@vibe-replay/provider-core/utils";
+import {
+  assertSqliteWalReadable,
+  withReadOnlySqlite,
+  SqliteSnapshotRequiredError,
+} from "@vibe-replay/provider-core/utils";
 import { inferSqliteProvider } from "./sqlite-schema.js";
 import { parseGrokBotMetaWake } from "@vibe-replay/provider-grok-bot/parser";
 import { CLI_VERSION } from "./version.js";
@@ -40,7 +44,7 @@ export interface SessionReferenceOptions {
 export async function discoverCliSessions(options: SessionReferenceOptions = {}) {
   const providers = options.provider ? [getProvider(options.provider)] : getAllProviders();
   if (providers.some((p) => !p)) throw new Error(`Unknown provider: ${options.provider}`);
-  const key = `cli-discovery-v2-${options.provider || "all"}`;
+  const key = `cli-discovery-v3-${options.provider || "all"}`;
   const cached = options.refresh ? null : await readFileCache<SafeProviderDiscoveryResult>(key);
   if (cached && Date.now() - Date.parse(cached.updatedAt) < 30_000) {
     return {
@@ -69,6 +73,7 @@ export async function discoverCliSessions(options: SessionReferenceOptions = {})
 }
 
 export class SessionReferenceError extends Error {
+  discoveryCheckpointMessage?: string;
   constructor(
     readonly code: "not-found" | "ambiguous",
     message: string,
@@ -475,6 +480,9 @@ export async function resolveCliSource(
       const checkpoint = discovery.coverage.find(
         (entry) => entry.errorCode === "checkpoint-required",
       );
+      if (options.readOnly && error.code === "not-found" && checkpoint)
+        error.discoveryCheckpointMessage =
+          checkpoint.message || "Read-only discovery requires a checkpointed source database.";
       error.message += ` Discovery incomplete: ${discovery.failedProviders.join(", ")}${checkpoint ? `. ${checkpoint.message}` : "; run vibe-replay doctor --json."}`;
     }
     throw error;
@@ -668,7 +676,7 @@ function loadedSession(
   };
 }
 
-async function readSavedReplay(outputDir: string): Promise<ReplaySession> {
+export async function readSavedReplay(outputDir: string): Promise<ReplaySession> {
   const replay = JSON.parse(
     await readFile(join(outputDir, "replay.json"), "utf-8"),
   ) as ReplaySession;
@@ -680,7 +688,10 @@ export async function readEffectiveReplay(outputDir: string): Promise<ReplaySess
   return applySavedEdits(await readSavedReplay(outputDir), outputDir);
 }
 
-async function applySavedEdits(replay: ReplaySession, outputDir: string): Promise<ReplaySession> {
+export async function applySavedEdits(
+  replay: ReplaySession,
+  outputDir: string,
+): Promise<ReplaySession> {
   const overlays = await loadOverlays(
     dirname(outputDir),
     basename(outputDir),
@@ -757,6 +768,56 @@ async function findSavedReplay(ref: string, options: SessionReferenceOptions, ex
 }
 
 export async function loadCliSession(
+  ref: string,
+  options: SessionReferenceOptions & { preferReplay?: boolean } = {},
+) {
+  try {
+    return await loadCliSessionContent(ref, options);
+  } catch (caught) {
+    // Only promote failed discovery after loadCliSessionContent has tried saved snapshots.
+    const error =
+      caught instanceof SessionReferenceError &&
+      caught.code === "not-found" &&
+      caught.discoveryCheckpointMessage
+        ? new SqliteSnapshotRequiredError(caught.discoveryCheckpointMessage)
+        : caught;
+    if (error instanceof SqliteSnapshotRequiredError) {
+      const quote = (value: string) =>
+        process.platform === "win32"
+          ? `'${value.replaceAll("'", "''")}'`
+          : `'${value.replaceAll("'", "'\\''")}'`;
+      const scope = [
+        ...(options.provider ? ["--provider", options.provider] : []),
+        ...(options.target ? ["--target", options.target] : []),
+      ];
+      const exportCommand = [
+        "vibe-replay",
+        "export",
+        ref,
+        ...scope,
+        "--source",
+        "--format",
+        "json",
+        "--output",
+        "./replay-recovery",
+        "--json",
+      ]
+        .map(quote)
+        .join(" ");
+      Object.assign(error, {
+        suggestions: [
+          "Checkpoint or finish the source transaction in its own application, then retry.",
+          "Find an existing saved snapshot without querying provider storage: vibe-replay replays --json",
+          `If standard provider reads are acceptable, save a local snapshot (writes output files): ${exportCommand}`,
+          "Preflight the saved JSON without accessing the database: vibe-replay share ./replay-recovery/replay.json --dry-run --json",
+        ],
+      });
+    }
+    throw error;
+  }
+}
+
+async function loadCliSessionContent(
   ref: string,
   options: SessionReferenceOptions & { preferReplay?: boolean } = {},
 ) {
@@ -910,6 +971,40 @@ function sceneText(scene: Scene): string {
     : JSON.stringify(scene);
 }
 
+function inspectionQuality(replay: ReplaySession) {
+  const tools = replay.scenes.filter(
+    (scene) => scene.type === "tool-call" && !scene.isToolContainer,
+  );
+  const unknown = tools.filter(
+    (scene) => scene.type === "tool-call" && scene.hasResult === undefined && scene.result === "",
+  ).length;
+  const available = tools.filter(
+    (scene) =>
+      scene.type === "tool-call" &&
+      (scene.hasResult ?? (scene.result !== undefined && scene.result !== "")),
+  ).length;
+  const unavailable = tools.length - available - unknown;
+  const notes = [...(replay.meta.dataSourceInfo?.notes || [])];
+  if (unavailable)
+    notes.push(
+      `${unavailable} of ${tools.length} tool calls have no recorded result; zero observed tool errors does not establish that those calls succeeded.`,
+    );
+  if (unknown)
+    notes.push(
+      `${unknown} legacy tool call${unknown === 1 ? "" : "s"} with empty output ${unknown === 1 ? "lacks" : "lack"} a result-presence marker; result availability is unknown.`,
+    );
+  return {
+    toolResultCoverage: {
+      total: tools.length,
+      available,
+      unavailable,
+      ...(unknown ? { unknown } : {}),
+      complete: unavailable === 0 && unknown === 0,
+    },
+    dataQualityNotes: [...new Set(notes)],
+  };
+}
+
 export function inspectSession(
   replay: ReplaySession,
   options: {
@@ -1020,6 +1115,7 @@ export function inspectSession(
     stats,
     prLinks: replay.meta.prLinks,
     toolCounts: tools,
+    ...inspectionQuality(replay),
     parseWarnings: replay.meta.parseWarnings,
     diagnosticNotes: replay.meta.diagnosticNotes,
     ...(content
@@ -1078,6 +1174,7 @@ export function diagnoseSession(replay: ReplaySession, query?: string, limit = 1
   return {
     revision: contentRevision(replay),
     signalRevision,
+    ...inspectionQuality(replay),
     pagination: Object.fromEntries(
       Object.entries(signals).map(([name, entries]) => [name, page(entries.length)]),
     ),

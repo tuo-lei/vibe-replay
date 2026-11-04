@@ -176,6 +176,7 @@ export function normalizeGitUrl(url: string): string | undefined {
 }
 
 export class SqliteSnapshotRequiredError extends Error {
+  readonly code = "checkpoint-required";
   constructor(
     message: string,
     readonly sessions: SessionInfo[] = [],

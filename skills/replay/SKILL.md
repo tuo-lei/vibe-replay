@@ -87,7 +87,7 @@ If `--json` returns an empty array, verify `vibe-replay` is installed and access
 npx vibe-replay --version
 ```
 
-Then broaden or drop the query, retry with `--any`, filter by project/provider, or ask the user for a session path directly.
+Then broaden or drop the query, retry with `--any`, filter by project/provider, or ask the user for a session path directly. If the source history was removed, use `npx vibe-replay replays --provider <provider> --json` to find edited saved snapshots independently of source discovery; follow its `replayPath` and `revision`.
 
 For search results, return a short ranked list with provider, timestamp, project, title or first prompt preview, slug/session id, why it matched, and whether deeper scan/replay is recommended. Do not dump full raw prompts unless the user asks.
 
@@ -106,6 +106,8 @@ npx vibe-replay inspect <session-id> --query "<error or command>" --json
 npx vibe-replay inspect <session-id> --scene <index> --json
 npx vibe-replay diagnose <session-id> --query "<error>" --json
 ```
+
+Check `toolResultCoverage` and `dataQualityNotes` before interpreting zero tool failures; missing results do not establish success. `doctor --read-only --json` checks no-writes discovery. A checkpoint-required error offers opt-in local JSON export and saved-JSON preflight steps; do not bypass storage guards.
 
 Inspect/diagnose default to the current source; export/share prefer the saved replay.
 Use `--source` or `--snapshot` consistently when citing scene indices across commands.

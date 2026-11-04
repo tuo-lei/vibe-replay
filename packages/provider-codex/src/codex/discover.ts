@@ -290,6 +290,7 @@ async function sessionInfoFromThreadRow(
     promptCount: transcriptStatus === undefined ? extracted?.promptCount : 0,
     automationTriggerCount: extracted?.automationTriggerCount,
     toolCallCount: extracted?.toolCallCount,
+    compactionCount: extracted?.compactionCount,
     model: row.model || extracted?.model,
     durationMsEst: extracted?.durationMsEst,
     editCountEst: extracted?.editCountEst,

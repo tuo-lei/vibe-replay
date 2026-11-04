@@ -40,6 +40,7 @@ import {
   shareReplay,
   type ShareVisibility,
 } from "./share.js";
+import { querySavedReplays } from "./saved-replays.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
 import { withBundledSampleIfEmpty } from "./bundled-sample.js";
@@ -307,9 +308,16 @@ program
     if (commandName !== "vibe-replay") {
       if (
         program.getOptionValueSource("provider") === "cli" &&
-        !["sessions", "inspect", "diagnose", "export", "doctor", "share", "live"].includes(
-          commandName,
-        )
+        ![
+          "sessions",
+          "replays",
+          "inspect",
+          "diagnose",
+          "export",
+          "doctor",
+          "share",
+          "live",
+        ].includes(commandName)
       )
         throw new Error(`--provider is not supported by ${commandName}`);
       for (const key of ["title", "dashboard", "open", "github"]) {
@@ -317,15 +325,17 @@ program
           throw new Error(`--${key} is not supported by ${commandName}`);
       }
       if (
-        !["sessions", "live"].includes(commandName) &&
+        !["sessions", "replays", "live"].includes(commandName) &&
         program.getOptionValueSource("session") === "cli"
       )
         throw new Error(
-          `Use a positional session reference with ${commandName}; --session is supported by sessions, live, and replay generation`,
+          `Use a positional session reference with ${commandName}; --session is supported by sessions, replays, live, and replay generation`,
         );
     }
     if (
       commandName === "telemetry" ||
+      commandName === "replays" ||
+      (commandName === "doctor" && actionCommand.opts().readOnly) ||
       process.argv[2] === "telemetry" ||
       (commandName === "share" && actionCommand.opts().dryRun) ||
       (commandName === "export" && actionCommand.opts().stdout)
@@ -1035,6 +1045,64 @@ program
     }
   });
 
+program
+  .command("replays")
+  .description("Find saved replay snapshots, including edits, without querying source providers")
+  .option("-q, --query <text>", "Search saved title, prompt previews, project, or slug")
+  .option("--project <text>", "Filter by project path substring")
+  .option("-p, --provider <name>", "Filter saved provider metadata")
+  .option("--target <id>", "Filter by SSH target ID, or local")
+  .option("-s, --session <ref>", "Select a saved ID, unique prefix, directory slug, or replay path")
+  .option("--directory <path>", "Parent directory containing saved replay directories")
+  .option("--compacted", "Only return snapshots with recorded compactions")
+  .option("--any", "Match any query term")
+  .option("--limit <number>", "Maximum snapshots (1–100)", workflowInteger, 10)
+  .option("--offset <index>", "Skip this many matching snapshots", workflowInteger, 0)
+  .option("--revision <hash>", "Require the list revision from the previous page")
+  .option("--json", "Print a machine-readable result")
+  .action(async (opts: SessionsCommandOptions & { directory?: string }, command: Command) => {
+    if (!opts.limit || opts.limit > 100) throw new Error("--limit must be between 1 and 100");
+    const queryOptions = normalizeSessionsCommandOptions(opts, command);
+    const result = await querySavedReplays(
+      {
+        ...queryOptions,
+        session: queryOptions.session ? expandUserPath(queryOptions.session) : undefined,
+      },
+      opts.directory ? expandUserPath(opts.directory) : undefined,
+    );
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    for (const replay of result.replays) {
+      console.log(
+        `${replay.title || replay.sessionId} (${replay.provider}) | snapshot | ${replay.status}`,
+      );
+      console.log(
+        `  ${replay.sceneCount} scenes | ${replay.annotationCount ?? "unknown"} annotations | ${replay.editedSceneCount ?? "unknown"} edited scenes`,
+      );
+      console.log(
+        `  ${replay.replayPath}${replay.revision ? ` | revision ${replay.revision}` : ""}`,
+      );
+      if (replay.error) console.log(`  ${replay.error}`);
+    }
+    console.log(`Returned ${result.replays.length} of ${result.pagination.total} saved replays`);
+    if (result.pagination.truncated)
+      console.log(
+        `Keep filters; continue with --offset ${result.pagination.nextOffset} --revision ${result.pagination.revision}`,
+      );
+    if (result.issues.length)
+      console.log(
+        `${result.issues.length} unreadable saved replay(s); use --json for their paths.`,
+      );
+    if (result.partial)
+      console.log(
+        "Some saved snapshots or edits could not be read, including entries outside this page; use --json for details.",
+      );
+    if (!result.replays.length)
+      console.log("No matching saved snapshots. Use sessions to find source histories.");
+  });
+
 interface WorkflowOptions {
   provider?: string;
   target?: string;
@@ -1050,6 +1118,7 @@ interface WorkflowOptions {
   source?: boolean;
   snapshot?: boolean;
   revision?: string;
+  readOnly?: boolean;
   signalRevision?: string;
   field?: "text" | "input" | "result";
   textOffset?: number;
@@ -1116,6 +1185,13 @@ function printWorkflowResult(payload: unknown, json = false): void {
       `${data.provider} | ${data.stats.userPrompts} prompts | ${data.stats.toolCalls} tools | ${data.stats.sceneCount} scenes`,
     );
   printContentProvenance(data.provenance);
+  if ("prompts" in data || "scenes" in data) {
+    if (data.toolResultCoverage && !data.toolResultCoverage.complete)
+      console.log(
+        `Tool results available: ${data.toolResultCoverage.available}/${data.toolResultCoverage.total}; ${data.toolResultCoverage.unavailable} unavailable${data.toolResultCoverage.unknown ? `; ${data.toolResultCoverage.unknown} unknown legacy outputs` : ""}.`,
+      );
+    for (const note of data.dataQualityNotes || []) console.log(`Data quality: ${note}`);
+  }
   if ("scenes" in data && data.scenes)
     for (const scene of data.scenes) {
       console.log(`\n[scene ${scene.index}] ${scene.type}\n${scene.content?.value ?? scene.text}`);
@@ -1260,16 +1336,26 @@ workflowCommand(
 
 program
   .command("doctor")
-  .description("Check session discovery coverage and provider storage compatibility")
+  .description("Check discovery coverage and storage compatibility for the selected read mode")
+  .option(
+    "--read-only",
+    "Check discovery under the no-writes rules used by stdout export/preflight",
+  )
   .option("-p, --provider <name>", "Check one provider")
   .option("--json", "Print a machine-readable result")
   .action(async (opts: WorkflowOptions, command: Command) => {
     const result = await discoverCliSessions({
       provider: normalizeCommandProviderOption(opts.provider, command),
       refresh: true,
+      readOnly: opts.readOnly,
     });
     printWorkflowResult(
       {
+        capability: "session-discovery",
+        readOnly: !!opts.readOnly,
+        notes: [
+          "Ready describes discovery in this read mode, not every per-session export or preflight. Use doctor --read-only to check no-writes discovery; use share <ref> --dry-run for an exact payload check.",
+        ],
         partial: result.failedProviders.length > 0,
         coverage: result.coverage,
         sessionCount: result.sessions.length,
@@ -1828,7 +1914,7 @@ await program.parseAsync().catch((error: unknown) => {
       ? `${JSON.stringify({ error: message, code, suggestions })}\n`
       : commanderErrorText
         ? commanderErrorText
-        : `\n  ✗ ${message}\n`,
+        : `\n  ✗ ${message}\n${suggestions.map((suggestion) => `  ${suggestion}\n`).join("")}`,
   );
   process.exitCode = 1;
 });
