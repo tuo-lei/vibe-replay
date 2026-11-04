@@ -79,6 +79,22 @@ it("lists saved edits offline, follows their exact revision, and reports unavail
         JSON.stringify([{ id: "note", sceneIndex: 1, body: "Investigate" }]),
       );
     }
+    // An unrelated active provider must not block default saved-ID fallback.
+    await mkdir(join(home, ".hermes"), { recursive: true });
+    await writeFile(
+      join(home, ".hermes", "state.db"),
+      Buffer.concat([Buffer.from("SQLite format 3\0"), Buffer.alloc(496)]),
+    );
+    await writeFile(join(home, ".hermes", "state.db-wal"), "Synthetic WAL");
+    const exportFallback = await run(["export", "saved-30", "--format", "json", "--stdout"], home);
+    expect(exportFallback.code).toBe(0);
+    expect(JSON.parse(exportFallback.stdout).scenes[0].content).toBe("Details removed");
+    const shareFallback = await run(["share", "saved-30", "--dry-run", "--json"], home);
+    expect(shareFallback.code).toBe(0);
+    expect(JSON.parse(shareFallback.stdout)).toMatchObject({
+      uploaded: false,
+      provenance: { origin: "snapshot" },
+    });
     const before = (await readdir(join(home, ".vibe-replay"))).sort();
     const first = await run(
       ["replays", "--provider", "cursor", "--limit", "1", "--json"],

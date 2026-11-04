@@ -73,6 +73,7 @@ export async function discoverCliSessions(options: SessionReferenceOptions = {})
 }
 
 export class SessionReferenceError extends Error {
+  discoveryCheckpointMessage?: string;
   constructor(
     readonly code: "not-found" | "ambiguous",
     message: string,
@@ -480,9 +481,8 @@ export async function resolveCliSource(
         (entry) => entry.errorCode === "checkpoint-required",
       );
       if (options.readOnly && error.code === "not-found" && checkpoint)
-        throw new SqliteSnapshotRequiredError(
-          checkpoint.message || "Read-only discovery requires a checkpointed source database.",
-        );
+        error.discoveryCheckpointMessage =
+          checkpoint.message || "Read-only discovery requires a checkpointed source database.";
       error.message += ` Discovery incomplete: ${discovery.failedProviders.join(", ")}${checkpoint ? `. ${checkpoint.message}` : "; run vibe-replay doctor --json."}`;
     }
     throw error;
@@ -773,7 +773,14 @@ export async function loadCliSession(
 ) {
   try {
     return await loadCliSessionContent(ref, options);
-  } catch (error) {
+  } catch (caught) {
+    // Only promote failed discovery after loadCliSessionContent has tried saved snapshots.
+    const error =
+      caught instanceof SessionReferenceError &&
+      caught.code === "not-found" &&
+      caught.discoveryCheckpointMessage
+        ? new SqliteSnapshotRequiredError(caught.discoveryCheckpointMessage)
+        : caught;
     if (error instanceof SqliteSnapshotRequiredError) {
       const quote = (value: string) =>
         process.platform === "win32"
