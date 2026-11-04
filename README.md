@@ -215,6 +215,7 @@ Find a session, inspect evidence, and export only the format you need:
 
 ```bash
 npx vibe-replay sessions --query "build" --any --brief --json
+npx vibe-replay replays --provider cursor --json
 npx vibe-replay inspect <session-id> --json
 npx vibe-replay inspect <session-id> --query "EUSAGE" --json
 npx vibe-replay diagnose <session-id> --query "EUSAGE" --json
@@ -242,6 +243,17 @@ All `--json` command errors, including argument parsing, emit one stderr object
 with `error`, a stable `code`, and `suggestions`; stdout stays free of errors.
 Discovery coverage remains a structured result: `sessions` and `doctor` may exit 1
 with JSON coverage on stdout when providers cannot be read.
+`replays` searches saved snapshots independently of provider storage, so edited or
+annotated work remains discoverable after its source history disappears. It accepts
+`--query`, `--project`, `--provider`, `--target`, `--session`, `--compacted`, and list
+pagination (`--limit`, `--offset`, `--revision`). The default parent is
+`~/.vibe-replay`; `--directory` selects another saved-replay parent. Results include
+`origin: "snapshot"`, `replayPath`, the effective content `revision`, edit/annotation
+counts, and a read status. Use `inspect <replayPath> --revision <revision>` to follow
+that exact content. Damaged sidecars remain visible with an error status and no
+original prompt/title previews. `partial` and `issues` identify unreadable entries;
+listing does not query source providers, write caches, or upload anything.
+
 Copied Cursor/Grok JSONL can share generic wake tags and custom tool payloads.
 When the source lacks provider-specific identity, pass `--provider cursor` or
 `--provider grok-bot`; missing tool IDs are not a reliable identity signal.
@@ -259,7 +271,15 @@ Pending rollback journals also require the source transaction or recovery to fin
 Committed PERSIST journals with zeroed headers remain readable.
 Healthy Hermes profiles remain available when another profile needs a checkpoint;
 coverage reports the incomplete discovery.
-`doctor --json` reports provider coverage and compatibility failures. Search output
+`doctor --json` reports provider discovery coverage and compatibility failures.
+Ready refers to discovery in the selected read mode, not every export or preflight.
+`doctor --read-only --json` checks the no-writes discovery mode used by stdout
+exports and sharing preflight. SQLite errors retain their protection and report
+`checkpoint-required`, with recovery suggestions. If standard provider reads are
+acceptable, first save a local JSON using `export <ref> --source --format json
+--output ./replay-recovery --json`, then preflight the saved file with `share
+./replay-recovery/replay.json --dry-run --json`. This recovery writes output files;
+it is never performed automatically. Search output
 marks partial discovery, and empty results include recovery suggestions.
 
 `inspect --scene <index>` reads an exact 0-based scene. Search pages accept
@@ -273,7 +293,11 @@ scenes. To read a long scene losslessly, use `--scene <index> --field result
 `text`, `input`, or `result`; offsets count JavaScript UTF-16 characters and each
 page is capped at 10,000 characters. JSON `content.value` is the exact page. `diagnose` separates model API errors, tool failures,
 compactions, and matching text evidence; it does not infer root causes from an error
-string alone. Each diagnostic signal has its own `pagination` totals and continuation.
+string alone. Both inspect and diagnose include `dataQualityNotes` and
+`toolResultCoverage` (`total`, `available`, `unavailable`, `complete`). Containers
+are excluded; a result explicitly marked unavailable stays unknown. Zero observed
+tool failures does not establish success for calls with missing results.
+Each diagnostic signal has its own `pagination` totals and continuation.
 Use `diagnose --offset <nextOffset>` to skip that many entries in every signal,
 with the same limit and `--revision <hash> --signal-revision <hash>` to require
 unchanged content and diagnostic metadata. Query evidence remains a separate
