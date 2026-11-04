@@ -1,4 +1,8 @@
 import { homedir } from "node:os";
+import { constants as fsConstants } from "node:fs";
+import { open, lstat } from "node:fs/promises";
+import { basename, extname } from "node:path";
+import { Readable } from "node:stream";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type {
@@ -157,6 +161,70 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
 
   app.get("/api/sources/cached", getCachedSourceSessions);
   app.get("/api/source-sessions/cached", getCachedSourceSessions);
+
+  app.get("/api/sources/open", async (c) => {
+    const provider = c.req.query("provider");
+    const slug = c.req.query("slug");
+    const project = c.req.query("project");
+    const fileIndex = Number(c.req.query("fileIndex"));
+    if (!provider || !slug || !project || !Number.isSafeInteger(fileIndex) || fileIndex < 0) {
+      return c.text("Source file not found", 404);
+    }
+
+    const cached = await readSourcesCatalogCache();
+    const matches = (cached?.sessions || []).filter(
+      (source) =>
+        source.provider === provider &&
+        source.slug === slug &&
+        source.project === project &&
+        source.location?.kind !== "ssh",
+    );
+    if (matches.length !== 1) return c.text("Source file not found", 404);
+
+    const filePath = matches[0].filePaths?.[fileIndex];
+    if (typeof filePath !== "string" || !filePath || extname(filePath).toLowerCase() !== ".jsonl") {
+      return c.text("Source file not found", 404);
+    }
+
+    let file;
+    try {
+      const before = await lstat(filePath);
+      if (!before.isFile() || before.isSymbolicLink()) {
+        return c.text("Source file not found", 404);
+      }
+      file = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      const opened = await file.stat();
+      const after = await lstat(filePath);
+      if (
+        !opened.isFile() ||
+        opened.dev !== before.dev ||
+        opened.ino !== before.ino ||
+        after.isSymbolicLink() ||
+        after.dev !== opened.dev ||
+        after.ino !== opened.ino
+      ) {
+        await file.close();
+        return c.text("Source file not found", 404);
+      }
+    } catch {
+      await file?.close().catch(() => undefined);
+      return c.text("Source file not found", 404);
+    }
+
+    const safeFilename = basename(filePath)
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(0, 120);
+    const stream = file.createReadStream({ autoClose: true });
+    return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `inline; filename="${safeFilename || "session.jsonl"}"`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+      },
+    });
+  });
 
   const getSourceSessionsEnrichmentStatus = async (c: Context) => {
     return c.json(getSourcesEnrichmentStatus());

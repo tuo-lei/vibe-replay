@@ -10,6 +10,7 @@ import Dashboard, {
   fetchScanResults,
   findSessionScanData,
   getSessionRangeTimestamp,
+  SessionDetailPopup,
   sessionExplorerCountLabel,
   type SessionScanData,
   shouldIncludeSessionForFacets,
@@ -97,6 +98,53 @@ describe("Dashboard (smoke)", () => {
     await waitFor(() =>
       expect(screen.queryByRole("navigation", { name: "Dashboard navigation" })).toBeNull(),
     );
+  });
+});
+
+describe("Session source locations", () => {
+  it("explains a SQLite source and shows its local database path", () => {
+    const databasePath = "/synthetic/home/.opencode/opencode.db";
+    render(
+      <SessionDetailPopup
+        session={{
+          provider: "opencode",
+          slug: "synthetic-session",
+          sessionId: "synthetic-id",
+          project: "/synthetic/project",
+          timestamp: "2026-11-04T00:00:00.000Z",
+          fileSize: 0,
+          lineCount: 1,
+          firstPrompt: "Synthetic SQLite source",
+          filePaths: [`${databasePath}#session:synthetic-id`],
+          hasSqlite: true,
+          existingReplay: null,
+        }}
+        scanData={{
+          provider: "opencode",
+          slug: "synthetic-session",
+          subAgentCount: 0,
+          apiErrorCount: 0,
+          compactionCount: 0,
+          editCount: 0,
+          filesModified: [],
+          promptCount: 1,
+          toolCallCount: 0,
+          dataSource: "sqlite",
+        }}
+        onClose={() => {}}
+        onGenerate={() => {}}
+        onViewReplay={() => {}}
+        onArchive={() => {}}
+        onTitleSave={async () => {}}
+        onDeleteReplay={() => {}}
+        isGenerating={false}
+        isArchived={false}
+      />,
+    );
+
+    expect(screen.getByText("SQLite storage")).toBeTruthy();
+    expect(screen.getByText(/session was read from SQLite/)).toBeTruthy();
+    expect(screen.getByText(databasePath)).toBeTruthy();
   });
 });
 
