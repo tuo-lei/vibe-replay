@@ -384,6 +384,8 @@ so a local HTML fallback is distinguishable from a cloud URL.
 
 Grok Bot sessions live on the cloud box (`/home/box/agent-data/agent-transcripts`, often a symlink to `sand-data`). Point discovery at a copy with `GROK_BOT_TRANSCRIPTS_DIR` (or `VIBE_REPLAY_GROK_BOT_DIR`), or drop files under `~/.grok-bot/agent-transcripts`. Group-chat user lines starting with `[Group chat:` become a room context-injection plus one user turn per `Speaker: message`; Eng and GTM keep separate transcripts:
 
+On macOS, the desktop client's replica store is also scanned at `~/Library/Application Support/Grok Bot/sand-client-persistence` (override with `GROK_BOT_CLIENT_PERSISTENCE_DIR`); replica-only sessions can be replayed, and replicas merge with matching-agent JSONL while retaining its tool timeline.
+
 ```bash
 GROK_BOT_TRANSCRIPTS_DIR=/path/to/agent-transcripts npx vibe-replay@latest -p grok-bot
 ```
