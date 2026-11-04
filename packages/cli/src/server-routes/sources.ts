@@ -166,8 +166,9 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
     const provider = c.req.query("provider");
     const slug = c.req.query("slug");
     const project = c.req.query("project");
-    const fileIndex = Number(c.req.query("fileIndex"));
-    if (!provider || !slug || !project || !Number.isSafeInteger(fileIndex) || fileIndex < 0) {
+    const sessionId = c.req.query("sessionId");
+    const filePath = c.req.query("path");
+    if (!provider || !slug || !project || !filePath) {
       return c.text("Source file not found", 404);
     }
 
@@ -177,12 +178,12 @@ export function registerSourceRoutes(app: Hono, deps: SourcesRouteDeps): void {
         source.provider === provider &&
         source.slug === slug &&
         source.project === project &&
+        (!sessionId || source.sessionId === sessionId) &&
         source.location?.kind !== "ssh",
     );
     if (matches.length !== 1) return c.text("Source file not found", 404);
 
-    const filePath = matches[0].filePaths?.[fileIndex];
-    if (typeof filePath !== "string" || !filePath || extname(filePath).toLowerCase() !== ".jsonl") {
+    if (!matches[0].filePaths?.includes(filePath) || extname(filePath).toLowerCase() !== ".jsonl") {
       return c.text("Source file not found", 404);
     }
 

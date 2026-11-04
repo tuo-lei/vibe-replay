@@ -32,8 +32,10 @@ function source(filePath: string, location?: SourceSummaryRecord["location"]): S
   };
 }
 
-function appFor(record: SourceSummaryRecord) {
-  const cache: NormalizedSourceSessionCatalogCache = { sessions: [record] };
+function appFor(records: SourceSummaryRecord[] | SourceSummaryRecord) {
+  const cache: NormalizedSourceSessionCatalogCache = {
+    sessions: Array.isArray(records) ? records : [records],
+  };
   const app = new Hono();
   registerSourceRoutes(app, {
     baseDir: "/synthetic",
@@ -62,13 +64,15 @@ function appFor(record: SourceSummaryRecord) {
   return app;
 }
 
-function openUrl(record: SourceSummaryRecord, fileIndex = 0): string {
+function openUrl(record: SourceSummaryRecord, filePath = record.filePaths[0]) {
+  if (!filePath) throw new Error("Synthetic test source needs a file path");
   const query = new URLSearchParams({
     provider: record.provider,
     slug: record.slug,
     project: record.project,
-    fileIndex: String(fileIndex),
+    path: filePath,
   });
+  if (record.sessionId) query.set("sessionId", record.sessionId);
   return `/api/sources/open?${query.toString()}`;
 }
 
@@ -95,9 +99,56 @@ describe("catalogued JSONL source route", () => {
   it("rejects files not uniquely present in the local catalog", async () => {
     const app = appFor(source("/synthetic/session.jsonl"));
     const response = await app.request(
-      "/api/sources/open?provider=codex&slug=unknown&project=%2Fsynthetic%2Fproject&fileIndex=0&path=%2Fetc%2Fpasswd",
+      "/api/sources/open?provider=codex&slug=unknown&project=%2Fsynthetic%2Fproject&path=%2Fetc%2Fpasswd",
     );
     expect(response.status).toBe(404);
+  });
+
+  it("selects the matching session when provider, slug, and project collide", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-source-file-"));
+    const firstPath = join(tempDir, "first.jsonl");
+    const secondPath = join(tempDir, "second.jsonl");
+    await writeFile(firstPath, "first synthetic session\n", "utf8");
+    await writeFile(secondPath, "second synthetic session\n", "utf8");
+    const first = { ...source(firstPath), sessionId: "first-session" };
+    const second = { ...source(secondPath), sessionId: "second-session" };
+    const app = appFor([first, second]);
+
+    const response = await app.request(openUrl(second));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("second synthetic session\n");
+
+    const ambiguous = new URLSearchParams({
+      provider: second.provider,
+      slug: second.slug,
+      project: second.project,
+      path: secondPath,
+    });
+    expect((await app.request(`/api/sources/open?${ambiguous}`)).status).toBe(404);
+  });
+
+  it("resolves a catalogued path after file list order changes and rejects stale or unlisted paths", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-source-file-"));
+    const firstPath = join(tempDir, "first.jsonl");
+    const secondPath = join(tempDir, "second.jsonl");
+    await writeFile(firstPath, "first synthetic file\n", "utf8");
+    await writeFile(secondPath, "second synthetic file\n", "utf8");
+    const record = source(firstPath);
+    record.filePaths.push(secondPath);
+    const app = appFor(record);
+
+    expect(await (await app.request(openUrl(record, secondPath))).text()).toBe(
+      "second synthetic file\n",
+    );
+
+    record.filePaths = [secondPath, firstPath];
+    expect(await (await app.request(openUrl(record, secondPath))).text()).toBe(
+      "second synthetic file\n",
+    );
+
+    record.filePaths = [firstPath];
+    expect((await app.request(openUrl(record, secondPath))).status).toBe(404);
+    expect((await app.request(openUrl(record, "/synthetic/unlisted.jsonl"))).status).toBe(404);
   });
 
   it("rejects SSH locations and non-JSONL catalog entries", async () => {

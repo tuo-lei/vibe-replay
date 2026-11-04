@@ -998,16 +998,17 @@ export function SessionDetailPopup({
                   <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer">
                     Original JSONL transcript{jsonlSourcePaths.length === 1 ? "" : "s"}
                   </div>
-                  {jsonlSourcePaths.map(({ path, index }) => {
+                  {jsonlSourcePaths.map(({ path }) => {
                     const query = new URLSearchParams({
                       provider: s.provider,
                       slug: s.slug,
                       project: s.project,
-                      fileIndex: String(index),
+                      path,
                     });
+                    if (s.sessionId) query.set("sessionId", s.sessionId);
                     return (
                       <a
-                        key={`${index}:${path}`}
+                        key={path}
                         href={`/api/sources/open?${query.toString()}`}
                         target="_blank"
                         rel="noreferrer"

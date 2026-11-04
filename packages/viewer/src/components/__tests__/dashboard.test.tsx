@@ -115,7 +115,7 @@ describe("Session source locations", () => {
           fileSize: 0,
           lineCount: 1,
           firstPrompt: "Synthetic SQLite source",
-          filePaths: [`${databasePath}#session:synthetic-id`],
+          filePaths: [`${databasePath}#session:synthetic-id`, "/synthetic/session.jsonl"],
           hasSqlite: true,
           existingReplay: null,
         }}
@@ -145,6 +145,9 @@ describe("Session source locations", () => {
     expect(screen.getByText("SQLite storage")).toBeTruthy();
     expect(screen.getByText(/session was read from SQLite/)).toBeTruthy();
     expect(screen.getByText(databasePath)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open transcript/ }).getAttribute("href")).toBe(
+      "/api/sources/open?provider=opencode&slug=synthetic-session&project=%2Fsynthetic%2Fproject&path=%2Fsynthetic%2Fsession.jsonl&sessionId=synthetic-id",
+    );
   });
 });
 
