@@ -44,12 +44,18 @@ def api_pages(path: str):
 
 
 lines: list[str] = []
-reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews") or []
+reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews")
+if reviews is None:
+    print("failed to retrieve reviews; existing dump preserved", file=sys.stderr)
+    sys.exit(1)
 for r in reviews:
     lines.append(f"## Review by {r['user']['login']} ({r['state']}) at {r['submitted_at']}\n")
     lines.append(r["body"] or "(no body)")
     lines.append("\n---\n")
-comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments") or []
+comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments")
+if comments is None:
+    print("failed to retrieve inline comments; existing dump preserved", file=sys.stderr)
+    sys.exit(1)
 for c in comments:
     lines.append(
         f"## Inline by {c['user']['login']} on {c['path']}:{c.get('line') or c.get('original_line')} "

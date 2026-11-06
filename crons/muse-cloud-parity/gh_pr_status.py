@@ -48,10 +48,16 @@ if not pr:
 head = pr["head"]["sha"]
 print(json.dumps({"state": pr["state"], "mergeable": pr.get("mergeable"), "head": head[:7], "base": pr["base"]["sha"][:7]}, indent=1))
 
-reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews") or []
+reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews")
+if reviews is None:
+    print("failed to retrieve reviews", file=sys.stderr)
+    sys.exit(1)
 for r in reviews:
     print(json.dumps({"reviewer": r["user"]["login"], "state": r["state"], "submitted": r["submitted_at"], "body_len": len(r["body"] or "")}))
-comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments") or []
+comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments")
+if comments is None:
+    print("failed to retrieve inline comments", file=sys.stderr)
+    sys.exit(1)
 for c in comments:
     print(json.dumps({"inline": True, "author": c["user"]["login"], "path": c["path"], "created": c["created_at"], "body": (c["body"] or "")[:300]}))
 
