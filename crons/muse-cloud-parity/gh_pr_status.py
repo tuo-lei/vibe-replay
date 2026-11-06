@@ -62,8 +62,14 @@ for c in comments:
     print(json.dumps({"inline": True, "author": c["user"]["login"], "path": c["path"], "created": c["created_at"], "body": (c["body"] or "")[:300]}))
 
 combined = api(f"/repos/tuo-lei/vibe-replay/commits/{head}/status")
+if combined is None:
+    print("failed to retrieve commit status", file=sys.stderr)
+    sys.exit(1)
 if combined:
     print(json.dumps({"ci_state": combined.get("state"), "statuses": [(s["context"], s["state"]) for s in combined.get("statuses", [])]}))
-checks = api(f"/repos/tuo-lei/vibe-replay/commits/{head}/check-runs?per_page=50") or {}
+checks = api(f"/repos/tuo-lei/vibe-replay/commits/{head}/check-runs?per_page=50")
+if checks is None:
+    print("failed to retrieve check runs", file=sys.stderr)
+    sys.exit(1)
 for cr in checks.get("check_runs", []):
     print(json.dumps({"check": cr["name"], "status": cr["status"], "conclusion": cr["conclusion"]}))

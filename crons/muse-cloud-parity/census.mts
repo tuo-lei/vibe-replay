@@ -201,19 +201,41 @@ async function streamFileCensus(file: string, shortId: string): Promise<FileCens
 }
 
 /** Enumerate every *.jsonl session file under the Muse agents roots. */
-async function enumerateSessionFiles(): Promise<string[]> {
+async function enumerateSessionFiles(): Promise<{
+  files: string[];
+  errors: Array<{ path: string; error: string }>;
+}> {
   const files: string[] = [];
+  const errors: Array<{ path: string; error: string }> = [];
   for (const root of getMuseAgentsDirs()) {
-    const agentDirs = await readdir(root).catch(() => [] as string[]);
+    let agentDirs: string[];
+    try {
+      agentDirs = await readdir(root);
+    } catch (err) {
+      // The agents root itself should exist and be readable; losing it
+      // silently would make the census report a clean empty window.
+      errors.push({ path: root, error: String(err).slice(0, 120) });
+      continue;
+    }
     for (const agentDir of agentDirs) {
       const sessionsDir = join(root, agentDir, "sessions");
-      const names = await readdir(sessionsDir).catch(() => [] as string[]);
+      let names: string[];
+      try {
+        names = await readdir(sessionsDir);
+      } catch (err) {
+        // A missing sessions dir is expected (agent dirs that never wrote
+        // sessions); any other failure makes the census incomplete.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          errors.push({ path: sessionsDir, error: String(err).slice(0, 120) });
+        }
+        continue;
+      }
       for (const name of names) {
         if (name.endsWith(".jsonl")) files.push(join(sessionsDir, name));
       }
     }
   }
-  return files;
+  return { files, errors };
 }
 
 async function main(): Promise<void> {
@@ -243,11 +265,28 @@ async function main(): Promise<void> {
   const parseThrowDetail: Array<{ session: string; error: string }> = [];
   const warningDetail: Array<{ session: string; warnings: number }> = [];
   const streamErrors: Array<{ session: string; error: string }> = [];
+  const statErrors: Array<{ session: string; error: string }> = [];
   const filesNotDiscovered: Array<{ session: string; lines: number; corrupt: number }> = [];
 
-  for (const file of await enumerateSessionFiles()) {
-    const st0 = await stat(file).catch(() => null);
-    if (!st0) continue;
+  const { files: candidateFiles, errors: enumerationErrors } = await enumerateSessionFiles();
+  for (const file of candidateFiles) {
+    let st0: Awaited<ReturnType<typeof stat>> | null;
+    try {
+      st0 = await stat(file);
+    } catch (err) {
+      // A file that vanished or became unreadable between enumeration and
+      // stat is a census gap, not a clean skip.
+      statErrors.push({
+        session:
+          file
+            .split("/")
+            .at(-1)
+            ?.replace(/\.jsonl$/, "")
+            .slice(0, 8) ?? "?",
+        error: String(err).slice(0, 120),
+      });
+      continue;
+    }
     if (now - st0.mtimeMs < FRESH_MS) {
       filesSkippedFresh++;
       continue;
@@ -316,6 +355,8 @@ async function main(): Promise<void> {
     filesSkippedFresh,
     filesUnstable,
     filesNotDiscovered,
+    enumerationErrors,
+    statErrors,
     streamErrors,
     totalLines: totals.lines,
     corruptLines: totals.corrupt,

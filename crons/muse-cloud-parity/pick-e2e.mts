@@ -74,8 +74,20 @@ async function main(): Promise<void> {
     thinking: blocks.filter((b) => b.type === "thinking").length,
     text: blocks.filter((b) => b.type === "text").length,
   };
-  // Most recent stub (1 prompt) for the cheap spot-check.
-  const stub = stable.find((s) => s.promptCount === 1);
+  // Most recent stub (1 prompt) for the cheap spot-check — it must be
+  // replayable (>= 1 parsed user turn) or source export would fail.
+  let stub: { id: string; filePath: string; fingerprint: string } | null = null;
+  for (const candidate of stable) {
+    if (candidate.promptCount !== 1) continue;
+    if ((await userTurns(candidate.filePath)) >= 1) {
+      stub = {
+        id: candidate.id,
+        filePath: candidate.filePath,
+        fingerprint: await fingerprint(candidate.filePath),
+      };
+      break;
+    }
+  }
   let companion: { id: string; filePath: string; fingerprint: string } | null = null;
   if (counts.toolUse === 0) {
     for (const candidate of stable) {
@@ -102,7 +114,7 @@ async function main(): Promise<void> {
           ? {
               id: stub.id,
               filePath: stub.filePath,
-              fingerprint: await fingerprint(stub.filePath),
+              fingerprint: stub.fingerprint,
             }
           : null,
         companion,
