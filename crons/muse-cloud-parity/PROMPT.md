@@ -36,6 +36,9 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    `chore/muse-cloud-parity-*` branch): a previous run may have left one
    open because review or CI was blocked — resuming it is your first job,
    so check out and continue that branch instead of starting a new audit.
+   List open PRs with `gh_list_prs.py` in this directory (stored
+   `custom.github` credential via `api.github.com` — the `gh` CLI is not
+   authenticated in this environment).
    With no open task PR, `git checkout main` (a reused checkout may still
    sit on a deleted PR branch — a bare `git pull` would follow the stale
    upstream), then `git pull` latest `main`. Note the HEAD SHA as the run's
@@ -74,7 +77,10 @@ remove the 30-minute exception in PR #702's review: keep the exception.
 4. **Integrity.** Stream (never fully load) every stable session file from
    the 14-day window — not just a recent sample; a malformed or
    parse-failing transcript outside the sample would otherwise go unseen
-   while the run reports clean. Skip files with activity in the last ~60s
+   while the run reports clean. Reuse the census script in this directory
+   (`census.mts`, run with the repo's `tsx`) instead of rewriting the
+   streaming/drift census from scratch; it writes a dated JSON snapshot for
+   the next run's drift comparison. Skip files with activity in the last ~60s
    (this run itself is a Muse agent whose actively appended JSONL is among
    the recent files, and a partial final record at EOF during an append
    would otherwise be falsely flagged corrupt). Flag corrupt/truncated
@@ -122,7 +128,8 @@ remove the 30-minute exception in PR #702's review: keep the exception.
 6. **Parity end-to-end.** Take the most recent non-trivial Muse session
    (skip sessions with activity in the last ~60s — this run's own session
    is always the newest and its file is still being written to), then run
-   the CLI scan so it shows up in session lists, generate a replay HTML
+   the CLI scan so it shows up in session lists (`sessions` defaults to 10
+   rows — confirm the subject with `-s <short-id>`), generate a replay HTML
    from it, and verify the HTML is well-formed, non-empty, and its scene
    inventory matches the parsed blocks. Non-trivial means more than a
    single-prompt/single-tool stub: concurrent short runs can flood the
@@ -148,7 +155,12 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    `<script id="vibe-replay-data">` tag specifically: the viewer bundle
    also contains the `window.__VIBE_REPLAY_DATA__` string (in its
    download-HTML code), so taking the first occurrence in the file parses
-   bundle code, not the embedded replay data. When the run changed the
+   bundle code, not the embedded replay data. The tag's content is a JS
+   assignment (`window.__VIBE_REPLAY_DATA__ = {...};`) — strip the
+   assignment prefix and the trailing `;` before `JSON.parse`, or the
+   parse fails on the `window` token. Reuse `verify-e2e.mts` in this
+   directory for the inventory + embedded-data check, and `pick-e2e.mts`
+   for subject selection. When the run changed the
    Muse parser or any replay-affecting code, validate both required replay
    sizes: a ~30-scene and a ~500-scene representative session, not just the
    single most recent one. A green unit suite alone does not
