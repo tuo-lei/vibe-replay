@@ -10,6 +10,7 @@ import Dashboard, {
   fetchScanResults,
   findSessionScanData,
   getSessionRangeTimestamp,
+  SessionDetailPopup,
   sessionExplorerCountLabel,
   type SessionScanData,
   shouldIncludeSessionForFacets,
@@ -96,6 +97,56 @@ describe("Dashboard (smoke)", () => {
     expect(window.location.search).toContain("tab=settings");
     await waitFor(() =>
       expect(screen.queryByRole("navigation", { name: "Dashboard navigation" })).toBeNull(),
+    );
+  });
+});
+
+describe("Session source locations", () => {
+  it("explains a SQLite source and shows its local database path", () => {
+    const databasePath = "/synthetic/home/.opencode/opencode.db";
+    render(
+      <SessionDetailPopup
+        session={{
+          provider: "opencode",
+          slug: "synthetic-session",
+          sessionId: "synthetic-id",
+          project: "/synthetic/project",
+          timestamp: "2026-11-04T00:00:00.000Z",
+          fileSize: 0,
+          lineCount: 1,
+          firstPrompt: "Synthetic SQLite source",
+          filePaths: [`${databasePath}#session:synthetic-id`, "/synthetic/session.jsonl"],
+          hasSqlite: true,
+          existingReplay: null,
+        }}
+        scanData={{
+          provider: "opencode",
+          slug: "synthetic-session",
+          subAgentCount: 0,
+          apiErrorCount: 0,
+          compactionCount: 0,
+          editCount: 0,
+          filesModified: [],
+          promptCount: 1,
+          toolCallCount: 0,
+          dataSource: "sqlite",
+        }}
+        onClose={() => {}}
+        onGenerate={() => {}}
+        onViewReplay={() => {}}
+        onArchive={() => {}}
+        onTitleSave={async () => {}}
+        onDeleteReplay={() => {}}
+        isGenerating={false}
+        isArchived={false}
+      />,
+    );
+
+    expect(screen.getByText("SQLite storage")).toBeTruthy();
+    expect(screen.getByText(/session was read from SQLite/)).toBeTruthy();
+    expect(screen.getByText(databasePath)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open transcript/ }).getAttribute("href")).toBe(
+      "/api/sources/open?provider=opencode&slug=synthetic-session&project=%2Fsynthetic%2Fproject&path=%2Fsynthetic%2Fsession.jsonl&sessionId=synthetic-id",
     );
   });
 });

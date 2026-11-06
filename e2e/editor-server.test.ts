@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
@@ -14,12 +14,45 @@ describe("Editor Server E2E", () => {
   let serverProcess: ChildProcess;
   let slug: string;
   let sessionId: string;
+  let sourcePrompt: string;
+  let sourceFilePath: string;
 
   beforeAll(async () => {
     const generated = await generateTestReplay();
     tmpDir = generated.tmpDir;
     slug = generated.session.meta.slug;
     sessionId = generated.session.meta.sessionId;
+
+    sourcePrompt = "Synthetic source-file access check";
+    const codexHome = join(tmpDir, ".codex");
+    const sessionsDir = join(codexHome, "sessions", "2026", "11", "04");
+    await mkdir(sessionsDir, { recursive: true });
+    sourceFilePath = join(sessionsDir, "rollout-synthetic-source-file-access.jsonl");
+    await writeFile(
+      sourceFilePath,
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-11-04T00:00:00.000Z",
+          payload: { id: "synthetic-source-file-access", cwd: join(tmpDir, "synthetic-project") },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-11-04T00:00:01.000Z",
+          payload: { type: "user_message", message: sourcePrompt },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-11-04T00:00:02.000Z",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Synthetic assistant response" }],
+          },
+        }),
+      ].join("\n")  }\n`,
+      "utf8",
+    );
 
     const serverModule = pathToFileURL(
       join(import.meta.dirname, "..", "packages/cli/src/server.ts"),
@@ -40,6 +73,7 @@ describe("Editor Server E2E", () => {
         ...process.env,
         HOME: tmpDir,
         USERPROFILE: tmpDir,
+        CODEX_HOME: codexHome,
         VIBE_REPLAY_NO_AUTO_OPEN: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -133,6 +167,37 @@ describe("Editor Server E2E", () => {
         { timeout: 15_000 },
       );
       expect(await page.locator("body").textContent()).toContain("vibe-replay");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("opens the catalogued JSONL transcript repeatedly and closes the source details", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    try {
+      await page.goto(`http://localhost:${serverPort}/?view=dashboard`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.getByText(sourcePrompt, { exact: true }).first().click();
+      const details = page.getByRole("region", { name: "Session details" });
+      await details.waitFor({ state: "visible" });
+      const transcriptLink = details.getByRole("link", {
+        name: `Open transcript · ${sourceFilePath}`,
+      });
+      expect(await transcriptLink.isVisible()).toBe(true);
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const popupPromise = page.waitForEvent("popup");
+        await transcriptLink.click();
+        const transcript = await popupPromise;
+        const transcriptText = await transcript.locator("body").textContent();
+        expect(transcriptText).toContain(sourcePrompt);
+        expect(transcriptText).toContain("Synthetic assistant response");
+        await transcript.close();
+      }
+
+      await details.getByRole("button", { name: "Close" }).click();
+      expect(await details.count()).toBe(0);
     } finally {
       await page.close();
     }
