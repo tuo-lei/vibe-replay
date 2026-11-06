@@ -223,8 +223,13 @@ async function main(): Promise<void> {
 
   const discovered = await discoverMuseSessions();
   const inWindow = discovered.filter((s) => Date.parse(s.timestamp) >= cutoff);
+  // Build the lookup from ALL discovered sessions, not just the timestamp
+  // window: a transcript modified recently can carry an older discovery
+  // timestamp (metadata updatedAt wins over transcript timestamps), and
+  // filtering here first would misreport it as undiscovered and drop its
+  // counts from the parity totals. Window selection happens per file below.
   const discoveredByPath = new Map<string, SessionInfo>();
-  for (const s of inWindow) discoveredByPath.set(s.filePath, s);
+  for (const s of discovered) discoveredByPath.set(s.filePath, s);
 
   const totals = newFileCensus();
   let filesStreamed = 0;
