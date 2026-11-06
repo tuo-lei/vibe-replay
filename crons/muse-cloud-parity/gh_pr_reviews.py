@@ -27,13 +27,29 @@ def api(path: str):
         return None
 
 
+def api_pages(path: str):
+    """GET every page of a paginated api.github.com list (100 per page)."""
+    items: list = []
+    page = 1
+    sep = "&" if "?" in path else "?"
+    while True:
+        data = api(f"{path}{sep}per_page=100&page={page}")
+        if data is None:
+            return None
+        items.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return items
+
+
 lines: list[str] = []
-reviews = api(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews?per_page=50") or []
+reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews") or []
 for r in reviews:
     lines.append(f"## Review by {r['user']['login']} ({r['state']}) at {r['submitted_at']}\n")
     lines.append(r["body"] or "(no body)")
     lines.append("\n---\n")
-comments = api(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments?per_page=100") or []
+comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments") or []
 for c in comments:
     lines.append(
         f"## Inline by {c['user']['login']} on {c['path']}:{c.get('line') or c.get('original_line')} "

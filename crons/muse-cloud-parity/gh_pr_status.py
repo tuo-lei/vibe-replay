@@ -26,16 +26,32 @@ def api(path: str):
         return None
 
 
+def api_pages(path: str):
+    """GET every page of a paginated api.github.com list (100 per page)."""
+    items: list = []
+    page = 1
+    sep = "&" if "?" in path else "?"
+    while True:
+        data = api(f"{path}{sep}per_page=100&page={page}")
+        if data is None:
+            return None
+        items.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return items
+
+
 pr = api(f"/repos/tuo-lei/vibe-replay/pulls/{PR}")
 if not pr:
     sys.exit(1)
 head = pr["head"]["sha"]
 print(json.dumps({"state": pr["state"], "mergeable": pr.get("mergeable"), "head": head[:7], "base": pr["base"]["sha"][:7]}, indent=1))
 
-reviews = api(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews?per_page=50") or []
+reviews = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/reviews") or []
 for r in reviews:
     print(json.dumps({"reviewer": r["user"]["login"], "state": r["state"], "submitted": r["submitted_at"], "body_len": len(r["body"] or "")}))
-comments = api(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments?per_page=50") or []
+comments = api_pages(f"/repos/tuo-lei/vibe-replay/pulls/{PR}/comments") or []
 for c in comments:
     print(json.dumps({"inline": True, "author": c["user"]["login"], "path": c["path"], "created": c["created_at"], "body": (c["body"] or "")[:300]}))
 
