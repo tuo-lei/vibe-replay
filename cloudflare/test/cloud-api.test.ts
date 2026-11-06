@@ -257,7 +257,7 @@ describe("Cloud API integration", () => {
       version: "0.2.9",
       platform: "darwin",
       dimensions: "duration=1-9s;sessions=10-99",
-      count: 2,
+      count: 1,
     });
 
     const uniqueUsers = await env.DB.prepare(
@@ -270,6 +270,36 @@ describe("Cloud API integration", () => {
       .bind(payload.installationId)
       .first();
     expect(rawId).toBeNull();
+  });
+
+  it("throttles repeat telemetry without additional database writes", async () => {
+    const installationId = "123e4567-e89b-12d3-a456-426614174999";
+    const payload = {
+      installationId,
+      event: "scan.completed",
+      version: "0.2.9",
+      platform: "darwin",
+    };
+    for (let i = 0; i < 100; i++) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        env,
+        createCtx(),
+      );
+      expect(response.status).toBe(204);
+    }
+    const daily = await env.DB.prepare("SELECT count FROM telemetry_daily").first<{
+      count: number;
+    }>();
+    expect(daily?.count).toBe(1);
+    const users = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM telemetry_monthly_users",
+    ).first<{ count: number }>();
+    expect(users?.count).toBe(1);
   });
 
   it("accepts telemetry when D1 cannot persist optional telemetry writes", async () => {
