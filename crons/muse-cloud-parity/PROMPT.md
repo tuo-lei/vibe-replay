@@ -80,7 +80,9 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    while the run reports clean. Reuse the census script in this directory
    (`census.mts`, run with the repo's `tsx`) instead of rewriting the
    streaming/drift census from scratch; it writes a dated JSON snapshot for
-   the next run's drift comparison. Skip files with activity in the last ~60s
+   the next run's drift comparison, and it enumerates session files
+   independently of discovery so a file with a malformed header that
+   discovery rejects still gets its corrupt lines counted. Skip files with activity in the last ~60s
    (this run itself is a Muse agent whose actively appended JSONL is among
    the recent files, and a partial final record at EOF during an append
    would otherwise be falsely flagged corrupt). Flag corrupt/truncated
@@ -160,7 +162,11 @@ remove the 30-minute exception in PR #702's review: keep the exception.
    assignment prefix and the trailing `;` before `JSON.parse`, or the
    parse fails on the `window` token. Reuse `verify-e2e.mts` in this
    directory for the inventory + embedded-data check, and `pick-e2e.mts`
-   for subject selection. When the run changed the
+   for subject selection. `pick-e2e.mts` judges stability from the
+   transcript file's mtime (not discovery's metadata timestamp) and
+   qualifies a subject by parsed user turns (≥ 2), not `promptCount`;
+   `verify-e2e.mts` fails if the file's fingerprint changed since
+   selection. When the run changed the
    Muse parser or any replay-affecting code, validate both required replay
    sizes: a ~30-scene and a ~500-scene representative session, not just the
    single most recent one. A green unit suite alone does not
