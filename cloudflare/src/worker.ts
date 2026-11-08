@@ -91,7 +91,43 @@ const TELEMETRY_ALLOWED_VALUES: Record<string, Set<string>> = {
 const MAX_TELEMETRY_EVENTS_PER_DAY = 2_000;
 const MAX_TELEMETRY_EVENTS_PER_INSTALLATION = 20;
 const MIN_TELEMETRY_INTERVAL_MS = 60 * 60 * 1000;
-const telemetryRateLimits = new Map<string, { day: string; count: number; lastWrite: number }>();
+const MAX_TELEMETRY_RATE_LIMIT_ENTRIES = 10_000;
+
+/**
+ * Per-isolate backpressure for optional telemetry. D1 remains the shared
+ * source of truth for the daily budget; this only avoids spending D1 reads and
+ * writes on reports we already have from the same installation.
+ */
+export class TelemetryWriteBudget {
+  private readonly installations = new Map<string, { day: string; count: number }>();
+  private readonly eventWrites = new Map<string, number>();
+
+  allow(day: string, installationHash: string, event: string, now: number): boolean {
+    if (
+      this.installations.size > MAX_TELEMETRY_RATE_LIMIT_ENTRIES ||
+      this.eventWrites.size > MAX_TELEMETRY_RATE_LIMIT_ENTRIES
+    ) {
+      this.installations.clear();
+      this.eventWrites.clear();
+    }
+    let installation = this.installations.get(installationHash);
+    if (!installation || installation.day !== day) {
+      installation = { day, count: 0 };
+      this.installations.set(installationHash, installation);
+    }
+    if (installation.count >= MAX_TELEMETRY_EVENTS_PER_INSTALLATION) return false;
+    // Keep the hourly interval across UTC day boundaries: a new day resets the
+    // daily count but must not admit another write straight away.
+    const eventKey = `${installationHash}:${event}`;
+    const lastWrite = this.eventWrites.get(eventKey);
+    if (lastWrite !== undefined && now - lastWrite < MIN_TELEMETRY_INTERVAL_MS) return false;
+    installation.count += 1;
+    this.eventWrites.set(eventKey, now);
+    return true;
+  }
+}
+
+const telemetryWriteBudget = new TelemetryWriteBudget();
 
 // GitHub API constants — shared across user gist routes and worker-side fetches.
 const GITHUB_API_ACCEPT = "application/vnd.github+json";
@@ -195,21 +231,6 @@ async function hashTelemetryInstallation(
   return Array.from(new Uint8Array(signature))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function allowTelemetryInstallation(day: string, installationHash: string, now: number): boolean {
-  const key = `${day}:${installationHash}`;
-  const previous = telemetryRateLimits.get(key);
-  if (!previous || previous.day !== day) {
-    if (telemetryRateLimits.size > 10_000) telemetryRateLimits.clear();
-    telemetryRateLimits.set(key, { day, count: 1, lastWrite: now });
-    return true;
-  }
-  if (previous.count >= MAX_TELEMETRY_EVENTS_PER_INSTALLATION) return false;
-  if (now - previous.lastWrite < MIN_TELEMETRY_INTERVAL_MS) return false;
-  previous.count += 1;
-  previous.lastWrite = now;
-  return true;
 }
 
 type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
@@ -356,7 +377,9 @@ app.post("/api/telemetry", async (c) => {
     );
     // Reject repeated reports before consuming any D1 reads or writes. This is
     // per-isolate backpressure; the shared daily D1 counter remains the fallback.
-    if (!allowTelemetryInstallation(day, installationHash, now.getTime())) return c.body(null, 204);
+    if (!telemetryWriteBudget.allow(day, installationHash, event, now.getTime())) {
+      return c.body(null, 204);
+    }
     const dailyTotal = await c.env.DB.prepare(
       "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?",
     )

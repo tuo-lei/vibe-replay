@@ -1,7 +1,11 @@
 import { Miniflare } from "miniflare";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Sentry from "@sentry/cloudflare";
-import worker, { createSentryOptions, scrubSentryRequest } from "../src/worker";
+import worker, {
+  createSentryOptions,
+  scrubSentryRequest,
+  TelemetryWriteBudget,
+} from "../src/worker";
 import { applyMigrations } from "./migration-utils";
 
 const TEST_USER_ID = "user-test-1";
@@ -230,17 +234,26 @@ describe("Cloud API integration", () => {
       properties: { sessions: "10-99", duration: "1-9s" },
     };
 
-    for (let i = 0; i < 2; i++) {
-      const response = await worker.fetch(
-        new Request("http://localhost/api/telemetry", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }),
-        env,
-        createCtx(),
-      );
-      expect(response.status).toBe(204);
+    // The hourly throttle allows one write per event type, so let the clock
+    // pass an hour between the two reports while keeping the same UTC day.
+    const baseTime = Date.parse("2026-10-17T12:00:00.000Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (let i = 0; i < 2; i++) {
+        vi.setSystemTime(baseTime + i * 60 * 60 * 1000);
+        const response = await worker.fetch(
+          new Request("http://localhost/api/telemetry", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+          env,
+          createCtx(),
+        );
+        expect(response.status).toBe(204);
+      }
+    } finally {
+      vi.useRealTimers();
     }
 
     const daily = await env.DB.prepare(
@@ -257,7 +270,7 @@ describe("Cloud API integration", () => {
       version: "0.2.9",
       platform: "darwin",
       dimensions: "duration=1-9s;sessions=10-99",
-      count: 1,
+      count: 2,
     });
 
     const uniqueUsers = await env.DB.prepare(
@@ -280,6 +293,21 @@ describe("Cloud API integration", () => {
       version: "0.2.9",
       platform: "darwin",
     };
+    const dailyTotalQuery =
+      "SELECT COALESCE(SUM(count), 0) AS count FROM telemetry_daily WHERE day = ?";
+    // Sentry instruments the shared D1 binding inside the worker, so observe
+    // this request through a thin wrapper instead of spying on env.DB.
+    const preparedQueries: string[] = [];
+    const trackedDb = {
+      prepare(query: string) {
+        preparedQueries.push(query);
+        return env.DB.prepare(query);
+      },
+      batch: (...args: Parameters<D1Database["batch"]>) => env.DB.batch(...args),
+      exec: (query: string) => env.DB.exec(query),
+      dump: () => env.DB.dump(),
+    } as unknown as D1Database;
+    const trackedEnv = { ...env, DB: trackedDb } as TestEnv;
     for (let i = 0; i < 100; i++) {
       const response = await worker.fetch(
         new Request("http://localhost/api/telemetry", {
@@ -287,11 +315,12 @@ describe("Cloud API integration", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         }),
-        env,
+        trackedEnv,
         createCtx(),
       );
       expect(response.status).toBe(204);
     }
+    expect(preparedQueries.filter((query) => query === dailyTotalQuery)).toHaveLength(1);
     const daily = await env.DB.prepare("SELECT count FROM telemetry_daily").first<{
       count: number;
     }>();
@@ -300,6 +329,35 @@ describe("Cloud API integration", () => {
       "SELECT COUNT(*) AS count FROM telemetry_monthly_users",
     ).first<{ count: number }>();
     expect(users?.count).toBe(1);
+  });
+
+  it("accepts distinct events from one installation within the hour", async () => {
+    const installationId = "123e4567-e89b-12d3-a456-426614174998";
+    for (const event of ["cli.started", "scan.completed"]) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            installationId,
+            event,
+            version: "0.2.9",
+            platform: "darwin",
+          }),
+        }),
+        env,
+        createCtx(),
+      );
+      expect(response.status).toBe(204);
+    }
+
+    const rows = await env.DB.prepare(
+      "SELECT event, count FROM telemetry_daily ORDER BY event",
+    ).all<{ event: string; count: number }>();
+    expect(rows.results).toEqual([
+      { event: "cli.started", count: 1 },
+      { event: "scan.completed", count: 1 },
+    ]);
   });
 
   it("accepts telemetry when D1 cannot persist optional telemetry writes", async () => {
@@ -314,7 +372,9 @@ describe("Cloud API integration", () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            installationId: "123e4567-e89b-12d3-a456-426614174000",
+            // Use a fresh installation so the per-isolate hourly throttle from
+            // earlier tests cannot short-circuit the simulated D1 failure.
+            installationId: "123e4567-e89b-12d3-a456-426614174997",
             event: "scan.completed",
             version: "0.2.9",
             platform: "darwin",
@@ -1271,5 +1331,49 @@ describe("Cloud API integration", () => {
     const html = await response.text();
     expect(html).toContain("/view/?relay=abcdefghijklmnopqrstuv");
     expect(html).toContain("+location.hash");
+  });
+});
+
+describe("TelemetryWriteBudget", () => {
+  const day = "2026-10-17";
+  const installationHash = "a".repeat(64);
+  const noon = Date.parse(`${day}T12:00:00.000Z`);
+
+  it("allows distinct events but throttles repeats within the hour", () => {
+    const budget = new TelemetryWriteBudget();
+    expect(budget.allow(day, installationHash, "cli.started", noon)).toBe(true);
+    expect(budget.allow(day, installationHash, "scan.completed", noon + 1)).toBe(true);
+    expect(budget.allow(day, installationHash, "cli.started", noon + 2)).toBe(false);
+    expect(budget.allow(day, installationHash, "cli.started", noon + 60 * 60 * 1000)).toBe(true);
+  });
+
+  it("keeps the hourly interval across UTC day boundaries", () => {
+    const budget = new TelemetryWriteBudget();
+    const beforeMidnight = Date.parse("2026-10-17T23:59:30.000Z");
+    expect(budget.allow("2026-10-17", installationHash, "scan.completed", beforeMidnight)).toBe(
+      true,
+    );
+    expect(
+      budget.allow("2026-10-18", installationHash, "scan.completed", beforeMidnight + 60 * 1000),
+    ).toBe(false);
+    expect(
+      budget.allow(
+        "2026-10-18",
+        installationHash,
+        "scan.completed",
+        beforeMidnight + 60 * 60 * 1000,
+      ),
+    ).toBe(true);
+  });
+
+  it("caps events per installation per day", () => {
+    const budget = new TelemetryWriteBudget();
+    let allowed = 0;
+    for (let i = 0; i < 30; i++) {
+      if (budget.allow(day, installationHash, "scan.completed", noon + i * 60 * 60 * 1000)) {
+        allowed += 1;
+      }
+    }
+    expect(allowed).toBe(20);
   });
 });
