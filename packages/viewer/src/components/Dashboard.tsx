@@ -736,6 +736,18 @@ export function SessionDetailPopup({
   const transcriptStatusText = transcriptStatusLabel(transcriptStatus);
   const transcriptStatusHelp = transcriptStatusDescription(transcriptStatus);
   const compactionCount = Math.max(scanData?.compactionCount ?? 0, s.compactionCount ?? 0);
+  const isSqliteSource = s.hasSqlite || scanData?.dataSource === "sqlite";
+  const sqliteLocation = isSqliteSource
+    ? s.filePaths
+        .map((path) => path.replace(/#session:.*$/, ""))
+        .find((path) => /\.(?:db|sqlite|sqlite3|vscdb)$/i.test(path))
+    : undefined;
+  const jsonlSourcePaths =
+    s.location?.kind === "ssh"
+      ? []
+      : s.filePaths
+          .map((path, index) => ({ path, index }))
+          .filter(({ path }) => /\.jsonl$/i.test(path));
 
   // Use scan data when available, fall back to discovery estimates
   const promptCount = scanData?.promptCount ?? s.promptCount;
@@ -957,6 +969,58 @@ export function SessionDetailPopup({
                 label="Data"
                 value={formatDataSourceLabel(s.hasSqlite, scanData?.dataSource, s.hasSdk)}
               />
+              {isSqliteSource && (
+                <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg/60 px-3 py-2 space-y-1">
+                  <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer">
+                    SQLite storage
+                  </div>
+                  <p className="text-xs font-mono text-terminal-dim leading-relaxed">
+                    {scanData?.dataSource === "sqlite"
+                      ? "This session was read from SQLite. The database holds its session records; there may not be a separate JSONL transcript."
+                      : "This provider also has SQLite storage for this session. The database may contain session records alongside a JSONL transcript."}
+                  </p>
+                  {sqliteLocation ? (
+                    <code
+                      className="block break-all text-xs font-mono text-terminal-dim"
+                      title={sqliteLocation}
+                    >
+                      {sqliteLocation}
+                    </code>
+                  ) : (
+                    <p className="text-xs font-mono text-terminal-dimmer">
+                      The database path is not available in this session catalog.
+                    </p>
+                  )}
+                </div>
+              )}
+              {jsonlSourcePaths.length > 0 && (
+                <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg/60 px-3 py-2 space-y-1.5">
+                  <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer">
+                    Original JSONL transcript{jsonlSourcePaths.length === 1 ? "" : "s"}
+                  </div>
+                  {jsonlSourcePaths.map(({ path }) => {
+                    const query = new URLSearchParams({
+                      provider: s.provider,
+                      slug: s.slug,
+                      project: s.project,
+                      path,
+                    });
+                    if (s.sessionId) query.set("sessionId", s.sessionId);
+                    return (
+                      <a
+                        key={path}
+                        href={`/api/sources/open?${query.toString()}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-xs font-mono text-terminal-blue hover:text-terminal-text break-all underline underline-offset-2"
+                        title={path}
+                      >
+                        Open transcript · {path}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Right: stats */}
